@@ -79,19 +79,19 @@ function hc2_signal(string $channel, string $message): void {
 }
 
 /**
- * Heartbeat eines Push-Checks nach hc2 spiegeln (health.php). Tut nur etwas, wenn der Check in
- * hc2_checks existiert und der Besitzer hc2 = 1 hat. Alte Logik laeuft unveraendert weiter.
- * Liefert true, wenn gespiegelt wurde.
+ * Heartbeat eines Push-Checks der neuen Welt (health.php). Liefert true, wenn der Token zu einem
+ * hc2-Check gehoert; dann hat health.php nichts mehr zu tun. Alte Tokens (nicht in hc2_checks) -> false,
+ * alte Logik laeuft unveraendert. Unbekannte Tokens werden hier NICHT verraten (false wie "alt").
  */
-function hc2_push_mirror($healthcheck, array $get): bool {
-	if (!is_array($healthcheck) || ($healthcheck['healthtoken'] ?? '') === '') { return false; }
+function hc2_push(string $token, array $get): bool {
+	if ($token === '' || !preg_match('/^[A-Za-z0-9]{20,50}$/', $token)) { return false; }
 	try {
 		$db = HC2_DB; $pdo = hc2_pdo();
-		$st = $pdo->prepare("SELECT c.token, u.hc2 FROM `$db`.hc2_checks c JOIN `ipv64`.`users` u ON u.id = c.userid WHERE c.token = :t AND c.type = 'push' AND c.deleted_at IS NULL");
-		$st->execute(array('t' => $healthcheck['healthtoken']));
+		$st = $pdo->prepare("SELECT token, paused FROM `$db`.hc2_checks WHERE token = :t AND type = 'push' AND deleted_at IS NULL");
+		$st->execute(array('t' => $token));
 		$row = $st->fetch(PDO::FETCH_ASSOC);
-		if (!$row || (int)$row['hc2'] !== 1) { return false; }
-		$down = isset($get['status']) && strtolower((string)$get['status']) === 'down' || isset($get['fail']);
+		if (!$row) { return false; }
+		$down = (isset($get['status']) && strtolower((string)$get['status']) === 'down') || isset($get['fail']);
 		$msg = mb_substr((string)($get['msg'] ?? $get['message'] ?? ''), 0, 500);
 		$details = json_encode(array('from' => $_SERVER['REMOTE_ADDR'] ?? '', 'via' => 'health.php'));
 		$pdo->prepare("INSERT IGNORE INTO `$db`.hc2_measurements (token, source, agent_seq, time, status, latency_ms, reason, message, details, received_at)
@@ -101,7 +101,7 @@ function hc2_push_mirror($healthcheck, array $get): bool {
 		hc2_signal('hc2:push', $row['token'] . ($down ? ':down' : ':up'));
 		return true;
 	} catch (Throwable $e) {
-		error_log('hc2_push_mirror: ' . $e->getMessage());
+		error_log('hc2_push: ' . $e->getMessage());
 		return false;
 	}
 }

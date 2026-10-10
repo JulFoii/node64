@@ -1,142 +1,55 @@
 # Phase 1 – Änderungen am Webcode (Vorher/Nachher)
 
-Alles minimal, alte Seiten und Bots laufen unverändert weiter, solange `users.hc2 = 0` ist (Standard). Reihenfolge: 1 → 2 → 3 → 4. Nichts davon braucht den hub.
+**Grundsatz (Entscheidung Dennis, 2026-10-10): keine Migration.** Wer in die neue Healthcheck-Welt wechselt, fängt bei null an. Die alte Welt (Tabellen, Bots, Seiten) bleibt **komplett unverändert** und läuft für alle weiter, bis sie am Ende abgeschaltet wird. Das Flag `users.hc2` merkt sich nur, dass ein Nutzer die neue Welt aktiviert hat (Menü).
 
-## 1. `dbconnect.php` – hc2-Hilfsfunktionen anhängen
+Damit sind es nur noch zwei Eingriffe, beide ohne Wirkung auf Bestehendes.
 
-Den Inhalt von `dbconnect_hc2.php` (ohne die erste Zeile `<?php`) **ans Ende** von `dbconnect.php` anhängen. Neue Funktionen: `hc2_log_change()`, `hc2_signal()`, `hc2_push_mirror()`, `hc2_encrypt()`/`hc2_decrypt()`. Sie nutzen `connectRedis()` aus derselben Datei.
+## 1. `dbconnect.php` – hc2-Block anhängen
 
-Dazu zwei Dateien außerhalb des Webroots (Pfad in den Konstanten oben im Block anpassen, falls anders):
+Den Inhalt von `dbconnect_hc2.php` (ohne die erste Zeile `<?php`) **ans Ende** von `dbconnect.php` anhängen. Wer den früheren Block schon drin hat: den Block ab der Kommentarzeile „Healthchecks 2.0 (hc2)“ bis zum Dateiende durch den aktuellen ersetzen.
+
+Drei Dateien außerhalb des Webroots (Pfade stehen oben im Block; `chmod 640`, Besitzer wie der Webroot):
 
 ```bash
 # Schluessel fuer Kanal-Geheimnisse: 32 Rohbytes, identisch auf Web-Server und beiden hubs
 head -c 32 /dev/urandom > /var/www/clients/client1/web58/private/hc2_secret.key
-chmod 640 /var/www/clients/client1/web58/private/hc2_secret.key
-```
-
-```bash
 # Redis-Passwort (Inhalt von /etc/ipv64-hub/redis.pass auf hc-srv02)
-# -> /var/www/clients/client1/web58/private/hc2_redis.pass (chmod 640)
-# Passwort des MySQL-Benutzers ipv64_hc (siehe Schritt 5)
-# -> /var/www/clients/client1/web58/private/hc2_db.pass (chmod 640)
+#   -> /var/www/clients/client1/web58/private/hc2_redis.pass
+# Passwort des MySQL-Benutzers ipv64_hc, eine Zeile, ohne Anfuehrungszeichen
+#   -> /var/www/clients/client1/web58/private/hc2_db.pass
 ```
 
-Die Schlüsseldatei kopiere ich anschließend auf beide hubs nach `/var/lib/ipv64-hub/secret.key` (sag Bescheid, wenn sie liegt – oder lege sie auf hc-srv01 unter `/root/hc2_secret.key` ab, dann verteile ich sie).
+Die Schlüsseldatei anschließend auf hc-srv01 nach `/root/hc2_secret.key` legen – ich verteile sie auf beide hubs.
 
-## 2. Alte Bots überspringen `hc2`-Accounts
+## 2. `health.php` – Heartbeats der neuen Welt annehmen
 
-Je eine Zeile in der Auswahlabfrage. `users` ist dort bereits gejoint (`u`).
+Push-Checks der neuen Welt bekommen neue Tokens, die es in `healthchecks` nicht gibt. Damit `https://ipv64.net/health.php?token=…` auch für sie funktioniert (gleiche URL wie bisher), **eine Zeile** direkt nach der Token-Prüfung einfügen. Für alte Tokens liefert die Funktion `false`, und alles läuft wie bisher.
 
-**`bots/healthcheck_web_live.php`** (ca. Zeile 215)
-
-Vorher:
+Vorher (ca. Zeile 50):
 ```php
-        WHERE h.type IN ('web','keyword')
-          AND h.status != 2
+if(isset($key) AND $key != "" AND strlen($key) == "32")
+{
 ```
 Nachher:
 ```php
-        WHERE h.type IN ('web','keyword')
-          AND u.hc2 = 0
-          AND h.status != 2
+if(isset($key) AND $key != "" AND strlen($key) == "32")
+{
+	if (hc2_push($key, $_GET + $_POST)) { http_response_code(200); echo "OK"; exit; }
 ```
 
-**`bots/healthcheck_tcp_live.php`** (ca. Zeile 292)
+Optional für `maintenance`/`start` der neuen Welt: `?status=down&msg=…` meldet eine Störung, sonst zählt der Aufruf als „OK“. Pausieren geht in der neuen Welt über die Oberfläche/API.
 
-Vorher:
-```php
-        WHERE h.type = 'tcp'
-          AND h.status != 2
-```
-Nachher:
-```php
-        WHERE h.type = 'tcp'
-          AND u.hc2 = 0
-          AND h.status != 2
-```
+## Rückbau der früheren Schritte (falls schon eingespielt)
 
-**`bots/healthcheck_pings_live.php`** (ca. Zeile 235)
+Die früher beschriebenen Ein-Zeilen-Änderungen sind **nicht mehr nötig** und sollten zurückgenommen werden, damit die alte Welt wirklich unberührt bleibt:
 
-Vorher:
-```php
-        WHERE h.type = 'ping'
-          AND h.status != 2
-```
-Nachher:
-```php
-        WHERE h.type = 'ping'
-          AND u.hc2 = 0
-          AND h.status != 2
-```
-
-**`dbconnect.php`, Funktion `healthcheck_check()`** – Push-Watchdog, zwei Abfragen (ca. Zeile 1392 und 1446)
-
-Vorher:
-```php
-	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE status = 3 AND type = 'health'");
-```
-Nachher:
-```php
-	$statement = $pdo->prepare("SELECT h.* FROM healthchecks h JOIN users u ON u.id = h.userid WHERE u.hc2 = 0 AND h.status = 3 AND h.type = 'health'");
-```
-
-Vorher:
-```php
-	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE alarm_time <= NOW() AND status = 1 AND type = 'health'");
-```
-Nachher:
-```php
-	$statement = $pdo->prepare("SELECT h.* FROM healthchecks h JOIN users u ON u.id = h.userid WHERE u.hc2 = 0 AND h.alarm_time <= NOW() AND h.status = 1 AND h.type = 'health'");
-```
-
-(Die alten Bots `healthcheck_web.php`, `healthcheck_tcp.php`, `healthcheck_pings.php` ohne `_live` sind die Vorgänger; falls sie noch im Cron stehen, dieselbe Bedingung – sonst nichts tun.)
-
-## 3. `health.php` – Heartbeat nach hc2 spiegeln
-
-Direkt nach dem Laden des Checks (ca. Zeile 56, nach `$healthcheck = $statement->fetch();`) **eine Zeile** einfügen. Alte Logik bleibt komplett; die Funktion tut nur etwas, wenn der Besitzer `hc2 = 1` hat.
-
-Vorher:
-```php
-	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE BINARY healthtoken = :key");
-	$result = $statement->execute(array('key' => $key));
-	$healthcheck = $statement->fetch();
-```
-Nachher:
-```php
-	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE BINARY healthtoken = :key");
-	$result = $statement->execute(array('key' => $key));
-	$healthcheck = $statement->fetch();
-	hc2_push_mirror($healthcheck, $_GET);
-```
-
-## 4. Migrationsskript
-
-`bots/hc2_migrate.php` nach `bots/` kopieren (nur CLI, kein Cron). Testlauf:
-
-```bash
-php /var/www/clients/client1/web58/web/bots/hc2_migrate.php test@schroederdennis.de --dry-run
-```
-
-Dann echt, aber noch **ohne** Aktivierung (Account bleibt im alten System, Daten liegen in `ipv64_hc`):
-
-```bash
-php /var/www/clients/client1/web58/web/bots/hc2_migrate.php test@schroederdennis.de
-```
-
-`--activate` erst, wenn der hub läuft (Phase 2). Ein zweiter Lauf ändert nichts (idempotent). Das Skript braucht `hc2_secret.key` aus Schritt 1, sobald der Account Integrationen mit Geheimnissen hat.
-
-## 5. Zugang zur hc2-Datenbank
-
-Das Portal nutzt für `ipv64_hc` eine **eigene Verbindung mit dem Benutzer `ipv64_hc`** (öffnet sich erst beim ersten hc2-Aufruf, z. B. einem Heartbeat). Der Portal-Benutzer braucht keine neuen Rechte. Nur das Passwort ablegen:
-
-```bash
-# Passwort von ipv64_hc, eine Zeile, ohne Anfuehrungszeichen
-# -> /var/www/clients/client1/web58/private/hc2_db.pass (chmod 640, Besitzer wie die anderen private-Dateien)
-```
+- `bots/healthcheck_web_live.php`, `healthcheck_tcp_live.php`, `healthcheck_pings_live.php`: die Zeile `AND u.hc2 = 0` wieder entfernen.
+- `dbconnect.php`, `healthcheck_check()`: die beiden Abfragen wieder auf `SELECT * FROM healthchecks WHERE status = 3 AND type = 'health'` bzw. `... WHERE alarm_time <= NOW() AND status = 1 AND type = 'health'` zurücksetzen.
+- `health.php`: die Zeile `hc2_push_mirror(...)` entfernen (ersetzt durch Schritt 2).
+- `bots/hc2_migrate.php`: löschen, falls kopiert.
 
 ## Prüfen
 
 - `php -l dbconnect.php` ohne Fehler; Portal-Seiten laden wie vorher.
-- Dry-run des Migrationsskripts zeigt plausible Zahlen (Kanäle, Checks, Messpunkte).
-- Nach dem echten Lauf: `SELECT COUNT(*) FROM ipv64_hc.hc2_checks WHERE userid = <id>;` entspricht der Zahl in `healthchecks`.
-- Ein Heartbeat auf `health.php?token=...` eines Testchecks läuft wie bisher (Account noch `hc2 = 0`, also keine Spiegelung).
+- Ein Heartbeat auf `health.php?token=<alter Token>` verhält sich exakt wie bisher.
+- `health.php?token=<unbekannt>` liefert wie bisher die alte Antwort (nichts verrät, ob ein Token in der neuen Welt existiert).
