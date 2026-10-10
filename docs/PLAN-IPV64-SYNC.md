@@ -14,7 +14,8 @@ Ergänzt das Konzept („ipv64 Agent – Konzept & Funktionsumfang“) und erset
 | L2 | **Neuer Dienst `ipv64-hub`** (Rolle `checker` ersetzt die PHP-Bots) auf den ipv64-Servern neben dem Altsystem (Strangler-Fig). Neue Tabellen mit Präfix `hc2_`. Freischaltung je Account per Flag. | Kein Big Bang, Rollback per Flag. |
 | L3 | **Server ist führend** für Konfiguration (Checks, Kanäle, Wartungsfenster), sobald ein Agent verknüpft ist. **Agent ist führend** für seine Messergebnisse (append-only). | Konzept, Abschnitt Synchronisation. |
 | L4 | **Eigener Go-Dienst `ipv64-hub` bei ipv64 für die gesamte Agent-Kommunikation** (Host `agents.ipv64.net`): eine WebSocket-Dauerverbindung je Agent plus HTTPS-Endpunkte für große Abgleiche. `api_v2.php` bleibt für Nutzer, Portal und Fremdsoftware; Agents reden nicht mit PHP. | Entscheidung Dennis 2026-10-10: von Anfang an für viele tausend Agents und mehrere Server-Instanzen auslegen. PHP kann weder Dauerverbindungen halten noch so skalieren; Long-Poll würde je Agent einen PHP-Prozess belegen. |
-| L9 | **Skalierung von Anfang an, Start mit einer Instanz auf einem eigenen Server**: `ipv64-hub` läuft auf einem neuen, eigenen Server (nicht auf dem Web-Server), dort auch Redis. Der Code ist von Anfang an für mehrere gleichwertige Instanzen gebaut (Rollen `gateway` und `checker` in einem Binary, Zustand nur in MySQL und Redis, Slots), aktuell läuft genau **eine** Instanz. Ein zweiter Check-Server ist jederzeit möglich (gleiches Binary, gleiche Konfiguration, nginx-Upstream erweitern), wird aber jetzt nicht gebaut. | Entscheidung Dennis 2026-10-10: „lieber größer denken als klein“, Trennung vom Web-Server, Redis auf dem neuen Server. |
+| L9 | **Zwei hub-Server von Anfang an, Nürnberg und Falkenstein** (Hetzner Cloud), getrennt vom Web-Server. Auf beiden läuft dasselbe Binary mit beiden Rollen (`gateway` + `checker`), Zustand nur in MySQL und Redis. Jeder Server ist ein **Standort** (`location`: `nbg`, `fsn`); Online-Checks werden standardmäßig **von beiden Standorten** gemessen. Fällt ein Server aus, übernimmt der andere die Agents sofort und die Online-Messung läuft mit einem Standort weiter. Ein dritter Standort ist nur ein weiterer Server mit eigenem `location`. | Entscheidung Dennis 2026-10-10: „lieber größer denken als klein“, zwei Standorte, Trennung vom Web-Server. |
+| L11 | **Hybrid ist eingebaut: mehrere Messstellen je Check, ein Gesamtzustand.** Ein Check kann vom Agent (innen), von Nürnberg und von Falkenstein (außen) gemessen werden. Jede Messstelle hat ihren eigenen Zustand; der Gesamtzustand folgt einer Regel je Check, Standard **„down nur, wenn alle Messstellen down sind“**; sagt nur ein Teil down, ist der Check **„teilweise gestört“** (`degraded`, gelb) mit Diagnose, standardmäßig ohne Alarm. | Entscheidung Dennis 2026-10-10: „nur wenn beide sagen, es ist down, dann ist irgendwas down“. Vermeidet Fehlalarme durch einen einzelnen Standort oder einen Heim-Internetausfall, ohne die Information zu verlieren. |
 | L10 | **IPv4 und IPv6 überall** (Namensgeber von ipv64): hub lauscht Dual-Stack, `agents.ipv64.net` hat A- und AAAA-Record, Online-Checks laufen je nach `ip_mode` über v4, v6 oder beides, MySQL/Redis-Verbindungen und nginx sind Dual-Stack; der Agent ist es bereits (Listener, Checks, ICMPv6, TLS-SANs, Ratelimits je /64). | Entscheidung Dennis 2026-10-10. |
 | L5 | **Rohe Messpunkte der Online-Checks nur 7 Tage in MySQL** (partitioniert), Stunden- und Tageswerte in MySQL. Influx wird nicht mehr für Healthchecks gebraucht. | Ein Datenmodell für Agent und Server, gleiche Charts. Influx bleibt für CDN/Statistiken. |
 | L6 | **Integrationen werden zu Kanälen** (`hc2_channels`), gleiche Typen wie im Agent (`smtp`, `telegram`, `discord`, `ntfy`, `gotify`, `webhook`, `pushover`) plus serverseitig `app`, `ipv64_mail`, `ipv64_sms`. Pushover auch im Agent, weil der Container ohne ipv64-Account vollwertig bleiben soll; `ipv64_mail`/`ipv64_sms` kann ein verknüpfter Agent über den hub nutzen. Alte `integrations` werden einmalig migriert, die Verifizierung per Mail/SMS bleibt. | Gleicher Versandcode (Go) auf Server und Agent; die bekannten Lücken im alten PHP (activate_integration ohne Login) verschwinden. |
@@ -44,7 +45,8 @@ Rolle **gateway** (Agent-Kommunikation):
 - HTTPS-Endpunkte für große Abgleiche (`/v1/agents/me/bootstrap`, `/config`, `/results`), Device-Code, Push-Eingang.
 
 Rolle **checker** (Online-Checks, ersetzt `healthcheck_*_live.php`, `healthcheck_alarm.php`):
-- Verteilung über **Slots**: `hc2_checks.slot = crc32(token) % 1024`. Instanzen registrieren sich in `hc2_nodes` (Heartbeat alle 10 s). Jede Instanz berechnet aus der sortierten Liste lebender Nodes (Heartbeat < 30 s) deterministisch dieselbe Zuteilung (Node i bekommt Slots mit `slot % n == i`), nimmt je Slot zusätzlich eine `hc2_slot_leases`-Lease (60 s) als Sicherung gegen Doppelausführung bei Netzpartition. Node fällt aus → nach 30 s übernehmen die anderen seine Slots,
+- **Standorte**: jede Instanz hat ein `location` (`nbg`, `fsn`). Ein Online-Check läuft an jedem Standort aus `hc2_checks.locations` (Standard: alle) als eigene Messreihe mit eigenem Zustand (3.12).
+- Verteilung über **Slots je Standort**: `hc2_checks.slot = crc32(token) % 1024`. Instanzen registrieren sich in `hc2_nodes` (mit `location`, Heartbeat alle 10 s). Jede Instanz berechnet aus der sortierten Liste lebender Nodes **ihres Standorts** deterministisch dieselbe Zuteilung (Node i bekommt Slots mit `slot % n == i`); mit einem Node je Standort hat er alle 1024 Slots. `hc2_slot_leases (location, slot)` (60 s) sichert gegen Doppelausführung bei Netzpartition. Fällt der einzige Node eines Standorts aus, fehlt diese Messreihe (Gesamtzustand rechnet mit den verbleibenden, 3.12) und Dennis bekommt einen Alarm `location_down`,
 - lädt die Checks seiner Slots mit `execution IN ('online','both')`, `paused = 0`, plant sie wie der Agent (Worker-Pool, Jitter, Retry, Stabilisierung, Flattern, Abhängigkeiten, Wartungsfenster), schreibt Messpunkte, Zustände, Ereignisse, Störungen in `hc2_*`,
 - bewertet Push-Checks seiner Slots per Watchdog; Push-Eingang kommt aus `health.php` (Redis `hc2:push`) oder aus dem hub selbst,
 - verschickt Benachrichtigungen (Server-Kanäle, `ipv64_mail`, `ipv64_sms`, `app`) und erzeugt Sendeaufträge für Agent-Kanäle,
@@ -56,7 +58,7 @@ Rolle **checker** (Online-Checks, ersetzt `healthcheck_*_live.php`, `healthcheck
 
 **Deployment (Stand jetzt)**: ein **eigener hub-Server** (neu, getrennt vom Web-Server; Dennis stellt IP-Adresse und Zugang). Darauf: `ipv64-hub` als systemd-Dienst (Port 9000 intern, nur localhost), nginx davor als TLS-Terminierung und WebSocket-Proxy (`proxy_http_version 1.1`, `Upgrade`-Header durchreichen, `proxy_read_timeout 120s`, Let's Encrypt für `agents.ipv64.net`), Redis lokal (nur `127.0.0.1`/`::1`, Passwort). MySQL bleibt auf dem Web-Server; der hub verbindet sich über das Netz mit einem eigenen MySQL-Benutzer `hc2` (Rechte nur auf `hc2_*` plus `SELECT` auf `users`, `user_class`; Zugriff nur von der hub-IP, TLS oder privates Netz). Das Portal (PHP) erreicht Redis auf dem hub-Server über den schon vorhandenen Client (`connectRedis()` in `dbconnect.php`), Firewall nur für die Web-Server-IP offen. Geheimnisse des hub (MySQL, Redis, SMTP, SMS-Gateway, Firebase, Kanal-Schlüssel) liegen in `/etc/ipv64-hub/config.yaml` (root:ipv64-hub 640), nicht im Code.
 
-**Zweite Instanz später**: gleicher Server-Aufbau, `agents.ipv64.net` auf beide (nginx-Upstream oder DNS A/AAAA-Round-Robin), gemeinsamer Redis (dann vom hub-Server A oder ein eigener), gemeinsame MySQL. Nichts am Code ändern; `hc2_nodes` und Slots regeln die Aufteilung.
+**Zwei Server (nbg, fsn)**: gleicher Aufbau auf beiden. Erreichbarkeit der Agents: `agents.ipv64.net` mit A/AAAA **beider** Server (Round-Robin); zusätzlich `hub-nbg.ipv64.net` und `hub-fsn.ipv64.net`. Der hub schickt im `hello` die Liste aller Endpunkte, der Agent merkt sie sich und wechselt bei Fehlschlag zum nächsten (kein Load Balancer nötig; Zertifikate für `agents.ipv64.net` auf beiden per DNS-01 über die PowerDNS-API, für die Einzelnamen per HTTP-01). **Redis** läuft auf nbg; fsn erreicht ihn über das Hetzner-Cloud-Private-Network (beide in der Netzzone eu-central, kein öffentlicher Port) – Redis ist nur Beschleuniger, fällt nbg aus, pollt fsn MySQL (2 s). **MySQL** auf dem Web-Server, erreichbar von beiden hub-IPs (v4/v6, TLS). Ein dritter Standort = dritter Server, `location` setzen, DNS ergänzen; nichts am Code ändern.
 
 **Portal (PHP)**: neue Seiten lesen und schreiben `hc2_*` direkt über PDO (wie der Rest des Portals), jede Änderung erhöht `revision`, schreibt eine Zeile in `hc2_config_log` und publiziert `hc2:cfg:<userid>` (Redis-Client ist in `dbconnect.php` vorhanden: `connectRedis()`). Fällt Redis oder die Verbindung aus, bleibt die Änderung trotzdem nicht liegen: der hub liest `hc2_config_log` zusätzlich alle 2 s per `SELECT MAX(id)` (Fallback-Polling); Redis macht es nur schneller. Charts holen Aggregate über die API v2.
 
@@ -119,10 +121,12 @@ CREATE TABLE hc2_checks (
   notify_down TINYINT NOT NULL DEFAULT 1, notify_up TINYINT NOT NULL DEFAULT 1, channels VARCHAR(255) NOT NULL DEFAULT '', repeat_minutes INT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL, updated_by VARCHAR(100) NOT NULL DEFAULT '',
   deleted_at DATETIME(3) NULL,               -- Tombstone: bleibt 90 Tage, damit Agents das Loeschen sehen
-  -- Laufzeitzustand je Ausfuehrungsort (local = vom Agent gemeldet, online = hub)
-  state_local ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
-  state_online ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
-  state ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending', -- Gesamt (siehe 3.5)
+  -- Messstellen und Bewertung (3.12)
+  locations SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',   -- Standorte fuer execution online/both
+  policy ENUM('all','any','majority') NOT NULL DEFAULT 'all', -- down, wenn: alle / eine / Mehrheit der Messstellen down
+  notify_degraded TINYINT NOT NULL DEFAULT 0,               -- Alarm auch bei "teilweise gestoert"
+  -- Gesamtzustand (aus hc2_check_states berechnet, 3.12); je Messstelle siehe hc2_check_states
+  state ENUM('pending','up','degraded','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
   state_since DATETIME(3) NULL, last_check_at DATETIME(3) NULL, next_check_at DATETIME(3) NULL,
   last_status ENUM('up','down') NULL, last_latency_ms FLOAT NULL, last_reason VARCHAR(64) NULL, last_message VARCHAR(500) NULL,
   last_push_at DATETIME(3) NULL, down_since DATETIME(3) NULL, incident_id BIGINT NULL,
@@ -130,20 +134,30 @@ CREATE TABLE hc2_checks (
   INDEX (userid, deleted_at), INDEX (agent_id), INDEX idx_due (slot, execution, paused, next_check_at), INDEX (parent_token)
 );
 
--- Messpunkte: Online (agent_id = '') und Agent (agent_id gesetzt), 7 Tage roh
+-- Zustand je Messstelle: source = 'agent:<agent_id>' oder 'loc:nbg' / 'loc:fsn'
+CREATE TABLE hc2_check_states (
+  token CHAR(32) NOT NULL, source VARCHAR(40) NOT NULL,
+  state ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
+  since DATETIME(3) NULL, last_check_at DATETIME(3) NULL, next_check_at DATETIME(3) NULL,
+  last_status ENUM('up','down') NULL, last_latency_ms FLOAT NULL, last_reason VARCHAR(64) NULL, last_message VARCHAR(500) NULL,
+  consecutive_fail SMALLINT NOT NULL DEFAULT 0, consecutive_ok SMALLINT NOT NULL DEFAULT 0, down_since DATETIME(3) NULL,
+  PRIMARY KEY (token, source)
+);
+
+-- Messpunkte: source wie oben (Standort oder Agent), 7 Tage roh
 CREATE TABLE hc2_measurements (
-  token CHAR(32) NOT NULL, agent_id VARCHAR(32) NOT NULL DEFAULT '', agent_seq BIGINT NOT NULL DEFAULT 0,
+  token CHAR(32) NOT NULL, source VARCHAR(40) NOT NULL, agent_seq BIGINT NOT NULL DEFAULT 0,
   time DATETIME(3) NOT NULL, status TINYINT NOT NULL, latency_ms FLOAT NOT NULL DEFAULT 0,
   reason VARCHAR(64) NOT NULL DEFAULT '', message VARCHAR(500) NOT NULL DEFAULT '', family CHAR(4) NOT NULL DEFAULT '',
   details JSON NULL, flags TINYINT NOT NULL DEFAULT 0, received_at DATETIME(3) NOT NULL,
-  PRIMARY KEY (token, agent_id, time, agent_seq),  -- idempotent: Agent-Punkte sind ueber (agent_id, agent_seq) eindeutig
-  INDEX (agent_id, agent_seq), INDEX (time)
+  PRIMARY KEY (token, source, time, agent_seq),    -- idempotent: Agent-Punkte sind ueber (source, agent_seq) eindeutig
+  INDEX (source, agent_seq), INDEX (time)
 ) PARTITION BY RANGE (TO_DAYS(time)) (...tagesweise, 8 Partitionen rollierend...);
 
-CREATE TABLE hc2_hourly (token CHAR(32), agent_id VARCHAR(32) NOT NULL DEFAULT '', hour DATETIME NOT NULL,
-  count INT, up_count INT, min_ms FLOAT, avg_ms FLOAT, max_ms FLOAT, PRIMARY KEY (token, agent_id, hour));
-CREATE TABLE hc2_daily  (token CHAR(32), agent_id VARCHAR(32) NOT NULL DEFAULT '', day DATE NOT NULL,
-  count INT, up_count INT, min_ms FLOAT, avg_ms FLOAT, max_ms FLOAT, PRIMARY KEY (token, agent_id, day));
+CREATE TABLE hc2_hourly (token CHAR(32), source VARCHAR(40) NOT NULL, hour DATETIME NOT NULL,
+  count INT, up_count INT, min_ms FLOAT, avg_ms FLOAT, max_ms FLOAT, PRIMARY KEY (token, source, hour));
+CREATE TABLE hc2_daily  (token CHAR(32), source VARCHAR(40) NOT NULL, day DATE NOT NULL,
+  count INT, up_count INT, min_ms FLOAT, avg_ms FLOAT, max_ms FLOAT, PRIMARY KEY (token, source, day));
 
 CREATE TABLE hc2_events (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, event_id CHAR(32) NOT NULL UNIQUE,
@@ -186,10 +200,11 @@ CREATE TABLE hc2_config_log (
   op ENUM('upsert','delete') NOT NULL, revision BIGINT NOT NULL, origin ENUM('portal','api','agent','system') NOT NULL,
   time DATETIME(3) NOT NULL, INDEX (userid, id), INDEX (agent_id, id)
 );
-CREATE TABLE hc2_nodes (name VARCHAR(64) PRIMARY KEY, roles VARCHAR(32), version VARCHAR(32), connections INT NOT NULL DEFAULT 0,
-  started_at DATETIME(3), heartbeat DATETIME(3), INDEX (heartbeat));              -- lebende hub-Instanzen
-CREATE TABLE hc2_slot_leases (slot SMALLINT PRIMARY KEY, owner VARCHAR(64), until DATETIME(3));  -- Sicherung gegen Doppelausfuehrung
-CREATE TABLE hc2_dirty_hours (token CHAR(32), agent_id VARCHAR(32) NOT NULL DEFAULT '', hour DATETIME, PRIMARY KEY (token, agent_id, hour));
+CREATE TABLE hc2_nodes (name VARCHAR(64) PRIMARY KEY, location VARCHAR(16) NOT NULL, roles VARCHAR(32), version VARCHAR(32),
+  connections INT NOT NULL DEFAULT 0, started_at DATETIME(3), heartbeat DATETIME(3), INDEX (heartbeat));  -- lebende hub-Instanzen je Standort
+CREATE TABLE hc2_locations (code VARCHAR(16) PRIMARY KEY, name VARCHAR(64), endpoint VARCHAR(100), enabled TINYINT DEFAULT 1); -- nbg "Nürnberg" hub-nbg.ipv64.net, fsn "Falkenstein" ...
+CREATE TABLE hc2_slot_leases (location VARCHAR(16), slot SMALLINT, owner VARCHAR(64), until DATETIME(3), PRIMARY KEY (location, slot));  -- Sicherung gegen Doppelausfuehrung
+CREATE TABLE hc2_dirty_hours (token CHAR(32), source VARCHAR(40) NOT NULL, hour DATETIME, PRIMARY KEY (token, source, hour));
 ```
 
 **Mapping Alt → Neu** (Migrationsskript, pro Account beim Setzen von `users.hc2 = 1`):
@@ -304,7 +319,7 @@ Agent                                   ipv64-hub (HTTPS)                       
 - Alle 30 s oder ab 100 Punkten: Nachricht `measurements {batch:[{seq, token, time, status, latency_ms, reason, message, family, details, flags}]}`, höchstens 500 je Batch, nächster Batch erst nach dem `ack`.
 - Server: `INSERT IGNORE` (Primärschlüssel enthält `agent_seq`), verwirft Punkte mit `time > now + 5 min` (`reason: future`), antwortet `ack {ack_seq: <höchste verarbeitete seq>, rejected:[seq...]}`. Agent speichert `ack_seq`.
 - Zustand: Der Agent ist für `state_local` zuständig und meldet Statuswechsel als Ereignisse (Nachricht `events {batch}`, idempotent über `event_id`; `ack {accepted:[...], duplicates:[...]}`). Der Server leitet aus Ereignissen `state_local`, `down_since`, `incident_id` ab. hub pflegt `state_online`.
-- **Gesamtzustand** `state` eines Checks mit `execution both`: down, wenn einer der beiden down ist; Diagnose im Portal: „intern OK, extern gestört → Router/Freigabe/CDN“.
+- **Gesamtzustand** `state`: aus den Zuständen aller Messstellen nach der Regel des Checks berechnet, siehe 3.12.
 - Rückwirkende Punkte (Agent war offline): werden nach `time` einsortiert; Aggregate der betroffenen Stunden/Tage werden von hub nachgerechnet (Markierung in `hc2_dirty_hours`).
 - Zeit: Agent sendet UTC aus NTP-Zeit; `received_at` setzt der Server. Abweichung > 5 min → Warnung im Portal und im Agent („Uhr des Agents weicht ab“).
 
@@ -377,10 +392,33 @@ Ein Check hat einen **Ausführungsort** (`execution`): `local` (nur dieser Agent
 
 - **lokal → online** (z. B. „google.de erreichbar“ soll künftig von ipv64 aus geprüft werden): Server prüft das Limit (`user_class.healthcheck_limit` zählt nur online/both), weist private Ziele ab (RFC 1918, ULA, Loopback, Link-Local, `.local`, `localhost` – Hinweis auf CDN), macht einen Testlauf aus dem hub (`hc2_testruns`, Ergebnis ≤ 30 s, im Portal und im Agent sichtbar). Erfolg → `execution = online`, `agent_id` bleibt als Herkunft (für „zurück“), der Agent stoppt die lokale Messung mit der nächsten `config`-Nachricht. Misserfolg → Check bleibt lokal, Fehlermeldung mit Grund.
 - **online → lokal**: Nutzer wählt den Agent (bei mehreren); der Check geht per `config` an den Agent, der ihn pausiert anlegt, einen Testlauf macht und das Ergebnis meldet (`command_result`); erst dann setzt der Server `execution = local` und stoppt die Online-Messung. Ist der Agent offline, bleibt es bei online, mit Hinweis „wartet auf Agent“.
-- **beides**: wie lokal → online, nur dass der Agent weitermisst. Gesamtzustand: down, wenn einer down ist; Diagnose „innen OK, außen gestört“ → Router/Freigabe/CDN; „innen gestört, außen OK“ → lokales Netz.
+- **beides**: wie lokal → online, nur dass der Agent weitermisst. Drei Messstellen (Agent, nbg, fsn), Gesamtzustand nach 3.12.
 - **Der Agent kann auch anstoßen**: In der Agent-UI gibt es im Check-Formular denselben Schalter (nur bei Verknüpfung). Die Änderung ist ein `propose`; der Server führt dieselben Prüfungen (Limit, privates Ziel, Testlauf) aus, bevor er `ack` gibt. Bis dahin misst der Agent weiter.
 - **Umhängen beim Entkoppeln** (`unlink`): `keep_checks = true` → alle lokalen Checks des Agents werden auf `online` gesetzt, sofern das Limit und die Zielregeln es erlauben (sonst bleiben sie mit `agent_id` als verwaist stehen und werden im Portal markiert); `false` → gelöscht (Tombstone).
 - Massenaktion im Portal und im Agent: mehrere Checks auf einmal umhängen; Testläufe parallel, Ergebnisliste.
+
+### 3.12 Mehrere Messstellen und Gesamtzustand (Hybrid)
+
+**Messstellen** (`source`): `agent:<agent_id>` (innen, vom Agent gemeldet) und `loc:nbg`, `loc:fsn` (außen, vom hub gemessen). Welche aktiv sind, ergibt sich aus `execution` (`local` → nur Agent; `online` → `locations`; `both` → Agent + `locations`). Jede Messstelle hat ihre eigene Zustandsmaschine (pending/up/down/stabilizing/flapping, Retries, Stabilisierung) in `hc2_check_states`, eigene Messreihe, eigene Pillenleiste und Latenz-Kurve. Nichts wird zusammengeworfen.
+
+**Gesamtzustand** (`hc2_checks.state`), berechnet vom hub bei jeder Zustandsänderung einer Messstelle (und vom Agent lokal für seine Anzeige, nach denselben Regeln mit den Daten, die er hat):
+
+| Regel (`policy`) | Gesamt **down**, wenn … | sonst **degraded**, wenn … | sonst |
+| --- | --- | --- | --- |
+| `all` (Standard) | **alle** aktiven Messstellen down | mindestens eine down | up |
+| `any` | **eine** Messstelle down | – | up |
+| `majority` | mehr als die Hälfte down | mindestens eine down | up |
+
+- Messstellen im Zustand `pending`, `paused`, `dependent` oder ohne aktuelle Daten (Agent offline > 3 min, Standort ausgefallen) zählen **nicht mit** (weder up noch down). Sind alle ohne Daten → `pending`. Dadurch kippt ein Check nicht auf down, nur weil der Heim-Agent gerade offline ist, und nicht auf up, nur weil ein Standort schweigt.
+- `stabilizing`/`flapping` einer Messstelle gelten für die Regel als up bzw. down nach ihrem `last_status`; der Gesamtzustand zeigt `flapping`, wenn die bestimmende Messstelle flattert.
+- Push-Checks haben genau eine Messstelle (die, die den Heartbeat bewertet) – Regel greift nicht.
+- **Ereignisse und Alarme** entstehen nur beim Wechsel des **Gesamtzustands** (`kind: down`, `up`, `degraded`, `degraded_end`); `degraded` löst nur Benachrichtigungen aus, wenn `notify_degraded = 1` (Standard aus). Die Ereignis-Nachricht enthält die Diagnose: „außen gestört (nbg, fsn), innen OK → Router/Portfreigabe/CDN“, „innen gestört, außen OK → Heimnetz/Agent“, „nur nbg gestört → wahrscheinlich Netzpfad Nürnberg“, „alle Messstellen gestört → Ziel down“.
+- Störungen (`hc2_incidents`) folgen dem Gesamtzustand; die Störungsseite zeigt, welche Messstellen beteiligt waren.
+- Statusseiten zeigen den Gesamtzustand; optional je Check die Messstellen als kleine Zeile.
+- Lokale Benachrichtigungen des Agents (standalone oder offline): der Agent kennt nur seine eigene Messstelle und alarmiert wie bisher über seine lokalen Kanäle; verknüpft und online überlässt er Alarme dem Server (Server-Kanäle **und** Agent-Kanäle per `send_order`), damit Hybrid-Checks nicht doppelt und nicht nach der falschen Regel alarmieren. Umschaltbar je Agent („Agent alarmiert immer lokal zusätzlich“).
+- Verfügbarkeit in Prozent (24 h/30 d/1 J) wird je Messstelle und als Gesamt (nach Regel, aus `hc2_events`-Dauern) angezeigt.
+
+**Beispiel** (Regel `all`, Check „google.de“ mit `both`): Heim-Internet fällt aus → Agent meldet down, nbg/fsn up → **degraded**, Hinweis „innen gestört, außen OK → Heimnetz“, kein Alarm (außer `notify_degraded`). Google selbst down → alle drei down → **down**, Alarm. Nürnberg hat Netzprobleme → nur `loc:nbg` down → degraded, Diagnose „Netzpfad Nürnberg“; zusätzlich sieht Dennis in den hub-Metriken, dass viele Checks an einem Standort gleichzeitig kippen (Alarm `location_degraded`, Schwelle 20 % der Checks eines Standorts in 5 min).
 
 ---
 
@@ -434,7 +472,7 @@ Portal/Fremdsoftware (Session oder API-Key) bekommen dieselben Ressourcen über 
 | Ereignis | Standalone | Verknüpft, Agent online | Verknüpft, Agent offline |
 | --- | --- | --- | --- |
 | Lokaler Check down/up | Agent sendet über Agent-Kanäle (inkl. Pushover) | Agent meldet Ereignis an Server; **Server** sendet Server-Kanäle und `ipv64_mail`/`ipv64_sms`; Agent-Kanäle sendet der Agent selbst sofort (kein Umweg, kein Sendeauftrag nötig) | Agent sendet Agent-Kanäle lokal (Fallback) und meldet das Ereignis später nach; Server sendet seine Kanäle beim Nachmelden **nur, wenn das Ereignis jünger als 15 min ist** (sonst nur Protokoll) |
-| Online-Check down/up | – | hub sendet Server-Kanäle; Agent-Kanäle als `send_order` über den Socket | Sendeauftrag bleibt liegen, verfällt nach 1 h |
+| Online-/Hybrid-Check: Gesamtzustand wechselt (down/up/degraded) | – | hub sendet Server-Kanäle; Agent-Kanäle als `send_order` über den Socket | Sendeauftrag bleibt liegen, verfällt nach 1 h |
 | Agent offline/online | – | hub über Server-Kanäle | – |
 
 - Deduplizierung über `event_id` in `hc2_deliveries (event_id, channel_id)` und im Agent `nf_deliveries`.
@@ -499,7 +537,7 @@ Push-URL `health.php?token=` bleibt dauerhaft; sie prüft `hc2` des Besitzers un
 | --- | --- | --- | --- |
 | 1 | `latest.json` + Versionsprüfung | ipv64 | Agent zeigt Version |
 | 2 | `hc2_*` DDL, Migrationsskript, `users.hc2`, Redis-Publish im Portal | ipv64 | Testaccount migriert, Vergleich alt/neu identisch |
-| 3 | `cmd/hub` Rolle **checker**: MySQL-Adapter für `scheduler.Store`, `hc2_nodes`/Slots/Leases, Konfig-Log + Redis, Push-Watchdog, Aggregation, Agent-Ausfall | Agent-Repo | Online-Checks eines Testaccounts laufen über zwei hub-Instanzen; eine stoppen → die andere übernimmt binnen 30 s |
+| 3 | `cmd/hub` Rolle **checker**: MySQL-Adapter für `scheduler.Store`, Standorte, `hc2_nodes`/Slots/Leases je Standort, Messstellen-Zustände + Gesamtzustand (3.12), Konfig-Log + Redis, Push-Watchdog, Aggregation, Agent-/Standort-Ausfall | Agent-Repo | Online-Checks eines Testaccounts laufen über zwei hub-Instanzen; eine stoppen → die andere übernimmt binnen 30 s |
 | 4 | `notify`: `pushover` (Agent + Server), `app`, `ipv64_mail`, `ipv64_sms` (Server, Backend über SMTP/SMS-Gateway wie heute), Agent-Weiterleitung `notify` | Agent-Repo | Testnachrichten je Typ, lokal und über hub |
 | 5 | Portal: `/notifications` (Kanäle), Verifizierung | ipv64 | Alte Integrationen migriert, Test-Button |
 | 6 | Portal: `/healthchecks2` Übersicht, Detail, Formular, Wartung, Störungen, Statusseite auf `hc2` | ipv64 | Feature-Parität zur alten Seite plus neue Typen |
@@ -519,9 +557,11 @@ Reihenfolge: 1 → 2 → 3 → 4 → 7 → 8 → 5 → 6 → 9 → 10. Pakete 3/
 3. **Pfad:** neue Seiten unter `/healthchecks2`; wie und wann umgestellt wird (Migrationsweg), bleibt offen.
 4. **Pushover** auch im Agent (Standalone ohne ipv64-Account muss vollwertig sein). **App** nur serverseitig. **E-Mail und SMS über ipv64** als Agent-Kanäle, die nur verknüpft funktionieren.
 5. **DNS-Failover** bleibt beim Online-System; Agent-Checks sind dafür keine Quelle.
-6. **Kein zweiter Standort** für Online-Checks jetzt; Spalte `location` und Slot-Verteilung sind darauf vorbereitet (ein weiterer Check-Server wäre nur eine weitere hub-Instanz mit eigenem `location`).
+6. ~~Kein zweiter Standort~~ → überholt durch 8/10: zwei Standorte (nbg, fsn) von Anfang an.
 7. **Transport:** kein Long-Poll über PHP, sondern ein eigener Go-Dienst `ipv64-hub` mit WebSocket, von Anfang an für viele tausend Agents und mehrere gleichwertige Instanzen ausgelegt (L4, L9, Abschnitt 1).
-8. **Server:** der hub läuft auf einem **eigenen neuen Server** (nicht auf dem Web-Server), dort auch Redis; aktuell eine Instanz, ein zweiter Check-Server bleibt vorbereitet. Zugang (IP usw.) kommt von Dennis.
+8. **Server:** zwei hub-Server von Anfang an, **Nürnberg** und **Falkenstein** (Hetzner Cloud), getrennt vom Web-Server; Redis auf nbg über privates Netz. Zugänge (IP usw.) kommen von Dennis.
+10. **Zwei Standorte für Online-Checks**: jeder Online-Check wird standardmäßig von beiden Standorten gemessen (abwählbar je Check).
+11. **Hybrid**: lokal + online gleichzeitig möglich; Gesamtzustand nach Regel je Check, Standard „down nur, wenn alle Messstellen down“, sonst „teilweise gestört“ ohne Alarm (3.12).
 9. **IPv6** überall, Agent und Server (L10).
 
 Der vollständige Phasenplan für die Serverseite steht in `PLAN-IPV64-SERVER-PHASEN.md`.

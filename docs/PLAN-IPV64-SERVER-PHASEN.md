@@ -3,8 +3,8 @@
 Stand 2026-10-10. Gilt zusammen mit `PLAN-IPV64-SYNC.md` (Datenmodell, Protokoll, Entscheidungen). Dieser Plan beschreibt **alles, was auf ipv64-Seite zu tun ist**, in der Reihenfolge, in der es gebaut und abgenommen wird. Jede Phase hat Ziel, Schritte, Dateien, Abnahme, Rückweg und „Was ich von Dennis brauche“.
 
 Rahmen (entschieden):
-- Ein **eigener hub-Server** (neu) für `ipv64-hub` und Redis; der Web-Server behält Portal, PHP, MySQL.
-- **Eine** hub-Instanz jetzt; Code und Aufbau sind für mehrere ausgelegt, ein zweiter Check-Server bleibt eine Option.
+- **Zwei hub-Server** (Hetzner Cloud, Nürnberg `nbg` und Falkenstein `fsn`) für `ipv64-hub`; Redis auf nbg; der Web-Server behält Portal, PHP, MySQL.
+- Beide Server sind gleichwertig (gateway + checker); Online-Checks laufen von **beiden Standorten**, Hybrid-Checks (innen + außen) mit Gesamtzustand nach Regel (Sync-Plan 3.12).
 - **IPv4 und IPv6** an jeder Stelle.
 - Alte Healthcheck-Bots und Seiten bleiben, bis der Schattenbetrieb sauber ist (Strangler-Fig, Flag `users.hc2`).
 - Änderungen am Webcode als Vorher/Nachher-Schnipsel, minimal, Dennis spielt ein. Go-Code im Agent-Repo (`cmd/hub`), Deploy per Binary + systemd.
@@ -34,7 +34,8 @@ Reihenfolge 1 → 2 → 3 → 4 → 5. Innerhalb von Phase 2–4 kann Go (hub) p
 **Ziel**: Ein Server, auf dem `ipv64-hub` sicher läuft, von Agents über `agents.ipv64.net` per v4 und v6 erreichbar, mit Zugriff auf MySQL des Web-Servers und lokalem Redis.
 
 **Schritte**
-1. Server: Debian 12 (wie die Testkiste), 2–4 Kerne, 4–8 GB RAM, 40 GB SSD reichen lange (hub hält keine Messdaten, die liegen in MySQL). Öffentliche IPv4 **und** IPv6. Zeit per NTP (`systemd-timesyncd`), Zeitzone UTC.
+1. Zwei Server: Hetzner Cloud `nbg1` und `fsn1`, Debian 12, je 2–4 vCPU, 4–8 GB RAM, 40 GB SSD (hub hält keine Messdaten). Öffentliche IPv4 **und** IPv6 (Hetzner gibt /64). Hetzner **Cloud Network** (privates Netz, Netzzone eu-central umfasst nbg1 und fsn1) für Redis-Verkehr fsn → nbg. Zeit per NTP, Zeitzone UTC. Alle folgenden Schritte auf beiden Servern, Unterschiede: `location` in `config.yaml`, Redis nur auf nbg.
+1a. Namen: `hub-nbg.ipv64.net`, `hub-fsn.ipv64.net` (A/AAAA je Server) und `agents.ipv64.net` (A/AAAA **beider** Server). Zertifikate: Einzelnamen per HTTP-01, `agents.ipv64.net` auf beiden per DNS-01 über die PowerDNS-API (certbot-Hook-Skript `deploy/certbot-pdns.sh`).
 2. Zugang: SSH nur mit Key, Benutzer `deploy` mit sudo, Root-Login aus. Für mich derselbe Weg wie bei der Testkiste (eigener Key, SSH-Config-Host `hub`).
 3. DNS: `agents.ipv64.net` A + AAAA auf den hub-Server (über das Portal/PowerDNS wie andere Records). TTL 300.
 4. Pakete: `nginx`, `certbot` (`python3-certbot-nginx`), `redis-server`, `nftables`, `mariadb-client` (nur zum Testen), kein Go (Binary kommt fertig gebaut).
@@ -104,7 +105,7 @@ Reihenfolge 1 → 2 → 3 → 4 → 5. Innerhalb von Phase 2–4 kann Go (hub) p
 2. `internal/hub/mysql`: Store-Adapter für `scheduler.Store` (Interfaces aus `internal/scheduler`): Checks laden (eigene Slots), Zustand schreiben, Messpunkte/Ereignisse/Störungen schreiben, Wartungsfenster, `hc2_config_log` lesen. Verbindungspool (`SetMaxOpenConns 20`), Prepared Statements, alle Zeiten UTC `DATETIME(3)`. Batch-Writer für Messpunkte (500 ms / 500 Zeilen).
 3. `internal/hub/cluster`: `hc2_nodes` Heartbeat (10 s), Slot-Zuteilung (deterministisch nach sortierter Node-Liste, 1024 Slots), `hc2_slot_leases` (60 s) als Sicherung. Mit einem Node: alle Slots. Logausgabe bei jeder Umverteilung.
 4. `internal/hub/signal`: Redis `PSUBSCRIBE hc2:cfg:*`, `hc2:push`, `hc2:agent:*` mit Reconnect; **immer zusätzlich** Polling `SELECT MAX(id) FROM hc2_config_log` alle 2 s (Redis nur Beschleuniger; Ausfall von Redis = max. 2 s Verzögerung, Log-Warnung).
-5. Checker-Lauf: `scheduler.Scheduler` aus dem Agent, Worker-Pool größer (Flag, Standard 200), Checks mit `execution IN ('online','both')`, `paused = 0`, eigene Slots. Konfigurationsänderung → `Upsert`/`Remove` am Scheduler. IPv4/IPv6 nach `ip_mode`; `FamilyProbe` wie im Agent (der Server hat beides; falls nicht, Alarm in `/metrics`).
+5. Checker-Lauf: `scheduler.Scheduler` aus dem Agent, Worker-Pool größer (Flag, Standard 200), Checks mit `execution IN ('online','both')`, `paused = 0`, `locations` enthält den eigenen Standort, eigene Slots. Zustand je Messstelle in `hc2_check_states (token, 'loc:<location>')`; nach jeder Änderung Gesamtzustand nach Regel (`internal/hub/verdict`, gleiche Funktion wie im Agent in `internal/scheduler/verdict.go`), Ereignis nur bei Wechsel des Gesamtzustands. Konfigurationsänderung → `Upsert`/`Remove` am Scheduler. IPv4/IPv6 nach `ip_mode`; `FamilyProbe` wie im Agent (der Server hat beides; falls nicht, Alarm in `/metrics`).
 6. Private Ziele: Online-Checks auf RFC-1918/ULA/Loopback/Link-Local werden beim Laden übersprungen und mit `reason private_target` als down markiert (das Portal verhindert das Anlegen, S7; das ist die zweite Sicherung).
 7. Push-Watchdog: Push-Checks der eigenen Slots; `hc2:push`-Signal oder `last_push_at`-Polling alle 10 s; Logik `period/grace` aus dem Agent.
 8. Agent-Ausfall: Slot-0-Node prüft alle 30 s `hc2_agents.online = 1` gegen Redis `hc2:online:<id>`; Ereignis `agent_offline`/`agent_online` (Versand in S4).
@@ -114,7 +115,7 @@ Reihenfolge 1 → 2 → 3 → 4 → 5. Innerhalb von Phase 2–4 kann Go (hub) p
 
 **Dateien**: `cmd/hub/`, `internal/hub/{config,mysql,cluster,signal,checker,aggregate,metrics}`, `deploy/config.example.yaml`, `Makefile` (`hub`, `hub-deploy`, `hub-itest`).
 
-**Abnahme**: Online-Checks des Testaccounts laufen über den hub; Zustände in `hc2_checks` entsprechen dem alten System (Vergleich per Hand); Push-Check kippt nach `period+grace` ohne Heartbeat; `kill -9` des hub → nach Neustart übernehmen die Checks ohne Doppel-Ereignisse; Redis stoppen → Checks laufen weiter, Konfigurationsänderung kommt nach ≤ 2 s an.
+**Abnahme**: Online-Checks des Testaccounts laufen auf **beiden** Servern (je Standort eine Messreihe); Gesamtzustand nach Regel `all`/`any`/`majority` mit künstlich blockiertem Ziel an einem Standort (nftables) → `degraded` bzw. `down` wie erwartet; einen Server stoppen → anderer meldet `location_down`, Checks laufen weiter; Zustände entsprechen dem alten System (Vergleich per Hand); Push-Check kippt nach `period+grace` ohne Heartbeat; `kill -9` des hub → nach Neustart übernehmen die Checks ohne Doppel-Ereignisse; Redis stoppen → Checks laufen weiter, Konfigurationsänderung kommt nach ≤ 2 s an.
 
 **Rückweg**: Dienst stoppen, `users.hc2 = 0`.
 
@@ -233,7 +234,7 @@ Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client 
 
 ### S10 – Betrieb des hub
 
-**Ziel**: Der hub ist überwacht, alarmiert selbst, lässt sich sicher aktualisieren, und der Weg zur zweiten Instanz ist beschrieben.
+**Ziel**: Beide hub-Server sind überwacht, alarmieren selbst, lassen sich sicher einzeln aktualisieren (Rolling: erst fsn, dann nbg), und der Weg zu einem dritten Standort ist beschrieben.
 
 **Schritte**
 1. `/metrics` (Prometheus): Verbindungen, Nachrichten/s, Messpunkte/s, DB-Latenz, Batch-Größen, Checks je Zustand, Slots je Node, Redis-Status, Fehlerzähler. Dazu ein kleiner Prometheus + Grafana auf dem hub-Server oder Anbindung an das, was Dennis schon hat (Influx? dann zusätzlich Influx-Line-Protocol-Export als Option).
@@ -242,7 +243,8 @@ Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client 
 4. Updates: `hub-deploy.sh` mit Drain (`bye` an Agents, 10 s), Rollback mit `hub.prev`; Datenbank-Migrationen des hub versioniert (`hc2_schema_version`), vorwärts-kompatibel (Spalten hinzufügen, nie umbenennen), Migration vor dem Binary-Wechsel.
 5. Backups: MySQL ist Sache des Web-Servers (bestehender Prozess; `hc2_measurements` darf aus dem Backup ausgenommen werden – 7 Tage Rohdaten sind verzichtbar, Aggregate nicht). hub-Server: `/etc/ipv64-hub`, `secret.key`, nginx.
 6. Runbook (`docs/RUNBOOK-HUB.md`): Start/Stop, Logs lesen, häufige Fehler (DB-Verbindung, Zertifikat, Redis), Agent-Token widerrufen, Account auf alt zurückstellen, Slots prüfen, Lasttest wiederholen.
-7. **Zweite Instanz** (wenn gewünscht): Server wie S0 (ohne Redis), `config.yaml` mit `redis.addr` des ersten Servers (Firewall), `node_name` eindeutig, `location` (z. B. `nbg`), DNS/nginx-Upstream erweitern. Danach: Redis-Ausfallsicherheit (Sentinel oder Redis auf einen dritten kleinen Host) – bis dahin ist Redis-Ausfall nur ein Verzögerer (Polling-Fallback), kein Stillstand.
+7. **Dritter Standort** (wenn gewünscht): Server wie S0 (ohne Redis), `config.yaml` mit `redis.addr` von nbg über das private Netz, `location` neu (z. B. `hel`), Zeile in `hc2_locations`, DNS ergänzen; Portal zeigt den Standort automatisch zur Auswahl. Redis-Ausfallsicherheit: Ausfall von nbg = Polling-Fallback auf fsn (2 s), kein Stillstand; bei Bedarf später Redis auf beiden mit Replikation/Sentinel.
+7a. **Standort-Ausfall**: fällt nbg oder fsn komplett aus, verbinden sich die Agents mit dem anderen (Endpunktliste aus `hello`), Online-Checks laufen mit einem Standort weiter, Gesamtzustände rechnen ohne die fehlende Messstelle, Alarm `location_down` an Dennis. Nach Rückkehr holt der Standort seine Slots wieder, Lücke in der Messreihe bleibt sichtbar.
 8. IPv6-Prüfung im Betrieb: Checker misst beide Familien, `/metrics` zählt `family_unreachable`; nginx/Redis/MySQL-Verbindungen auf v6 getestet (`curl -6`, `mysql --host=<v6>`).
 
 ---
