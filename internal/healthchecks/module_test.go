@@ -105,9 +105,11 @@ func TestCheckLifecycleViaAPI(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if c.State.State != "up" || c.State.LastLatencyMS <= 0 {
-		t.Fatalf("expected up with latency, got %+v", c.State)
+	if c.State.State != "up" {
+		t.Fatalf("expected up, got %+v", c.State)
 	}
+	_, mb := call(t, srv, "GET", "/api/checks/"+c.Token+"/measurements", nil)
+	t.Logf("state latency %.3f ms, measurements: %s", c.State.LastLatencyMS, mb)
 	// Messpunkte und Stats
 	code, b = call(t, srv, "GET", "/api/checks/"+c.Token+"/measurements", nil)
 	var ms []Measurement

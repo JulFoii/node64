@@ -18,6 +18,9 @@ import (
 type localResolver struct{}
 
 func (localResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	if host == "dual.test" {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("::1")}}, nil
+	}
 	if host == "nope.invalid" {
 		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 	}
@@ -30,7 +33,40 @@ func (localResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr,
 func testRunner() *Runner {
 	r := NewRunner()
 	r.Resolver = localResolver{}
+	r.FamilyProbe = func(string) bool { return true }
 	return r
+}
+
+func TestAutoSkipsUnavailableFamily(t *testing.T) {
+	r := testRunner()
+	// Agent ohne IPv6: auto prueft nur IPv4
+	r.FamilyProbe = func(fam string) bool { return fam == "ipv4" }
+	res := r.Run(context.Background(), def(TypePort, "dual.test:1", nil))
+	if len(res) != 1 || res[0].Family != "ipv4" {
+		t.Fatalf("auto without ipv6 should check ipv4 only, got %+v", res)
+	}
+	// Agent mit beidem: zwei Teilergebnisse (neuer Runner, die Probe wird eine Minute gecacht)
+	r = testRunner()
+	if res := r.Run(context.Background(), def(TypePort, "dual.test:1", nil)); len(res) != 2 {
+		t.Fatalf("auto with both families should check both, got %d", len(res))
+	}
+	// Explizit both bleibt strikt, auch ohne IPv6 am Agent
+	r = testRunner()
+	r.FamilyProbe = func(fam string) bool { return fam == "ipv4" }
+	d := def(TypePort, "dual.test:1", nil)
+	d.IPMode = IPBoth
+	if res := r.Run(context.Background(), d); len(res) != 2 {
+		t.Fatalf("both must stay strict, got %d", len(res))
+	}
+	// Probe wird gecacht: zweiter Aufruf fragt nicht erneut
+	calls := 0
+	r2 := testRunner()
+	r2.FamilyProbe = func(string) bool { calls++; return true }
+	r2.Run(context.Background(), def(TypePort, "dual.test:1", nil))
+	r2.Run(context.Background(), def(TypePort, "dual.test:1", nil))
+	if calls != 2 {
+		t.Fatalf("expected 2 probe calls (one per family), got %d", calls)
+	}
 }
 
 func def(t Type, target string, params any) Definition {

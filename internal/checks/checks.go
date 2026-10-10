@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -143,11 +144,23 @@ type Runner struct {
 	checkers map[Type]Checker
 	Resolver Resolver
 	Now      func() time.Time
+	// FamilyProbe sagt, ob der Agent selbst ipv4 bzw. ipv6 erreichen kann.
+	// Im Modus auto werden nur verfuegbare Familien geprueft; austauschbar fuer Tests.
+	FamilyProbe func(family string) bool
+
+	famMu    sync.Mutex
+	famCache map[string]famState
+}
+
+type famState struct {
+	ok bool
+	at time.Time
 }
 
 // NewRunner registriert alle eingebauten Checker.
 func NewRunner() *Runner {
-	r := &Runner{checkers: map[Type]Checker{}, Resolver: net.DefaultResolver, Now: func() time.Time { return time.Now().UTC() }}
+	r := &Runner{checkers: map[Type]Checker{}, Resolver: net.DefaultResolver, Now: func() time.Time { return time.Now().UTC() }, famCache: map[string]famState{}}
+	r.FamilyProbe = probeFamily
 	for _, c := range []Checker{&httpChecker{}, &httpChecker{keyword: true}, &tcpChecker{}, &portChecker{}, &certChecker{}, &icmpChecker{}} {
 		r.checkers[c.Type()] = c
 	}
@@ -252,18 +265,61 @@ func (r *Runner) resolve(ctx context.Context, host string, mode IPMode, timeout 
 			return nil, &Result{Status: Down, Reason: ReasonNoAddress, Message: "both IPv4 and IPv6 required but " + host + " has only one family", Time: now}
 		}
 		ips = []net.IP{pick(v4), pick(v6)}
-	default: // auto
-		if len(v4) > 0 {
+	default: // auto: was DNS liefert, aber nur Familien, die der Agent selbst hat
+		if len(v4) > 0 && r.hasFamily("ipv4") {
 			ips = append(ips, pick(v4))
 		}
-		if len(v6) > 0 {
+		if len(v6) > 0 && r.hasFamily("ipv6") {
 			ips = append(ips, pick(v6))
+		}
+		if len(ips) == 0 {
+			// Keine passende Familie am Agent: trotzdem pruefen, damit der Grund sichtbar wird
+			if len(v4) > 0 {
+				ips = append(ips, pick(v4))
+			} else if len(v6) > 0 {
+				ips = append(ips, pick(v6))
+			}
 		}
 	}
 	if len(ips) == 0 {
 		return nil, &Result{Status: Down, Reason: ReasonDNSFailed, Message: "no address for " + host, Time: now}
 	}
 	return ips, nil
+}
+
+// hasFamily fragt FamilyProbe hoechstens einmal pro Minute je Familie.
+func (r *Runner) hasFamily(fam string) bool {
+	if r.FamilyProbe == nil {
+		return true
+	}
+	r.famMu.Lock()
+	defer r.famMu.Unlock()
+	if r.famCache == nil {
+		r.famCache = map[string]famState{}
+	}
+	if st, ok := r.famCache[fam]; ok && time.Since(st.at) < time.Minute {
+		return st.ok
+	}
+	ok := r.FamilyProbe(fam)
+	r.famCache[fam] = famState{ok: ok, at: time.Now()}
+	return ok
+}
+
+// probeFamily prueft per UDP-"Connect" (es wird kein Paket gesendet), ob eine
+// Route fuer die Familie existiert. Ohne IPv6-Route antwortet der Kernel mit
+// "network is unreachable".
+func probeFamily(fam string) bool {
+	network, addr := "udp4", "192.0.2.1:9"
+	if fam == "ipv6" {
+		network, addr = "udp6", "[2001:db8::1]:9"
+	}
+	d := net.Dialer{Timeout: time.Second}
+	c, err := d.Dial(network, addr)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
 }
 
 func family(ip net.IP) string {
