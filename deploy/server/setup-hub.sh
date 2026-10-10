@@ -115,6 +115,7 @@ table inet filter {
     tcp dport 22 accept
     tcp dport { 80, 443 } accept
     ip saddr 10.10.0.0/24 tcp dport 6379 accept
+    ip saddr 10.100.0.110 tcp dport 6379 accept
   }
   chain forward { type filter hook forward priority 0; policy drop; }
   chain output  { type filter hook output priority 0; policy accept; }
