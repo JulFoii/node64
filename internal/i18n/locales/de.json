@@ -96,7 +96,10 @@
     "submit": "Anmelden",
     "failed": "Benutzername oder Passwort ist falsch.",
     "ratelimited": "Zu viele Versuche. Bitte in {seconds} Sekunden erneut versuchen.",
-    "logged_out": "Du bist abgemeldet."
+    "logged_out": "Du bist abgemeldet.",
+    "totp_title": "Zweiter Faktor",
+    "totp_hint": "Gib den Code aus deiner Authenticator-App ein oder einen Wiederherstellungscode.",
+    "totp_failed": "Der Code ist falsch oder abgelaufen."
   },
   "dashboard": {
     "title": "Dashboard",
@@ -144,7 +147,14 @@
     "export": "Konfiguration exportieren",
     "import": "Konfiguration importieren",
     "about": "Über",
-    "version": "Version"
+    "version": "Version",
+    "cert_download": "Zertifikat herunterladen",
+    "log_module": "Bereich",
+    "log_inherit": "wie global",
+    "updates_check": "Täglich auf neue Versionen prüfen",
+    "updates_hint": "Ruft nur eine Versionsdatei bei ipv64.net ab, es werden keine Daten gesendet.",
+    "update_available": "Neue Version {version} verfügbar.",
+    "update_none": "Aktuell ist Version {version}, kein Update."
   },
   "audit": {
     "title": "Audit-Log",
@@ -327,7 +337,25 @@
       "title": "Push-URL",
       "hint": "Diese URL regelmäßig aufrufen, z. B. per Cron. Mit ?status=down meldet der Dienst selbst eine Störung."
     },
-    "channels_default": "Standardkanäle"
+    "channels_default": "Standardkanäle",
+    "maint": {
+      "title": "Wartungsfenster",
+      "hint": "Während eines Wartungsfensters laufen die Checks weiter, es gibt aber keine Alarme. Messpunkte sind markiert und zählen nicht gegen die Verfügbarkeit.",
+      "list": "Geplante Fenster",
+      "empty": "Noch kein Wartungsfenster.",
+      "new": "Neues Wartungsfenster",
+      "when": "Zeitraum",
+      "start": "Beginn",
+      "end": "Ende",
+      "repeat": "Wiederholung",
+      "until": "bis",
+      "repeat_none": "einmalig",
+      "repeat_daily": "täglich",
+      "repeat_weekly": "wöchentlich",
+      "repeat_monthly": "monatlich",
+      "all_hint": "keine Auswahl = alle",
+      "deleted": "Wartungsfenster gelöscht."
+    }
   },
   "notify": {
     "subject": {
@@ -378,7 +406,9 @@
       "discord": "Discord",
       "ntfy": "ntfy",
       "gotify": "Gotify",
-      "webhook": "Webhook"
+      "webhook": "Webhook",
+      "ipv64_mail": "E-Mail über ipv64",
+      "ipv64_sms": "SMS über ipv64"
     },
     "field": {
       "host": "SMTP-Server",
@@ -427,7 +457,8 @@
     "ok": "gesendet",
     "failed": "fehlgeschlagen",
     "saved": "Kanal gespeichert.",
-    "deleted": "Kanal gelöscht."
+    "deleted": "Kanal gelöscht.",
+    "planned": "nach Verknüpfung mit ipv64"
   },
   "day": {
     "1": "Mo",
@@ -437,5 +468,57 @@
     "5": "Fr",
     "6": "Sa",
     "7": "So"
+  },
+  "twofa": {
+    "title": "Zwei-Faktor-Anmeldung",
+    "hint": "Schützt den Login zusätzlich mit einem Code aus einer Authenticator-App.",
+    "setup": "Einrichten",
+    "manage": "Verwalten",
+    "active": "Zwei-Faktor-Anmeldung ist aktiv.",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren",
+    "enabled": "Zwei-Faktor-Anmeldung aktiviert. Andere Sitzungen wurden abgemeldet.",
+    "disabled": "Zwei-Faktor-Anmeldung deaktiviert.",
+    "code_wrong": "Der Code passt nicht. Uhrzeit des Geräts prüfen und erneut versuchen.",
+    "manual": "Oder manuell eingeben:",
+    "step1": "Authenticator-App öffnen (z. B. Aegis, 2FAS, Google Authenticator).",
+    "step2": "QR-Code scannen oder das Geheimnis eintippen.",
+    "step3": "Den angezeigten Code unten eingeben.",
+    "recovery": "Wiederherstellungscodes",
+    "recovery_hint": "Jeder Code funktioniert einmal, falls die App nicht verfügbar ist. Jetzt sicher aufbewahren, sie werden nicht noch einmal angezeigt."
+  },
+  "apikey": {
+    "title": "API-Keys",
+    "hint": "Für Skripte und Automationen gegen die lokale API. Nutzung: Authorization: Bearer <Key>.",
+    "name": "Name, z. B. Backup-Skript",
+    "create": "Erzeugen",
+    "created": "API-Key erzeugt.",
+    "deleted": "API-Key gelöscht.",
+    "show_once": "Der Key wird nur jetzt angezeigt:"
+  },
+  "backup": {
+    "title": "Backup und Konfiguration",
+    "hint": "Das Backup enthält die komplette Datenbank mit Messdaten. Der Export enthält nur die Konfiguration als JSON.",
+    "download": "Datenbank herunterladen",
+    "restore": "Datenbank wiederherstellen",
+    "restore_btn": "Wiederherstellen",
+    "restore_hint": "Der Agent startet danach neu. Die bisherige Datenbank bleibt unter /data/backups erhalten.",
+    "restore_confirm": "Die aktuelle Datenbank wird ersetzt und der Agent neu gestartet. Fortfahren?",
+    "restarting": "Datenbank übernommen, der Agent startet jetzt neu. In ein paar Sekunden neu anmelden.",
+    "no_file": "Keine Datei ausgewählt.",
+    "invalid": "Das ist keine Datenbank des ipv64 Agents.",
+    "export": "Konfiguration exportieren",
+    "export_none": "ohne Geheimnisse (Tokens, Passwörter)",
+    "export_password": "Geheimnisse mit Passwort verschlüsselt",
+    "password": "Passwort",
+    "export_btn": "Exportieren",
+    "password_short": "Das Passwort muss mindestens 8 Zeichen haben.",
+    "import": "Konfiguration importieren",
+    "import_btn": "Importieren",
+    "import_hint": "Checks werden über den Token abgeglichen, Kanäle und Wartungsfenster über den Namen. Nichts wird gelöscht.",
+    "invalid_config": "Das ist keine Konfigurationsdatei des ipv64 Agents.",
+    "password_needed": "Die Datei ist verschlüsselt, bitte das Passwort angeben.",
+    "password_wrong": "Das Passwort passt nicht zur Datei.",
+    "imported": "{count} Einträge importiert."
   }
 }

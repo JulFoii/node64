@@ -29,6 +29,11 @@ const (
 // Types in Anzeigereihenfolge.
 var Types = []Type{TypeSMTP, TypeTelegram, TypeDiscord, TypeNtfy, TypeGotify, TypeWebhook}
 
+// Planned sind Kanaele, die ipv64.net nach der Verknuepfung bereitstellt:
+// Mail ohne eigenen SMTP-Server und SMS ueber das ipv64-Gateway. Sie werden
+// vom Server gesendet (execution "ipv64") und sind standalone nicht verfuegbar.
+var Planned = []Type{"ipv64_mail", "ipv64_sms"}
+
 // Channel ist ein Benachrichtigungskanal.
 type Channel struct {
 	ID              int64

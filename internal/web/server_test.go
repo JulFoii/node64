@@ -26,12 +26,16 @@ import (
 var csrfRe = regexp.MustCompile(`name="_csrf" value="([^"]+)"`)
 
 type testApp struct {
-	srv    *httptest.Server
-	client *http.Client
-	store  *store.Store
+	srv      *httptest.Server
+	client   *http.Client
+	store    *store.Store
+	s        *Server
+	registry *module.Registry
 }
 
-func newTestApp(t *testing.T) *testApp {
+func newTestApp(t *testing.T) *testApp { return newTestAppWith(t) }
+
+func newTestAppWith(t *testing.T, mods ...module.Module) *testApp {
 	t.Helper()
 	dir := t.TempDir()
 	logger := logging.New("debug", "text", io.Discard)
@@ -50,6 +54,9 @@ func newTestApp(t *testing.T) *testApp {
 	}
 	reg := module.NewRegistry(st, logger.Slog())
 	reg.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Path: "/dyndns"}})
+	for _, m := range mods {
+		reg.Register(m)
+	}
 	cfg := &config.Config{DataDir: dir, HTTPPort: 8080, LogLevel: "info"}
 	s, err := New(Deps{Cfg: cfg, Store: st, Log: logger, I18n: bundle, Modules: reg, Sync: agentsync.NoOp{}, Version: "test", StartedAt: time.Now()})
 	if err != nil {
@@ -59,7 +66,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &testApp{srv: srv, client: client, store: st}
+	return &testApp{srv: srv, client: client, store: st, s: s, registry: reg}
 }
 
 func (a *testApp) get(t *testing.T, path string) (*http.Response, string) {
@@ -169,8 +176,8 @@ func TestSetupLoginSettingsFlow(t *testing.T) {
 		t.Fatalf("logout: %d", resp.StatusCode)
 	}
 	resp, _ = a.get(t, "/settings")
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
-		t.Fatalf("after logout expected redirect to /login, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusSeeOther || !strings.HasPrefix(resp.Header.Get("Location"), "/login") {
+		t.Fatalf("after logout expected redirect to /login, got %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	_, body = a.get(t, "/login")
 	csrf = csrfOf(t, body)

@@ -5,6 +5,7 @@
 	<h1 class="h4 mb-0">{{.T "nav.healthchecks"}} <span class="text-body-secondary fs-6">{{$d.Total}}</span></h1>
 	<div class="d-flex gap-2">
 		<a class="btn btn-outline-secondary btn-sm" href="/healthchecks{{if $f.q}}?q={{$f.q}}{{end}}" title="{{.T "logs.refresh"}}"><i class="bi bi-arrow-clockwise"></i></a>
+		<a class="btn btn-outline-secondary btn-sm" href="/healthchecks/maintenance"><i class="bi bi-wrench"></i> {{.T "hc.maint.title"}}</a>
 		<a class="btn btn-primary btn-sm" href="/healthchecks/new"><i class="bi bi-plus-lg"></i> {{.T "hc.new"}}</a>
 	</div>
 </div>

@@ -16,6 +16,7 @@ type notifyData struct {
 	Deliveries []notify.Delivery
 	NextBefore int64
 	Types      []notify.Type
+	Planned    []notify.Type
 	Quiet      map[string]string
 	Days       []int
 }
@@ -46,7 +47,7 @@ func (s *Server) notifyIndex(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	d := notifyData{Channels: chans, Deliveries: dl, Types: notify.Types, Days: []int{1, 2, 3, 4, 5, 6, 7}}
+	d := notifyData{Channels: chans, Deliveries: dl, Types: notify.Types, Planned: notify.Planned, Days: []int{1, 2, 3, 4, 5, 6, 7}}
 	if len(dl) == 50 {
 		d.NextBefore = dl[len(dl)-1].ID
 	}

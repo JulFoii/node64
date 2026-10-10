@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ const (
 	ctxSession ctxKey = iota
 	ctxUser
 	ctxCSRF
+	ctxPending // Sitzung wartet auf die zweite Stufe (TOTP)
+	ctxAPIKey  // Anfrage per API-Key authentifiziert
 )
 
 func randomToken(n int) string {
@@ -68,10 +71,23 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// rateLimit schuetzt UI und API vor Ueberlastung (je IP).
+func (s *Server) rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/static/") && !s.ipLimit.allow(s.clientIP(r)) {
+			s.log.Warn("request rate limited", "ip", s.clientIP(r), "path", r.URL.Path)
+			w.Header().Set("Retry-After", "10")
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) bodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+			r.Body = http.MaxBytesReader(w, r.Body, bodyLimitFor(r.URL.Path))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -82,6 +98,25 @@ func (s *Server) bodyLimit(next http.Handler) http.Handler {
 func (s *Server) session(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		// API-Key: Authorization: Bearer ipv64a_... (nur fuer /api/)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ipv64a_") {
+				key, err := s.Store.APIKeyByValue(ctx, strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
+				if err == nil && key != nil {
+					if u, err := s.Store.UserByID(ctx, key.UserID); err == nil && u != nil {
+						_ = s.Store.TouchAPIKey(ctx, key.ID)
+						ctx = context.WithValue(ctx, ctxUser, u)
+						ctx = context.WithValue(ctx, ctxAPIKey, key)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
+				s.limiter.fail("apikey:" + s.clientIP(r))
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, `{"error":"invalid api key"}`, http.StatusUnauthorized)
+				return
+			}
+		}
 		var sess *store.Session
 		if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 			sess, _ = s.Store.SessionByID(ctx, c.Value)
@@ -94,6 +129,9 @@ func (s *Server) session(next http.Handler) http.Handler {
 			u, err := s.Store.UserByID(ctx, sess.UserID)
 			if err != nil || u == nil {
 				sess = nil
+			} else if ok, _ := s.Store.SessionTOTPOK(ctx, sess.ID); !ok {
+				// Passwort stimmt, zweiter Faktor fehlt noch
+				ctx = context.WithValue(ctx, ctxPending, sess)
 			} else {
 				ctx = context.WithValue(ctx, ctxSession, sess)
 				ctx = context.WithValue(ctx, ctxUser, u)
@@ -110,7 +148,7 @@ func (s *Server) session(next http.Handler) http.Handler {
 
 		// CSRF: Double-Submit-Cookie, bei Sitzung zusaetzlich an die Sitzung gebunden
 		csrf := ""
-		if sess != nil {
+		if sess != nil && ctx.Value(ctxPending) == nil {
 			csrf = sess.CSRF
 		} else if c, err := r.Cookie(csrfCookie); err == nil && len(c.Value) >= 32 {
 			csrf = c.Value
@@ -147,16 +185,32 @@ func (s *Server) session(next http.Handler) http.Handler {
 func (s *Server) auth(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if currentUser(r) == nil {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+				return
+			}
+			if pendingSession(r) != nil {
+				http.Redirect(w, r, "/login/totp?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
+				return
+			}
 			if n, _ := s.Store.UserCount(r.Context()); n == 0 {
 				http.Redirect(w, r, "/setup", http.StatusSeeOther)
 				return
 			}
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 			return
 		}
 		h(w, r)
 	})
 }
+
+func pendingSession(r *http.Request) *store.Session {
+	s, _ := r.Context().Value(ctxPending).(*store.Session)
+	return s
+}
+
+func viaAPIKey(r *http.Request) bool { return r.Context().Value(ctxAPIKey) != nil }
 
 func currentUser(r *http.Request) *store.User {
 	u, _ := r.Context().Value(ctxUser).(*store.User)
@@ -202,8 +256,9 @@ func (s *Server) clientIP(r *http.Request) string {
 	return host
 }
 
-// startSession legt nach erfolgreichem Login eine neue Sitzung an.
-func (s *Server) startSession(w http.ResponseWriter, r *http.Request, userID int64) error {
+// startSession legt nach erfolgreichem Login eine neue Sitzung an. Mit
+// totpPending wartet sie noch auf den zweiten Faktor.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, userID int64, totpPending bool) error {
 	now := time.Now()
 	sess := &store.Session{
 		ID: randomToken(32), UserID: userID, CSRF: randomToken(32),
@@ -212,6 +267,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, userID int
 	}
 	if err := s.Store.CreateSession(r.Context(), sess); err != nil {
 		return err
+	}
+	if totpPending {
+		if err := s.Store.SetSessionTOTP(r.Context(), sess.ID, false); err != nil {
+			return err
+		}
 	}
 	s.setCookie(w, r, sessionCookie, sess.ID, int(sessionMax.Seconds()))
 	s.setCookie(w, r, csrfCookie, sess.CSRF, 0)

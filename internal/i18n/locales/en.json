@@ -96,7 +96,10 @@
     "submit": "Sign in",
     "failed": "Username or password is wrong.",
     "ratelimited": "Too many attempts. Please try again in {seconds} seconds.",
-    "logged_out": "You are signed out."
+    "logged_out": "You are signed out.",
+    "totp_title": "Second factor",
+    "totp_hint": "Enter the code from your authenticator app or a recovery code.",
+    "totp_failed": "The code is wrong or expired."
   },
   "dashboard": {
     "title": "Dashboard",
@@ -144,7 +147,14 @@
     "export": "Export configuration",
     "import": "Import configuration",
     "about": "About",
-    "version": "Version"
+    "version": "Version",
+    "cert_download": "Download certificate",
+    "log_module": "Area",
+    "log_inherit": "same as global",
+    "updates_check": "Check daily for new versions",
+    "updates_hint": "Only fetches a version file from ipv64.net, no data is sent.",
+    "update_available": "New version {version} available.",
+    "update_none": "Latest is version {version}, no update."
   },
   "audit": {
     "title": "Audit log",
@@ -327,7 +337,25 @@
       "title": "Push URL",
       "hint": "Call this URL regularly, e.g. from cron. With ?status=down the service reports an outage itself."
     },
-    "channels_default": "Default channels"
+    "channels_default": "Default channels",
+    "maint": {
+      "title": "Maintenance windows",
+      "hint": "During a maintenance window checks keep running but do not alert. Measurements are marked and do not count against availability.",
+      "list": "Scheduled windows",
+      "empty": "No maintenance window yet.",
+      "new": "New maintenance window",
+      "when": "Period",
+      "start": "Start",
+      "end": "End",
+      "repeat": "Repeat",
+      "until": "until",
+      "repeat_none": "once",
+      "repeat_daily": "daily",
+      "repeat_weekly": "weekly",
+      "repeat_monthly": "monthly",
+      "all_hint": "no selection = all",
+      "deleted": "Maintenance window deleted."
+    }
   },
   "notify": {
     "subject": {
@@ -378,7 +406,9 @@
       "discord": "Discord",
       "ntfy": "ntfy",
       "gotify": "Gotify",
-      "webhook": "Webhook"
+      "webhook": "Webhook",
+      "ipv64_mail": "E-mail via ipv64",
+      "ipv64_sms": "SMS via ipv64"
     },
     "field": {
       "host": "SMTP server",
@@ -427,7 +457,8 @@
     "ok": "sent",
     "failed": "failed",
     "saved": "Channel saved.",
-    "deleted": "Channel deleted."
+    "deleted": "Channel deleted.",
+    "planned": "after linking with ipv64"
   },
   "day": {
     "1": "Mon",
@@ -437,5 +468,57 @@
     "5": "Fri",
     "6": "Sat",
     "7": "Sun"
+  },
+  "twofa": {
+    "title": "Two-factor authentication",
+    "hint": "Protects the login with an additional code from an authenticator app.",
+    "setup": "Set up",
+    "manage": "Manage",
+    "active": "Two-factor authentication is enabled.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "enabled": "Two-factor authentication enabled. Other sessions were signed out.",
+    "disabled": "Two-factor authentication disabled.",
+    "code_wrong": "The code does not match. Check the device clock and try again.",
+    "manual": "Or enter manually:",
+    "step1": "Open your authenticator app (e.g. Aegis, 2FAS, Google Authenticator).",
+    "step2": "Scan the QR code or type in the secret.",
+    "step3": "Enter the code shown below.",
+    "recovery": "Recovery codes",
+    "recovery_hint": "Each code works once if the app is unavailable. Store them safely now, they are not shown again."
+  },
+  "apikey": {
+    "title": "API keys",
+    "hint": "For scripts and automations against the local API. Usage: Authorization: Bearer <key>.",
+    "name": "Name, e.g. backup script",
+    "create": "Create",
+    "created": "API key created.",
+    "deleted": "API key deleted.",
+    "show_once": "The key is shown only now:"
+  },
+  "backup": {
+    "title": "Backup and configuration",
+    "hint": "The backup contains the whole database including measurements. The export contains only the configuration as JSON.",
+    "download": "Download database",
+    "restore": "Restore database",
+    "restore_btn": "Restore",
+    "restore_hint": "The agent restarts afterwards. The previous database is kept under /data/backups.",
+    "restore_confirm": "The current database will be replaced and the agent restarted. Continue?",
+    "restarting": "Database accepted, the agent is restarting now. Sign in again in a few seconds.",
+    "no_file": "No file selected.",
+    "invalid": "This is not an ipv64 Agent database.",
+    "export": "Export configuration",
+    "export_none": "without secrets (tokens, passwords)",
+    "export_password": "secrets encrypted with a password",
+    "password": "Password",
+    "export_btn": "Export",
+    "password_short": "The password needs at least 8 characters.",
+    "import": "Import configuration",
+    "import_btn": "Import",
+    "import_hint": "Checks are matched by token, channels and maintenance windows by name. Nothing is deleted.",
+    "invalid_config": "This is not an ipv64 Agent configuration file.",
+    "password_needed": "The file is encrypted, please enter the password.",
+    "password_wrong": "The password does not match the file.",
+    "imported": "{count} items imported."
   }
 }

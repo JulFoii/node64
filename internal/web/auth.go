@@ -142,3 +142,43 @@ func (l *loginLimiter) cleanup() {
 		}
 	}
 }
+
+// ipLimiter begrenzt Anfragen je IP (Standard 600 pro Minute, Burst 300).
+type ipLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*bucket
+	burst   float64
+	refill  float64 // pro Sekunde
+}
+
+func newIPLimiter(burst, perMinute float64) *ipLimiter {
+	return &ipLimiter{buckets: map[string]*bucket{}, burst: burst, refill: perMinute / 60}
+}
+
+func (l *ipLimiter) allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	b, ok := l.buckets[ip]
+	if !ok {
+		b = &bucket{tokens: l.burst, last: now}
+		l.buckets[ip] = b
+	}
+	b.tokens = min(l.burst, b.tokens+now.Sub(b.last).Seconds()*l.refill)
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+func (l *ipLimiter) cleanup() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, b := range l.buckets {
+		if time.Since(b.last) > 10*time.Minute {
+			delete(l.buckets, k)
+		}
+	}
+}

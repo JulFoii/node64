@@ -4,7 +4,7 @@ Ein leichtgewichtiger Docker-Container für das Heimnetz: Health-Checks (als Upt
 
 Ein einziges Go-Binary, SQLite, eingebettete Weboberfläche, keine externen Abhängigkeiten zur Laufzeit. Läuft auf amd64 und arm64, auch auf einem Raspberry Pi.
 
-**Stand: Phase 4 (Benachrichtigungen).** Fertig sind der Kern (Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log, Logs), alle Check-Typen mit Scheduler, Verdichtung und JSON-API, die Oberfläche für Health-Checks (Liste mit Pillen, Formular, Detailseite mit Chart, Dashboard) und die Benachrichtigungen: E-Mail (SMTP), Telegram, Discord, ntfy, Gotify und Webhook mit verschlüsselten Geheimnissen, Standardkanälen, Kanalwahl je Check, Ruhezeiten, Wiederholung bei anhaltender Störung, Sammelmeldungen, Ratenbegrenzung und Zustellprotokoll. Wartungsfenster-Seite, Backup, Export und 2FA folgen in Phase 5.
+**Stand: Phase 5 (Betrieb).** Der erste Entwurf ist vollständig: Kern mit Setup, Login, Zwei-Faktor-Anmeldung (TOTP mit Wiederherstellungscodes), API-Keys, Modulsystem, Datenbank mit Migrationen, Backup und Wiederherstellung, Export und Import der Konfiguration, Audit-Log, Logs mit Log-Level je Bereich, Versionsprüfung per Opt-in. Health-Checks mit allen Typen, Scheduler, Oberfläche, Wartungsfenstern und JSON-API. Benachrichtigungen über E-Mail, Telegram, Discord, ntfy, Gotify und Webhook. Was ipv64.net für die Verknüpfung bauen muss, steht in [docs/SYNC.md](docs/SYNC.md).
 
 ## Benachrichtigungen
 
@@ -77,6 +77,15 @@ curl "http://localhost:8080/api/push/<token>?status=down&msg=backup+failed"
 Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents`, `GET /api/events`, `GET /api/incidents`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`.
 
 ICMP-Checks brauchen im Container entweder unprivilegiertes Ping (`sysctls: net.ipv4.ping_group_range=0 65535`, siehe compose oben) oder `cap_add: NET_RAW`.
+
+## Betrieb
+
+- **Backup:** Unter *Einstellungen* lässt sich die Datenbank im laufenden Betrieb konsistent herunterladen und aus einer Datei wiederherstellen. Nach der Wiederherstellung startet der Agent neu (Docker startet ihn mit `restart: unless-stopped` automatisch), die alte Datenbank bleibt unter `/data/backups`. Vor jeder Migration entsteht dort ebenfalls ein Backup.
+- **Export und Import:** Die Konfiguration (Checks, Wartungsfenster, Kanäle, Einstellungen) als JSON, wahlweise ohne Geheimnisse oder mit Passwort verschlüsselt. Der Import gleicht Checks über den Token und Kanäle über den Namen ab und löscht nichts.
+- **Zwei-Faktor-Anmeldung:** TOTP mit jeder Authenticator-App, acht Wiederherstellungscodes.
+- **API-Keys:** Für Skripte gegen die lokale API, `Authorization: Bearer ipv64a_...`. Keys werden nur einmal angezeigt und gehasht gespeichert.
+- **Schutz:** Login-Ratelimit, Ratelimit je IP für alle Anfragen, Push-URLs mit Mindestabstand, höchstens 60 Nachrichten je Kanal und Stunde.
+- **Updates:** Optional prüft der Agent täglich eine Versionsdatei bei ipv64.net. Es werden keine Daten gesendet.
 
 ## Umgebungsvariablen
 

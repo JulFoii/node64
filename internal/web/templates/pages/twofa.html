@@ -1,0 +1,54 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="small"><a href="/settings">{{.T "settings.title"}}</a></div>
+<h1 class="h4 mb-3">{{.T "twofa.title"}}</h1>
+{{if $d.Recovery}}
+<div class="card border-warning mb-3">
+	<div class="card-header"><i class="bi bi-life-preserver"></i> {{.T "twofa.recovery"}}</div>
+	<div class="card-body">
+		<p>{{.T "twofa.recovery_hint"}}</p>
+		<pre class="border rounded p-3 font-monospace">{{range $d.Recovery}}{{.}}
+{{end}}</pre>
+		<a class="btn btn-primary" href="/settings">{{.T "common.back"}}</a>
+	</div>
+</div>
+{{else if $d.Enabled}}
+<div class="card mb-3">
+	<div class="card-body">
+		<p><i class="bi bi-shield-check text-success"></i> {{.T "twofa.active"}}</p>
+		<form method="post" action="/settings/2fa/disable" class="row g-2 align-items-end">
+			<input type="hidden" name="_csrf" value="{{.CSRF}}">
+			<div class="col-sm-6"><label class="form-label" for="password">{{.T "settings.password_current"}}</label><input class="form-control" type="password" id="password" name="password" autocomplete="current-password" required></div>
+			<div class="col-sm-6"><button class="btn btn-outline-danger" type="submit" data-confirm="{{.T "common.confirm"}}">{{.T "twofa.disable"}}</button></div>
+		</form>
+	</div>
+</div>
+{{else}}
+<div class="row g-3">
+	<div class="col-md-5">
+		<div class="card h-100"><div class="card-body text-center">
+			{{if $d.QR}}<img src="{{$d.QR}}" alt="QR" class="img-fluid rounded mb-2" width="220" height="220">{{end}}
+			<div class="small text-body-secondary">{{.T "twofa.manual"}}</div>
+			<code class="user-select-all">{{$d.Secret}}</code>
+		</div></div>
+	</div>
+	<div class="col-md-7">
+		<div class="card h-100"><div class="card-body">
+			<ol class="small">
+				<li>{{.T "twofa.step1"}}</li>
+				<li>{{.T "twofa.step2"}}</li>
+				<li>{{.T "twofa.step3"}}</li>
+			</ol>
+			<form method="post" action="/settings/2fa/enable">
+				<input type="hidden" name="_csrf" value="{{.CSRF}}">
+				<label class="form-label" for="code">{{.T "login.totp"}}</label>
+				<input class="form-control form-control-lg text-center font-monospace mb-3" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+				<button class="btn btn-primary" type="submit">{{.T "twofa.enable"}}</button>
+				<a class="btn btn-outline-secondary" href="/settings">{{.T "common.cancel"}}</a>
+			</form>
+		</div></div>
+	</div>
+</div>
+{{end}}
+{{end}}
+{{define "scripts"}}<script src="/static/js/healthchecks.js"></script>{{end}}

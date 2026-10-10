@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1 class="h5 mb-3">{{.T "login.totp_title"}}</h1>
+<p class="small text-body-secondary">{{.T "login.totp_hint"}}</p>
+<form method="post" action="/login/totp">
+	<input type="hidden" name="_csrf" value="{{.CSRF}}">
+	<input type="hidden" name="next" value="{{.Val "next"}}">
+	<div class="mb-3">
+		<label class="form-label" for="code">{{.T "login.totp"}}</label>
+		<input class="form-control form-control-lg text-center font-monospace" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
+	</div>
+	<button class="btn btn-primary w-100" type="submit">{{.T "login.submit"}}</button>
+</form>
+<form method="post" action="/logout" class="mt-3 text-center">
+	<input type="hidden" name="_csrf" value="{{.CSRF}}">
+	<button class="btn btn-link btn-sm" type="submit">{{.T "common.cancel"}}</button>
+</form>
+{{end}}

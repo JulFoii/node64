@@ -6,6 +6,8 @@
 		<button type="button" class="btn btn-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-plus-lg"></i> {{.T "nf.new"}}</button>
 		<ul class="dropdown-menu dropdown-menu-end">
 			{{range $d.Types}}<li><a class="dropdown-item" href="/notifications/new?type={{.}}">{{$.T (print "nf.type." .)}}</a></li>{{end}}
+			<li><hr class="dropdown-divider"></li>
+			{{range $d.Planned}}<li><span class="dropdown-item disabled">{{$.T (print "nf.type." .)}} <span class="badge text-bg-light">{{$.T "nf.planned"}}</span></span></li>{{end}}
 		</ul>
 	</div>
 </div>

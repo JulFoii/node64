@@ -105,22 +105,64 @@
 	</div>
 
 	<div class="col-lg-6">
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-shield-lock"></i> {{.T "twofa.title"}}</div>
+			<div class="card-body">
+				{{if $d.TOTP}}<p class="mb-2"><i class="bi bi-shield-check text-success"></i> {{.T "twofa.active"}}</p>
+				<a class="btn btn-outline-secondary btn-sm" href="/settings/2fa">{{.T "twofa.manage"}}</a>
+				{{else}}<p class="small text-body-secondary">{{.T "twofa.hint"}}</p>
+				<a class="btn btn-primary btn-sm" href="/settings/2fa">{{.T "twofa.setup"}}</a>{{end}}
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-header"><i class="bi bi-key"></i> {{.T "apikey.title"}}</div>
+			<div class="card-body">
+				<p class="small text-body-secondary">{{.T "apikey.hint"}}</p>
+				{{if $d.NewAPIKey}}<div class="alert alert-warning small"><strong>{{.T "apikey.show_once"}}</strong><br><code class="user-select-all">{{$d.NewAPIKey}}</code></div>{{end}}
+				{{if $d.APIKeys}}
+				<ul class="list-group list-group-flush mb-3">
+				{{range $d.APIKeys}}
+					<li class="list-group-item d-flex justify-content-between align-items-center px-0 small">
+						<span><strong>{{.Name}}</strong> <code>{{.Hint}}</code><br><span class="text-body-secondary">{{$.T "nf.last_used"}}: {{$.Ago .LastUsedAt}}</span></span>
+						<form method="post" action="/settings/api-keys/{{.ID}}/delete" class="m-0"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="btn btn-sm btn-outline-danger" type="submit" data-confirm="{{$.T "common.confirm"}}"><i class="bi bi-trash"></i></button></form>
+					</li>
+				{{end}}
+				</ul>
+				{{end}}
+				<form method="post" action="/settings/api-keys" class="d-flex gap-2">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<input class="form-control form-control-sm" name="name" placeholder="{{.T "apikey.name"}}" maxlength="100" required>
+					<button class="btn btn-sm btn-primary text-nowrap" type="submit">{{.T "apikey.create"}}</button>
+				</form>
+			</div>
+		</div>
+	</div>
+
+	<div class="col-lg-6">
 		<div class="card">
 			<div class="card-header"><i class="bi bi-terminal"></i> {{.T "settings.logging"}}</div>
 			<div class="card-body">
 				<form method="post" action="/settings/logging">
 					<input type="hidden" name="_csrf" value="{{.CSRF}}">
 					<div class="row">
-						<div class="col-sm-6 mb-3">
+						<div class="col-sm-4 mb-3">
+							<label class="form-label" for="log_module">{{.T "settings.log_module"}}</label>
+							<select class="form-select" id="log_module" name="module">
+								<option value="global">{{.T "common.all"}}</option>
+								{{range $d.Modules2}}<option value="{{.}}">{{.}}{{with index $d.LogModules .}} ({{.}}){{end}}</option>{{end}}
+							</select>
+						</div>
+						<div class="col-sm-4 mb-3">
 							<label class="form-label" for="level">{{.T "settings.log_level"}}</label>
 							<select class="form-select" id="level" name="level">
+								<option value="inherit">{{.T "settings.log_inherit"}}</option>
 								<option value="debug"{{if eq $d.LogLevel "debug"}} selected{{end}}>debug</option>
 								<option value="info"{{if eq $d.LogLevel "info"}} selected{{end}}>info</option>
 								<option value="warn"{{if eq $d.LogLevel "warn"}} selected{{end}}>warn</option>
 								<option value="error"{{if eq $d.LogLevel "error"}} selected{{end}}>error</option>
 							</select>
 						</div>
-						<div class="col-sm-6 mb-3">
+						<div class="col-sm-4 mb-3">
 							<label class="form-label" for="reset_minutes">{{.T "settings.log_reset_after"}}</label>
 							<select class="form-select" id="reset_minutes" name="reset_minutes">
 								<option value="30">30 {{.T "common.minutes"}}</option>
@@ -140,6 +182,43 @@
 	</div>
 
 	<div class="col-lg-6">
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-database"></i> {{.T "backup.title"}}</div>
+			<div class="card-body">
+				<p class="small text-body-secondary">{{.T "backup.hint"}}</p>
+				<a class="btn btn-outline-primary btn-sm mb-3" href="/settings/backup"><i class="bi bi-download"></i> {{.T "backup.download"}}</a>
+				<form method="post" action="/settings/restore" enctype="multipart/form-data" class="mb-3">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<label class="form-label" for="restore_file">{{.T "backup.restore"}}</label>
+					<div class="input-group input-group-sm">
+						<input class="form-control" type="file" id="restore_file" name="file" accept=".db,.sqlite,.sqlite3" required>
+						<button class="btn btn-outline-danger" type="submit" data-confirm="{{.T "backup.restore_confirm"}}">{{.T "backup.restore_btn"}}</button>
+					</div>
+					<div class="form-text">{{.T "backup.restore_hint"}}</div>
+				</form>
+				<hr>
+				<form method="post" action="/settings/export" class="mb-3">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<label class="form-label">{{.T "backup.export"}}</label>
+					<div class="form-check"><input class="form-check-input" type="radio" name="secrets" value="none" id="exp_none" checked><label class="form-check-label small" for="exp_none">{{.T "backup.export_none"}}</label></div>
+					<div class="form-check mb-2"><input class="form-check-input" type="radio" name="secrets" value="password" id="exp_pw"><label class="form-check-label small" for="exp_pw">{{.T "backup.export_password"}}</label></div>
+					<div class="input-group input-group-sm">
+						<input class="form-control" type="password" name="password" placeholder="{{.T "backup.password"}}" autocomplete="new-password">
+						<button class="btn btn-outline-primary" type="submit"><i class="bi bi-download"></i> {{.T "backup.export_btn"}}</button>
+					</div>
+				</form>
+				<form method="post" action="/settings/import" enctype="multipart/form-data">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<label class="form-label" for="import_file">{{.T "backup.import"}}</label>
+					<div class="input-group input-group-sm mb-1">
+						<input class="form-control" type="file" id="import_file" name="file" accept=".json" required>
+						<input class="form-control" type="password" name="password" placeholder="{{.T "backup.password"}}" autocomplete="off">
+						<button class="btn btn-outline-primary" type="submit">{{.T "backup.import_btn"}}</button>
+					</div>
+					<div class="form-text">{{.T "backup.import_hint"}}</div>
+				</form>
+			</div>
+		</div>
 		<div class="card">
 			<div class="card-header"><i class="bi bi-info-circle"></i> {{.T "settings.about"}}</div>
 			<div class="card-body small">
@@ -147,9 +226,19 @@
 					<dt class="col-4">{{.T "settings.version"}}</dt><dd class="col-8">{{.Version}}</dd>
 					<dt class="col-4">{{.T "dashboard.database"}}</dt><dd class="col-8">{{$d.DBPath}} ({{.Bytes $d.DBSize}})</dd>
 					<dt class="col-4">Backups</dt><dd class="col-8">{{$d.BackupDir}}</dd>
+					{{if $d.HTTPSPort}}<dt class="col-4">HTTPS</dt><dd class="col-8"><a href="/settings/certificate">{{.T "settings.cert_download"}}</a></dd>{{end}}
 				</dl>
+				<hr>
+				<form method="post" action="/settings/updates">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="updates_check" id="updates_check"{{if $d.UpdateOn}} checked{{end}}><label class="form-check-label" for="updates_check">{{.T "settings.updates_check"}}</label></div>
+					<div class="form-text mb-2">{{.T "settings.updates_hint"}}</div>
+					{{if $d.Update}}{{if index $d.Update "newer"}}<div class="alert alert-info py-2">{{.T "settings.update_available" "version" (index $d.Update "version")}}{{with index $d.Update "url"}} <a href="{{.}}" target="_blank" rel="noopener">Release</a>{{end}}</div>{{else}}<div class="text-body-secondary">{{.T "settings.update_none" "version" (index $d.Update "version")}}</div>{{end}}{{end}}
+					<button class="btn btn-outline-primary btn-sm mt-2" type="submit">{{.T "common.save"}}</button>
+				</form>
 			</div>
 		</div>
 	</div>
 </div>
 {{end}}
+{{define "scripts"}}<script src="/static/js/healthchecks.js"></script>{{end}}

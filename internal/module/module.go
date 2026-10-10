@@ -9,6 +9,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -78,6 +79,12 @@ type Guards struct {
 // Templater liefert die Seiten-Templates eines Moduls (pages/*.html).
 type Templater interface {
 	Templates() fs.FS
+}
+
+// Exporter exportiert und importiert die Konfiguration eines Moduls (JSON).
+type Exporter interface {
+	Export(ctx context.Context) (any, error)
+	Import(ctx context.Context, raw json.RawMessage) (int, error)
 }
 
 // DashboardProvider liefert Kacheln fuer das Dashboard des Kerns.

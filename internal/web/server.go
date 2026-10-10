@@ -41,6 +41,9 @@ type Deps struct {
 	Sync       agentsync.Client
 	Version    string
 	StartedAt  time.Time
+	// Restart beendet den Agent kontrolliert (Docker startet ihn neu), z. B.
+	// nach einer Wiederherstellung der Datenbank.
+	Restart func()
 }
 
 type Server struct {
@@ -50,6 +53,7 @@ type Server struct {
 	handler http.Handler
 	pages   map[string]*template.Template
 	limiter *loginLimiter
+	ipLimit *ipLimiter
 
 	mu      sync.Mutex
 	servers []*http.Server
@@ -59,12 +63,12 @@ const maxBody = 1 << 20 // 1 MB fuer Formulare und JSON
 
 // New baut Router und Templates.
 func New(d Deps) (*Server, error) {
-	s := &Server{Deps: d, log: d.Log.Slog().With("module", "web"), mux: http.NewServeMux(), limiter: newLoginLimiter()}
+	s := &Server{Deps: d, log: d.Log.Slog().With("module", "web"), mux: http.NewServeMux(), limiter: newLoginLimiter(), ipLimit: newIPLimiter(300, 600)}
 	if err := s.parseTemplates(); err != nil {
 		return nil, err
 	}
 	s.routes()
-	s.handler = s.recoverer(s.securityHeaders(s.bodyLimit(s.session(s.mux))))
+	s.handler = s.recoverer(s.securityHeaders(s.rateLimit(s.bodyLimit(s.session(s.mux)))))
 	return s, nil
 }
 
@@ -137,6 +141,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.loginForm)
 	s.mux.HandleFunc("POST /login", s.loginSubmit)
 	s.mux.HandleFunc("POST /logout", s.logout)
+	s.authRoutes()
+	s.backupRoutes()
 
 	s.mux.Handle("GET /{$}", s.auth(s.dashboard))
 	s.mux.Handle("GET /settings", s.auth(s.settings))
@@ -145,6 +151,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /settings/password", s.auth(s.settingsPassword))
 	s.mux.Handle("POST /settings/modules", s.auth(s.settingsModules))
 	s.mux.Handle("POST /settings/logging", s.auth(s.settingsLogging))
+	s.mux.Handle("POST /settings/updates", s.auth(s.settingsUpdates))
 	if s.Notify != nil {
 		s.notifyRoutes()
 	}
@@ -260,6 +267,10 @@ func (s *Server) housekeeping(ctx context.Context) {
 				s.log.Debug("expired sessions removed", "count", n)
 			}
 			s.limiter.cleanup()
+			s.ipLimit.cleanup()
+			if s.Notify != nil {
+				_ = s.Notify.PruneDeliveries(ctx, 90*24*time.Hour)
+			}
 		}
 	}
 }

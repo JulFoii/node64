@@ -10,11 +10,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 	_ "time/tzdata" // Zeitzonen im Binary, das Laufzeit-Image hat keine
@@ -28,6 +30,7 @@ import (
 	"github.com/ipv64net/agent/internal/secrets"
 	"github.com/ipv64net/agent/internal/store"
 	agentsync "github.com/ipv64net/agent/internal/sync"
+	"github.com/ipv64net/agent/internal/update"
 	"github.com/ipv64net/agent/internal/web"
 )
 
@@ -72,6 +75,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := applyRestore(cfg, log); err != nil {
+		return err
+	}
+
 	st, err := store.Open(ctx, cfg.DBPath(), cfg.BackupDir(), logger.Slog())
 	if err != nil {
 		return err
@@ -111,10 +118,11 @@ func run() error {
 	registerModules(modules)
 	modules.StartEnabled(ctx)
 	defer modules.StopAll()
+	go updateLoop(ctx, st, log)
 
 	srv, err := web.New(web.Deps{
 		Cfg: cfg, Store: st, Log: logger, I18n: bundle, Modules: modules, Notify: nfStore, Dispatcher: dispatcher,
-		Sync: agentsync.NoOp{}, Version: Version, StartedAt: time.Now(),
+		Sync: agentsync.NoOp{}, Version: Version, StartedAt: time.Now(), Restart: stop,
 	})
 	if err != nil {
 		return err
@@ -129,6 +137,69 @@ func registerModules(r *module.Registry) {
 	r.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Path: "/dyndns", Order: 20}})
 	r.Register(module.Placeholder{I: module.Info{Name: "proxy", TitleKey: "nav.proxy", Icon: "bi-diagram-3", Path: "/proxy", Order: 30}})
 	r.Register(module.Placeholder{I: module.Info{Name: "link", TitleKey: "nav.link", Icon: "bi-cloud", Path: "/link", Order: 90}})
+}
+
+// updateLoop prueft taeglich auf neue Versionen, aber nur wenn der Nutzer es
+// in den Einstellungen eingeschaltet hat.
+func updateLoop(ctx context.Context, st *store.Store, log *slog.Logger) {
+	check := func() {
+		if st.SettingOr(ctx, "updates.check", "0") != "1" {
+			return
+		}
+		info, err := update.New(Version).Check(ctx)
+		if err != nil {
+			log.Debug("update check failed", "err", err)
+			return
+		}
+		b, _ := json.Marshal(info)
+		_ = st.SetSetting(ctx, "updates.latest", string(b))
+		if info.Newer {
+			log.Info("new agent version available", "version", info.Version, "url", info.URL)
+		}
+	}
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(2 * time.Minute):
+		check()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			check()
+		}
+	}
+}
+
+// applyRestore setzt eine hochgeladene Datenbank (agent.db.restore) ein und
+// sichert die bisherige vorher unter backups/.
+func applyRestore(cfg *config.Config, log *slog.Logger) error {
+	restore := filepath.Join(cfg.DataDir, web.RestoreFileName)
+	if _, err := os.Stat(restore); err != nil {
+		return nil
+	}
+	if err := os.MkdirAll(cfg.BackupDir(), 0o750); err != nil {
+		return err
+	}
+	if _, err := os.Stat(cfg.DBPath()); err == nil {
+		dest := filepath.Join(cfg.BackupDir(), "agent-"+time.Now().UTC().Format("20060102-150405")+"-pre-restore.db")
+		if err := os.Rename(cfg.DBPath(), dest); err != nil {
+			return fmt.Errorf("move old database: %w", err)
+		}
+		log.Info("old database kept", "file", dest)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Remove(cfg.DBPath() + suffix)
+	}
+	if err := os.Rename(restore, cfg.DBPath()); err != nil {
+		return fmt.Errorf("apply restore: %w", err)
+	}
+	log.Warn("database restored from upload")
+	return nil
 }
 
 // firstAdminFromEnv legt den Administrator aus AGENT_ADMIN_USER/PASSWORD an,

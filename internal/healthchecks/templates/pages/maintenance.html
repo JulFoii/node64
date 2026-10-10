@@ -1,0 +1,66 @@
+{{define "content"}}
+{{$d := .Data}}
+{{$f := $d.Form}}
+<div class="small"><a href="/healthchecks">{{.T "nav.healthchecks"}}</a></div>
+<h1 class="h4 mb-3">{{.T "hc.maint.title"}}</h1>
+<p class="text-body-secondary small">{{.T "hc.maint.hint"}}</p>
+<div class="row g-3">
+	<div class="col-lg-7">
+		<div class="card">
+			<div class="card-header"><i class="bi bi-wrench"></i> {{.T "hc.maint.list"}}</div>
+			{{if not $d.Windows}}<div class="card-body small text-body-secondary">{{.T "hc.maint.empty"}}</div>
+			{{else}}
+			<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0 table-cards">
+				<thead><tr><th>{{.T "common.name"}}</th><th>{{.T "hc.maint.when"}}</th><th>{{.T "hc.maint.repeat"}}</th><th>{{.T "nav.healthchecks"}}</th><th class="text-end">{{.T "common.actions"}}</th></tr></thead>
+				<tbody>
+				{{range $d.Windows}}
+				<tr{{if not .Active}} class="text-body-tertiary"{{end}}>
+					<td data-label="{{$.T "common.name"}}"><a href="/healthchecks/maintenance/{{.ID}}/edit">{{.Name}}</a>{{if not .Active}} <span class="badge text-bg-secondary">{{$.T "common.disabled"}}</span>{{end}}</td>
+					<td data-label="{{$.T "hc.maint.when"}}" class="small text-nowrap">{{$.Time .StartAt}}<br>{{$.Time .EndAt}}</td>
+					<td data-label="{{$.T "hc.maint.repeat"}}" class="small">{{$.T (print "hc.maint.repeat_" .Repeat)}}{{if not .RepeatUntil.IsZero}}<br>{{$.T "hc.maint.until"}} {{$.Date .RepeatUntil}}{{end}}</td>
+					<td data-label="{{$.T "nav.healthchecks"}}" class="small">{{if .Tokens}}{{range .Tokens}}{{index $d.Names .}}<br>{{end}}{{else}}{{$.T "common.all"}}{{end}}</td>
+					<td data-label="{{$.T "common.actions"}}" class="text-end text-nowrap">
+						<a class="btn btn-sm btn-outline-secondary" href="/healthchecks/maintenance/{{.ID}}/edit"><i class="bi bi-pencil"></i></a>
+						<form method="post" action="/healthchecks/maintenance/{{.ID}}/delete" class="d-inline m-0"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="btn btn-sm btn-outline-danger" type="submit" data-confirm="{{$.T "common.confirm"}}"><i class="bi bi-trash"></i></button></form>
+					</td>
+				</tr>
+				{{end}}
+				</tbody>
+			</table></div>
+			{{end}}
+		</div>
+	</div>
+	<div class="col-lg-5">
+		<div class="card">
+			<div class="card-header">{{if $d.Edit}}{{.T "hc.edit"}}: {{$d.Edit.Name}}{{else}}{{.T "hc.maint.new"}}{{end}}</div>
+			<div class="card-body">
+				{{if $d.Error}}<div class="alert alert-danger small">{{$d.Error}}</div>{{end}}
+				<form method="post" action="{{if $d.Edit}}/healthchecks/maintenance/{{$d.Edit.ID}}/edit{{else}}/healthchecks/maintenance{{end}}">
+					<input type="hidden" name="_csrf" value="{{.CSRF}}">
+					<div class="mb-2"><label class="form-label" for="name">{{.T "common.name"}}</label><input class="form-control" id="name" name="name" value="{{index $f "name"}}" maxlength="200" required></div>
+					<div class="row g-2 mb-2">
+						<div class="col-6"><label class="form-label" for="start_at">{{.T "hc.maint.start"}}</label><input class="form-control" type="datetime-local" id="start_at" name="start_at" value="{{index $f "start_at"}}" required></div>
+						<div class="col-6"><label class="form-label" for="end_at">{{.T "hc.maint.end"}}</label><input class="form-control" type="datetime-local" id="end_at" name="end_at" value="{{index $f "end_at"}}" required></div>
+					</div>
+					<div class="row g-2 mb-2">
+						<div class="col-6"><label class="form-label" for="repeat">{{.T "hc.maint.repeat"}}</label>
+							<select class="form-select" id="repeat" name="repeat">{{range $d.Repeats}}<option value="{{.}}"{{if eq . (index $f "repeat")}} selected{{end}}>{{$.T (print "hc.maint.repeat_" .)}}</option>{{end}}</select></div>
+						<div class="col-6"><label class="form-label" for="repeat_until">{{.T "hc.maint.until"}}</label><input class="form-control" type="datetime-local" id="repeat_until" name="repeat_until" value="{{index $f "repeat_until"}}"></div>
+					</div>
+					<label class="form-label">{{.T "nav.healthchecks"}} <span class="text-body-secondary">({{.T "hc.maint.all_hint"}})</span></label>
+					<div class="border rounded p-2 mb-2" style="max-height:220px;overflow:auto">
+						{{$sel := index $f "tokens"}}
+						{{range $d.Checks}}
+						<div class="form-check"><input class="form-check-input" type="checkbox" name="tokens" value="{{.Token}}" id="mt{{.Token}}"{{if contains (print "," $sel ",") (print "," .Token ",")}} checked{{end}}><label class="form-check-label small" for="mt{{.Token}}">{{.Name}}</label></div>
+						{{end}}
+					</div>
+					<div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="active" id="active"{{if index $f "active"}} checked{{end}}><label class="form-check-label" for="active">{{.T "common.enabled"}}</label></div>
+					<button class="btn btn-primary" type="submit">{{.T "common.save"}}</button>
+					{{if $d.Edit}}<a class="btn btn-outline-secondary" href="/healthchecks/maintenance">{{.T "common.cancel"}}</a>{{end}}
+				</form>
+			</div>
+		</div>
+	</div>
+</div>
+{{end}}
+{{define "scripts"}}<script src="/static/js/healthchecks.js"></script>{{end}}

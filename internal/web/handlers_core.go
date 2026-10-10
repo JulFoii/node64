@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -106,7 +107,7 @@ func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.Audit(ctx, store.AuditEntry{Actor: u.Username, Action: "setup", Details: "initial setup completed", IP: s.clientIP(r)})
 	s.setCookie(w, r, langCookie, v.Lang, 365*24*3600)
-	if err := s.startSession(w, r, u.ID); err != nil {
+	if err := s.startSession(w, r, u.ID, false); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -175,14 +176,19 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, http.StatusUnauthorized, "login", v)
 		return
 	}
-	if err := s.startSession(w, r, u.ID); err != nil {
+	pending := u.TOTPSecret != ""
+	if err := s.startSession(w, r, u.ID, pending); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	_ = s.Store.TouchUserLogin(ctx, u.ID)
 	if s.I18n.Has(u.Lang) {
 		s.setCookie(w, r, langCookie, u.Lang, 365*24*3600)
 	}
+	if pending {
+		http.Redirect(w, r, "/login/totp?next="+url.QueryEscape(v.Form["next"]), http.StatusSeeOther)
+		return
+	}
+	_ = s.Store.TouchUserLogin(ctx, u.ID)
 	_ = s.Store.Audit(ctx, store.AuditEntry{Actor: u.Username, Action: "login", IP: ip})
 	s.log.Info("login", "user", u.Username, "ip", ip)
 	http.Redirect(w, r, v.Form["next"], http.StatusSeeOther)
@@ -192,6 +198,8 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if sess := currentSession(r); sess != nil {
 		_ = s.Store.DeleteSession(r.Context(), sess.ID)
 		s.audit(r, "logout", "", "")
+	} else if sess := pendingSession(r); sess != nil {
+		_ = s.Store.DeleteSession(r.Context(), sess.ID)
 	}
 	s.clearCookie(w, r, sessionCookie)
 	s.clearCookie(w, r, csrfCookie)
@@ -262,6 +270,14 @@ type settingsData struct {
 	DBSize     int64
 	BackupDir  string
 	GoVersion  string
+	TOTP       bool
+	UpdateOn   bool
+	Update     map[string]any
+	LogModules map[string]string
+	Modules2   []string
+	APIKeys    []store.APIKey
+	NewAPIKey  string
+	HTTPSPort  int
 }
 
 func (s *Server) settingsView(r *http.Request) *View {
@@ -277,7 +293,19 @@ func (s *Server) settingsView(r *http.Request) *View {
 		DBPath:     s.Store.Path(),
 		DBSize:     s.Store.Size(),
 		BackupDir:  s.Cfg.BackupDir(),
+		TOTP:       v.User.TOTPSecret != "",
+		HTTPSPort:  s.Cfg.HTTPSPort,
 	}
+	d.APIKeys, _ = s.Store.APIKeys(ctx, v.User.ID)
+	d.UpdateOn = s.Store.SettingOr(ctx, "updates.check", "0") == "1"
+	if raw := s.Store.SettingOr(ctx, "updates.latest", ""); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &d.Update)
+	}
+	d.LogModules = map[string]string{}
+	for k, l := range s.Log.ModuleLevels() {
+		d.LogModules[k] = logging.LevelName(l)
+	}
+	d.Modules2 = []string{"core", "web", "store", "scheduler", "notify", "healthchecks"}
 	v.Data = d
 	v.Form = map[string]string{"agent_name": d.AgentName, "location": d.Location, "lang": v.User.Lang, "timezone": v.User.Timezone, "level": d.LogLevel}
 	return v
@@ -285,6 +313,18 @@ func (s *Server) settingsView(r *http.Request) *View {
 
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "settings", s.settingsView(r))
+}
+
+func (s *Server) settingsUpdates(w http.ResponseWriter, r *http.Request) {
+	on := r.PostFormValue("updates_check") == "on"
+	_ = s.Store.SetSetting(r.Context(), "updates.check", map[bool]string{true: "1", false: "0"}[on])
+	if !on {
+		_ = s.Store.SetSetting(r.Context(), "updates.latest", "")
+	}
+	s.audit(r, "settings.updates", "", fmt.Sprintf("check=%v", on))
+	v := s.view(r, "settings.title")
+	s.flash(w, r, "success", v.T("common.saved"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 func (s *Server) settingsAgent(w http.ResponseWriter, r *http.Request) {
@@ -389,13 +429,25 @@ func (s *Server) settingsModules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsLogging(w http.ResponseWriter, r *http.Request) {
-	f := s.formValues(r, "level", "reset_minutes")
+	f := s.formValues(r, "level", "reset_minutes", "module")
 	v := s.settingsView(r)
-	lvl := logging.ParseLevel(f["level"])
 	mins, _ := strconv.Atoi(f["reset_minutes"])
 	if mins < 0 || mins > 1440 {
 		mins = 0
 	}
+	if mod := f["module"]; mod != "" && mod != "global" {
+		if f["level"] == "inherit" {
+			s.Log.SetModuleLevel(mod, nil)
+		} else {
+			lvl := logging.ParseLevel(f["level"])
+			s.Log.SetModuleLevel(mod, &lvl)
+		}
+		s.audit(r, "logging.module", mod, f["level"])
+		s.flash(w, r, "success", v.T("settings.log_changed"))
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
+	lvl := logging.ParseLevel(f["level"])
 	var reset time.Duration
 	if lvl == slog.LevelDebug && mins > 0 {
 		reset = time.Duration(mins) * time.Minute
