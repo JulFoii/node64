@@ -11,11 +11,12 @@ Ergänzt das Konzept („ipv64 Agent – Konzept & Funktionsumfang“) und erset
 | Nr. | Entscheidung | Begründung |
 | --- | --- | --- |
 | L1 | **Ein Check-Bot in Go** für Agent und Server (`internal/checks`, `internal/scheduler`, `internal/notify` aus dem Agent-Repo). Die PHP-Bots `healthcheck_*_live.php`, `healthcheck_alarm.php` werden abgelöst. | Gleiche Logik, gleiche Fehlergründe, gleiche Zustandsmaschine überall. |
-| L2 | **Neuer Dienst `ipv64-checkd`** auf den ipv64-Servern neben dem Altsystem (Strangler-Fig). Neue Tabellen mit Präfix `hc2_`. Freischaltung je Account per Flag. | Kein Big Bang, Rollback per Flag. |
+| L2 | **Neuer Dienst `ipv64-hub`** (Rolle `checker` ersetzt die PHP-Bots) auf den ipv64-Servern neben dem Altsystem (Strangler-Fig). Neue Tabellen mit Präfix `hc2_`. Freischaltung je Account per Flag. | Kein Big Bang, Rollback per Flag. |
 | L3 | **Server ist führend** für Konfiguration (Checks, Kanäle, Wartungsfenster), sobald ein Agent verknüpft ist. **Agent ist führend** für seine Messergebnisse (append-only). | Konzept, Abschnitt Synchronisation. |
-| L4 | **Alle Agent-Aufrufe über die API v2** (`api_v2.php`), authentifiziert mit einem Agent-Token. Die Dauerverbindung ist ein Long-Poll-Endpunkt der API v2 (`/agents/me/pull`), kein WebSocket. | PHP kann keine WebSockets halten; Long-Poll erfüllt „ausgehende Dauerverbindung, keine offenen Ports“ und ist in 100 Zeilen fertig. Ein WebSocket-Stream über `checkd` kann später als Option dazu. |
+| L4 | **Eigener Go-Dienst `ipv64-hub` bei ipv64 für die gesamte Agent-Kommunikation** (Host `agents.ipv64.net`): eine WebSocket-Dauerverbindung je Agent plus HTTPS-Endpunkte für große Abgleiche. `api_v2.php` bleibt für Nutzer, Portal und Fremdsoftware; Agents reden nicht mit PHP. | Entscheidung Dennis 2026-10-10: von Anfang an für viele tausend Agents und mehrere Server-Instanzen auslegen. PHP kann weder Dauerverbindungen halten noch so skalieren; Long-Poll würde je Agent einen PHP-Prozess belegen. |
+| L9 | **Skalierung von Anfang an**: `ipv64-hub` läuft als mehrere gleichwertige Instanzen (Rollen `gateway` und `checker` in einem Binary), Agents erreichen über einen Load Balancer eine beliebige Instanz, Zustand zwischen den Instanzen nur über MySQL und Redis. Keine Instanz ist „die eine“; fällt eine aus, verbinden sich ihre Agents binnen Sekunden mit der anderen. | Entscheidung Dennis 2026-10-10: „lieber größer denken als klein“. |
 | L5 | **Rohe Messpunkte der Online-Checks nur 7 Tage in MySQL** (partitioniert), Stunden- und Tageswerte in MySQL. Influx wird nicht mehr für Healthchecks gebraucht. | Ein Datenmodell für Agent und Server, gleiche Charts. Influx bleibt für CDN/Statistiken. |
-| L6 | **Integrationen werden zu Kanälen** (`hc2_channels`), gleiche Typen wie im Agent plus `ipv64_mail`, `ipv64_sms`, `pushover`, `app`. Alte `integrations` werden einmalig migriert, die Verifizierung per Mail/SMS bleibt. | Gleicher Versandcode (Go) auf Server und Agent; die bekannten Lücken im alten PHP (activate_integration ohne Login) verschwinden. |
+| L6 | **Integrationen werden zu Kanälen** (`hc2_channels`), gleiche Typen wie im Agent (`smtp`, `telegram`, `discord`, `ntfy`, `gotify`, `webhook`, `pushover`) plus serverseitig `app`, `ipv64_mail`, `ipv64_sms`. Pushover auch im Agent, weil der Container ohne ipv64-Account vollwertig bleiben soll; `ipv64_mail`/`ipv64_sms` kann ein verknüpfter Agent über den hub nutzen. Alte `integrations` werden einmalig migriert, die Verifizierung per Mail/SMS bleibt. | Gleicher Versandcode (Go) auf Server und Agent; die bekannten Lücken im alten PHP (activate_integration ohne Login) verschwinden. |
 | L7 | **Push-URLs bleiben stabil**: `https://ipv64.net/health.php?token=...` und der neue Pfad `/api/v2/push/{token}` funktionieren beide, auch nach der Migration. | Tausende Geräte rufen die alte URL. |
 | L8 | Lokale Checks im Container haben **kein Limit**. Gezählt werden nur Checks, die online bei ipv64 laufen (`execution online` oder `both`), und zwar wie bisher gegen das Limit aus der User-Class des Accounts. Kein Limit für die Anzahl Agents je Account. | Entscheidung Dennis, 2026-10-10. |
 
@@ -24,27 +25,39 @@ Ergänzt das Konzept („ipv64 Agent – Konzept & Funktionsumfang“) und erset
 ## 1. Zielarchitektur
 
 ```
-Browser ──► Portal (PHP, neue Seiten /healthchecks2 ...) ──► MySQL hc2_*  ◄── ipv64-checkd (Go)
-                                                                   ▲              │  führt Online-Checks aus,
-Agent ──► api_v2.php /agents/* (REST + Long-Poll) ─────────────────┘              │  Zustandsmaschine, Versand
-                                                                                  ▼
-Geräte ──► health.php?token= / api_v2.php /push/{token} ──► hc2_measurements + Redis "hc2:push"
+Browser ──► Portal (PHP, /healthchecks2 ...) ──► MySQL hc2_*  +  Redis (Signale) ◄──┐
+                                                        ▲                             │
+Agent ══WSS══► agents.ipv64.net ──► ipv64-hub Instanz A ────────────────────────────┤  Rollen gateway + checker
+Agent ══WSS══► (nginx/LB)      ──► ipv64-hub Instanz B ────────────────────────────┘
+Geräte ──► health.php?token= (PHP)  oder  agents.ipv64.net/v1/push/{token} (hub) ──► hc2_measurements + Redis "hc2:push"
 ```
 
-**ipv64-checkd** (Go, aus dem Agent-Repo gebaut, `cmd/checkd`):
-- lädt alle `hc2_checks` mit `execution IN ('online','both')` und `paused = 0`, plant sie wie der Agent (Worker-Pool, Jitter, Retry, Stabilisierung, Flattern, Abhängigkeiten, Wartungsfenster),
-- schreibt Messpunkte, Zustände, Ereignisse, Störungen in `hc2_*`,
-- bewertet Push-Checks per Watchdog (Push-Eingang kommt aus PHP, Signal über Redis),
-- verschickt Benachrichtigungen (Server-Kanäle und `ipv64_mail`/`ipv64_sms`), erzeugt Sendeaufträge für Agent-Kanäle,
-- verdichtet (stündlich) und räumt auf,
-- erkennt Agent-Ausfälle (Heartbeat) und meldet sie,
-- bekommt Konfigurationsänderungen vom Portal über `hc2_config_log` (Polling alle 2 s) oder Redis-Pub/Sub `hc2:config`.
+**ipv64-hub** (Go, aus dem Agent-Repo gebaut, `cmd/hub`; nutzt `internal/checks`, `internal/scheduler`, `internal/notify`): ein Binary, zwei Rollen, standardmäßig beide auf jeder Instanz aktiv, einzeln per Flag abschaltbar.
 
-Zwei Instanzen auf zwei Servern mit Lease-Tabelle (`hc2_leases`: `name, owner, until`): die aktive Instanz prüft, die zweite übernimmt nach 30 s ohne Lease-Verlängerung. Standorte (Falkenstein/Nürnberg) für „von außen“-Messungen kommen später als `location`-Spalte und zweiter Scheduler.
+Rolle **gateway** (Agent-Kommunikation):
+- nimmt WebSocket-Verbindungen der Agents an (`/v1/ws`), prüft den Agent-Token, hält je Verbindung zwei Goroutines (ca. 20–50 KB Speicher; 10.000 Verbindungen je Instanz sind unkritisch, Limit per Flag),
+- schreibt Messpunkte und Ereignisse **gebündelt** nach MySQL (Sammler je Instanz, Batch-Insert alle 500 ms oder 500 Zeilen) und bestätigt dem Agent per `ack`,
+- verteilt Konfigurationsänderungen: Portal und API schreiben `hc2_config_log` und publizieren `hc2:cfg:<userid>` in Redis; jede Instanz hat `PSUBSCRIBE hc2:cfg:*` und reicht nur an die eigenen verbundenen Agents dieses Accounts weiter (Filter im Speicher, ein Lookup `userid → Verbindungen`),
+- Sendeaufträge und Kommandos an einen bestimmten Agent gehen über Redis `hc2:agent:<agent_id>`; ist der Agent nirgends verbunden, bleibt der Auftrag in `hc2_send_orders` und wird beim nächsten Verbinden zugestellt,
+- pflegt den Online-Status: Redis `SET hc2:online:<agent_id> <instanz> EX 90` bei jedem Ping; `hc2_agents.last_seen/online` gebündelt alle 60 s,
+- HTTPS-Endpunkte für große Abgleiche (`/v1/agents/me/bootstrap`, `/config`, `/results`), Device-Code, Push-Eingang.
 
-**Portal (PHP)**: neue Seiten lesen und schreiben `hc2_*` direkt über PDO (wie der Rest des Portals), jede Änderung erhöht `revision` und schreibt eine Zeile in `hc2_config_log`. Charts holen Aggregate über die API v2.
+Rolle **checker** (Online-Checks, ersetzt `healthcheck_*_live.php`, `healthcheck_alarm.php`):
+- Verteilung über **Slots**: `hc2_checks.slot = crc32(token) % 1024`. Instanzen registrieren sich in `hc2_nodes` (Heartbeat alle 10 s). Jede Instanz berechnet aus der sortierten Liste lebender Nodes (Heartbeat < 30 s) deterministisch dieselbe Zuteilung (Node i bekommt Slots mit `slot % n == i`), nimmt je Slot zusätzlich eine `hc2_slot_leases`-Lease (60 s) als Sicherung gegen Doppelausführung bei Netzpartition. Node fällt aus → nach 30 s übernehmen die anderen seine Slots,
+- lädt die Checks seiner Slots mit `execution IN ('online','both')`, `paused = 0`, plant sie wie der Agent (Worker-Pool, Jitter, Retry, Stabilisierung, Flattern, Abhängigkeiten, Wartungsfenster), schreibt Messpunkte, Zustände, Ereignisse, Störungen in `hc2_*`,
+- bewertet Push-Checks seiner Slots per Watchdog; Push-Eingang kommt aus `health.php` (Redis `hc2:push`) oder aus dem hub selbst,
+- verschickt Benachrichtigungen (Server-Kanäle, `ipv64_mail`, `ipv64_sms`, `app`) und erzeugt Sendeaufträge für Agent-Kanäle,
+- Agent-Ausfallerkennung: die Instanz, die Slot 0 hält, prüft alle 30 s `hc2_agents.online = 1` gegen die Redis-Keys,
+- verdichtet stündlich/täglich (`hc2_dirty_hours`), räumt Partitionen, Log und Tombstones auf,
+- bekommt Konfigurationsänderungen über dieselbe Redis-Subscription wie das gateway (nur eigene Slots).
 
-**API v2 (PHP)**: Endpunkte für Portal-JS, Fremdsoftware und Agents. Agent-Endpunkte unter `/api/v2/agents/...`.
+**Kapazität (Planungsgröße)**: 10.000 Agents × 20 Checks à 60 s ≈ 3.300 Messpunkte/s → Batch-Inserts, tagesweise Partitionen, ca. 300 MB/Tag roh (7 Tage ≈ 2 GB). WebSocket-Verkehr je Agent ≈ 1 KB/30 s. Redis trägt nur Signale, keine Daten. 100.000 Agents = zehn Instanzen gleicher Bauart, nichts umbauen.
+
+**Deployment**: zwei Server, auf jedem eine Instanz als systemd-Dienst (`ipv64-hub.service`, Port 9000 intern). Davor nginx als TLS-Terminierung und WebSocket-Proxy (`upstream hub { server A:9000; server B:9000; }`, `proxy_http_version 1.1`, `Upgrade`-Header durchreichen, `proxy_read_timeout 120s`). Alternativ DNS-Round-Robin `agents.ipv64.net` mit zwei A/AAAA-Records; der Agent nimmt bei Fehlschlag den nächsten. Beide Instanzen sprechen dieselbe MySQL und denselben Redis; Schlüsseldatei für Kanal-Geheimnisse außerhalb des Webroots, auf beiden Servern gleich.
+
+**Portal (PHP)**: neue Seiten lesen und schreiben `hc2_*` direkt über PDO (wie der Rest des Portals), jede Änderung erhöht `revision`, schreibt eine Zeile in `hc2_config_log` und publiziert `hc2:cfg:<userid>` (Redis ist im Portal schon vorhanden). Charts holen Aggregate über die API v2.
+
+**API v2 (PHP)**: nur noch Nutzer, Portal-JS, Fremdsoftware. Keine Agent-Endpunkte; die liegen im hub.
 
 ---
 
@@ -69,7 +82,7 @@ CREATE TABLE hc2_agents (
   last_seen DATETIME(3) NULL, last_sync DATETIME(3) NULL,
   last_ack_seq BIGINT NOT NULL DEFAULT 0,    -- hoechste bestaetigte Messpunkt-Nummer
   outbox_size INT NOT NULL DEFAULT 0,        -- vom Agent gemeldet
-  online TINYINT NOT NULL DEFAULT 0,         -- von checkd gepflegt (Heartbeat)
+  online TINYINT NOT NULL DEFAULT 0,         -- von hub gepflegt (Heartbeat)
   created_at DATETIME(3) NOT NULL, revoked_at DATETIME(3) NULL,
   INDEX (userid)
 );
@@ -103,14 +116,15 @@ CREATE TABLE hc2_checks (
   notify_down TINYINT NOT NULL DEFAULT 1, notify_up TINYINT NOT NULL DEFAULT 1, channels VARCHAR(255) NOT NULL DEFAULT '', repeat_minutes INT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL, updated_by VARCHAR(100) NOT NULL DEFAULT '',
   deleted_at DATETIME(3) NULL,               -- Tombstone: bleibt 90 Tage, damit Agents das Loeschen sehen
-  -- Laufzeitzustand je Ausfuehrungsort (local = vom Agent gemeldet, online = checkd)
+  -- Laufzeitzustand je Ausfuehrungsort (local = vom Agent gemeldet, online = hub)
   state_local ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
   state_online ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending',
   state ENUM('pending','up','down','stabilizing','flapping','dependent','paused') NOT NULL DEFAULT 'pending', -- Gesamt (siehe 3.5)
   state_since DATETIME(3) NULL, last_check_at DATETIME(3) NULL, next_check_at DATETIME(3) NULL,
   last_status ENUM('up','down') NULL, last_latency_ms FLOAT NULL, last_reason VARCHAR(64) NULL, last_message VARCHAR(500) NULL,
   last_push_at DATETIME(3) NULL, down_since DATETIME(3) NULL, incident_id BIGINT NULL,
-  INDEX (userid, deleted_at), INDEX (agent_id), INDEX idx_due (execution, paused, next_check_at), INDEX (parent_token)
+  slot SMALLINT NOT NULL DEFAULT 0,            -- crc32(token) % 1024, Verteilung auf hub-Instanzen (Rolle checker)
+  INDEX (userid, deleted_at), INDEX (agent_id), INDEX idx_due (slot, execution, paused, next_check_at), INDEX (parent_token)
 );
 
 -- Messpunkte: Online (agent_id = '') und Agent (agent_id gesetzt), 7 Tage roh
@@ -141,7 +155,7 @@ CREATE TABLE hc2_incidents (id BIGINT AUTO_INCREMENT PRIMARY KEY, token CHAR(32)
 
 CREATE TABLE hc2_channels (
   id INT AUTO_INCREMENT PRIMARY KEY, userid INT NOT NULL,
-  agent_id VARCHAR(32) NULL,                 -- NULL = Server-Kanal (gesendet von checkd), sonst Agent-Kanal (gesendet vom Agent)
+  agent_id VARCHAR(32) NULL,                 -- NULL = Server-Kanal (gesendet von hub), sonst Agent-Kanal (gesendet vom Agent)
   type VARCHAR(20) NOT NULL,                 -- smtp, telegram, discord, ntfy, gotify, webhook, pushover, app, ipv64_mail, ipv64_sms
   name VARCHAR(100) NOT NULL, config_enc TEXT NOT NULL,   -- JSON, Geheimnisse mit Server-Schluessel (AES-GCM) verschluesselt
   secret_only_local TINYINT NOT NULL DEFAULT 0,          -- Agent-Kanal: Server kennt nur Typ und Name
@@ -154,7 +168,7 @@ CREATE TABLE hc2_channels (
 );
 CREATE TABLE hc2_deliveries (id BIGINT AUTO_INCREMENT PRIMARY KEY, event_id CHAR(32), channel_id INT, userid INT, agent_id VARCHAR(32) NOT NULL DEFAULT '',
   time DATETIME(3), kind VARCHAR(20), ok TINYINT, error VARCHAR(500), UNIQUE (event_id, channel_id), INDEX (userid, time));
-CREATE TABLE hc2_send_orders (                -- Sendeauftraege fuer Agent-Kanaele, holt der Agent per Pull
+CREATE TABLE hc2_send_orders (                -- Sendeauftraege fuer Agent-Kanaele, Zustellung ueber den Socket
   id BIGINT AUTO_INCREMENT PRIMARY KEY, agent_id VARCHAR(32), channel_id INT, event_id CHAR(32), payload JSON,
   created_at DATETIME(3), fetched_at DATETIME(3) NULL, done_at DATETIME(3) NULL, INDEX (agent_id, done_at));
 
@@ -162,14 +176,17 @@ CREATE TABLE hc2_maintenance (id INT AUTO_INCREMENT PRIMARY KEY, userid INT, age
   start_at DATETIME(3), end_at DATETIME(3), `repeat` ENUM('none','daily','weekly','monthly') DEFAULT 'none', repeat_until DATETIME(3) NULL,
   tokens TEXT, active TINYINT DEFAULT 1, revision BIGINT DEFAULT 1, created_at DATETIME(3), updated_at DATETIME(3), deleted_at DATETIME(3) NULL, INDEX (userid));
 
--- Aenderungsprotokoll der Konfiguration: Quelle der Deltas fuer Agents und checkd
+-- Aenderungsprotokoll der Konfiguration: Quelle der Deltas fuer Agents und hub
 CREATE TABLE hc2_config_log (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, userid INT NOT NULL, agent_id VARCHAR(32) NULL,   -- NULL = betrifft alle Agents des Accounts
   entity ENUM('check','channel','maintenance','agent') NOT NULL, entity_id VARCHAR(32) NOT NULL,
   op ENUM('upsert','delete') NOT NULL, revision BIGINT NOT NULL, origin ENUM('portal','api','agent','system') NOT NULL,
   time DATETIME(3) NOT NULL, INDEX (userid, id), INDEX (agent_id, id)
 );
-CREATE TABLE hc2_leases (name VARCHAR(32) PRIMARY KEY, owner VARCHAR(64), until DATETIME(3));
+CREATE TABLE hc2_nodes (name VARCHAR(64) PRIMARY KEY, roles VARCHAR(32), version VARCHAR(32), connections INT NOT NULL DEFAULT 0,
+  started_at DATETIME(3), heartbeat DATETIME(3), INDEX (heartbeat));              -- lebende hub-Instanzen
+CREATE TABLE hc2_slot_leases (slot SMALLINT PRIMARY KEY, owner VARCHAR(64), until DATETIME(3));  -- Sicherung gegen Doppelausfuehrung
+CREATE TABLE hc2_dirty_hours (token CHAR(32), agent_id VARCHAR(32) NOT NULL DEFAULT '', hour DATETIME, PRIMARY KEY (token, agent_id, hour));
 ```
 
 **Mapping Alt → Neu** (Migrationsskript, pro Account beim Setzen von `users.hc2 = 1`):
@@ -198,25 +215,25 @@ CREATE TABLE hc2_leases (name VARCHAR(32) PRIMARY KEY, owner VARCHAR(64), until 
 - Check-`token`: 32 Zeichen, erzeugt dort, wo der Check angelegt wird. Bei der Erstverknüpfung prüft der Server Eindeutigkeit; bei Kollision vergibt er einen neuen Token und schickt `{old_token, new_token}` zurück, der Agent benennt um (Messdaten, Ereignisse, Push-URL).
 - `revision`: pro Entität (Check, Kanal, Wartungsfenster) eine ganze Zahl. **Der Server vergibt sie** aus einem Zähler je Account (`MAX(revision)+1` in einer Transaktion); damit sind Revisionen innerhalb eines Accounts streng steigend und ein Agent kann mit „alles seit Revision R“ fragen.
 - `agent_seq`: laufende Nummer je Agent für Messpunkte, nie wiederverwendet (SQLite `AUTOINCREMENT`).
-- `event_id`: 32 Hex, vom Erzeuger (Agent oder checkd) vergeben.
+- `event_id`: 32 Hex, vom Erzeuger (Agent oder hub) vergeben.
 
 ### 3.2 Erstverknüpfung (Device-Code)
 
 ```
-Agent                                   api_v2.php                              Portal (Nutzer)
-  │ POST /agents/link/start {agent_id,name,version}
+Agent                                   ipv64-hub (HTTPS)                       Portal (Nutzer, PHP)
+  │ POST /v1/agents/link/start {agent_id,name,version}
   │──────────────────────────────────────►│ legt hc2_link_codes an (8 Zeichen, 10 min gueltig)
   │◄──────────────────────────────────────│ {code:"K7PQ4MZB", poll_secret, expires_at, interval:5}
   │ zeigt "Gehe zu ipv64.net/link und gib K7PQ-4MZB ein"                                  │
-  │ alle 5 s: POST /agents/link/poll {code, poll_secret}                                  │
+  │ alle 5 s: POST /v1/agents/link/poll {code, poll_secret}                                  │
   │◄── 202 {status:"pending"} ────────────│                                               │
   │                                       │   Nutzer meldet sich an, /link: Code, Standort, Name, Remote-Verwaltung
   │                                       │◄──────────────────────────────────────────────│
   │                                       │ userid, location in hc2_link_codes, Limit Agents je Tarif pruefen
-  │ POST /agents/link/poll                │
+  │ POST /v1/agents/link/poll             │
   │◄── 200 {agent_token, account:{id,email,plan}, location, name, remote_mgmt} ──────────│
   │ speichert agent_token verschluesselt (secrets.Box), Status "verknuepft"
-  │ POST /agents/me/bootstrap  ► siehe 3.6 Erstabgleich
+  │ POST /v1/agents/me/bootstrap, dann WebSocket /v1/ws  ► siehe 3.3 und 3.6
 ```
 
 - Der Code wird dem Nutzer mit Bindestrich gezeigt, gespeichert ohne. Alphabet ohne 0/O/1/I. 10 Minuten gültig, einmal einlösbar.
@@ -224,32 +241,36 @@ Agent                                   api_v2.php                              
 - Alternative ohne Browser am Agent: Token aus dem Portal (Seite Agents → „Token erzeugen“) als `AGENT_IPV64_TOKEN` beim Start.
 - Token-Format: `ipv64ag_` + 40 Zeichen Base64url. Server speichert `sha256`. Widerruf im Portal → nächste Anfrage 401 `token_revoked` → Agent zeigt „Verknüpfung getrennt“, arbeitet standalone weiter.
 
-### 3.3 Konfiguration: Server → Agent
+### 3.3 Dauerverbindung (WebSocket) und Konfiguration Server → Agent
 
-- Jede Änderung im Portal/API schreibt die Entität mit neuer Revision und eine Zeile in `hc2_config_log`.
-- Agent hält `last_revision` (höchste verarbeitete Revision des Accounts).
-- Long-Poll `GET /agents/me/pull?since=<last_revision>&wait=25`: antwortet sofort, wenn es Einträge mit `revision > since` gibt (oder Sendeaufträge, oder Kommandos), sonst wartet PHP bis 25 s (Schleife mit `usleep`, Abfrage alle 2 s; bei `hc2_config_log` reicht ein `SELECT MAX(id)`), dann `204`. Ein Zyklus pro 30 s ist der Keepalive aus dem Konzept.
-- Antwort: `{revision: <neu>, changes:[{entity, id, op, revision, data}], send_orders:[...], commands:[...]}`. `data` ist die vollständige Entität (keine Diffs), `op: delete` ohne `data`.
-- Agent wendet an: Check upsert → Scheduler `Upsert` (Zustand behalten, wenn Typ gleich); delete → `Remove` + lokale Tombstone-Zeile.
-- Lücke (Agent-`last_revision` kleiner als die kleinste noch vorhandene Log-Revision, Log wird nach 30 Tagen gekürzt) → Server antwortet `409 {error:"revision_gap"}` → Agent macht Vollabgleich (3.6).
+- Verbindung: `wss://agents.ipv64.net/v1/ws`, Header `Authorization: Bearer ipv64ag_...`, Query `since=<last_revision>`. Nach dem Handshake schickt der hub `hello {server_time, revision, account:{id,plan,limits}, remote_mgmt}` und sofort alle Änderungen seit `since` (oder `revision_gap`, siehe unten).
+- Nachrichten sind JSON-Textframes `{"t":"<typ>","id":"<laufende Nummer des Senders>", ...}`. Jede Nachricht, die Daten trägt, wird mit `{"t":"ack","id":<dieselbe>, ...}` beantwortet; bleibt ein `ack` 30 s aus, gilt die Verbindung als tot. Keine Nachricht größer als 1 MB.
+- Server → Agent: `config {revision, changes:[{entity, id, op, revision, data}]}` (`data` ist die vollständige Entität, keine Diffs; `op: delete` ohne `data`), `send_order {id, channel_id, payload}`, `command {id, name, args}`, `ping`, `bye {reason}` (Instanz fährt herunter, Agent verbindet sofort neu).
+- Agent → Server: siehe 3.4 (`propose`), 3.5 (`measurements`, `events`), 5 (`deliveries`, `order_done`, `notify`), 3.8 (`command_result`), außerdem `status {version, modules, timezone, outbox_size, local_time}` alle 5 Minuten und `pong`.
+- Jede Änderung im Portal/API schreibt die Entität mit neuer Revision, eine Zeile in `hc2_config_log` und publiziert `hc2:cfg:<userid>`; das gateway, das den Agent hält, liest die neuen Log-Zeilen und schickt `config`. Latenz Portal → Agent unter einer Sekunde.
+- Agent hält `last_revision` (höchste verarbeitete Revision des Accounts) und wendet an: Check upsert → Scheduler `Upsert` (Zustand behalten, wenn Typ gleich); delete → `Remove` + lokale Tombstone-Zeile.
+- Keepalive: hub sendet `ping` alle 30 s, Agent antwortet `pong`; zwei ausgelassene Pongs → hub schließt. Agent-seitig: Reconnect mit Backoff 1 s → 60 s und zufälligem Jitter ±30 % (verhindert einen Reconnect-Sturm, wenn eine Instanz neu startet), nach Reconnect `since` = letzte verarbeitete Revision. Beim `bye` kein Backoff.
+- Lücke (`last_revision` kleiner als die kleinste noch vorhandene Log-Revision; Log wird nach 30 Tagen gekürzt) → `revision_gap` → Agent macht Vollabgleich (3.6) über HTTPS und verbindet neu.
+- Große Datenmengen (Bootstrap, Vollabgleich, Online-Ergebnisse) laufen nicht über den Socket, sondern über HTTPS am selben Host mit demselben Token.
 - Betrifft ein Check-Eintrag einen anderen Agent (`agent_id` ≠ eigener, `execution local`), bekommt der Agent ihn trotzdem als **read-only Sicht** (Portal-Feature „alle Checks des Accounts sehen“), markiert `owner: other`.
+- Ohne Verbindung arbeitet der Agent vollständig weiter (Checks, lokale Kanäle, Oberfläche); nur Sync und ipv64-Kanäle warten.
 
 ### 3.4 Konfiguration: Agent → Server (Vorschläge)
 
-- Lokale Änderung bei bestehender Verbindung: Agent sendet `PUT /agents/me/checks/{token}` mit `base_revision` (die Revision, die er zuletzt gesehen hat) und dem vollen Objekt. Server: wenn `base_revision == aktuelle revision` → speichern, neue Revision, Antwort mit dem gespeicherten Objekt; der Agent übernimmt die Antwort (Write-Through). Erst dann gilt die Änderung lokal; die Oberfläche zeigt bis dahin „wird gespeichert“.
+- Lokale Änderung bei bestehender Verbindung: Agent sendet `propose {entity:"check", op:"upsert", id, base_revision, data}` mit `base_revision` (die Revision, die er zuletzt gesehen hat) und dem vollen Objekt. Server: wenn `base_revision == aktuelle revision` → speichern, neue Revision, `ack {revision, data}` mit dem gespeicherten Objekt; der Agent übernimmt die Antwort (Write-Through). Erst dann gilt die Änderung lokal; die Oberfläche zeigt bis dahin „wird gespeichert“.
 - Ohne Verbindung: Änderung in die lokale Outbox (`hc_outbox`: `kind=check_upsert|check_delete|channel_upsert|...`, `payload`, `base_revision`), Oberfläche zeigt „ausstehend“. Beim Wiederverbinden Replay in Reihenfolge.
-- Konflikt (`base_revision` veraltet): `409 {error:"conflict", server: {...}, revision}`. Agent speichert beide Versionen in `hc_conflicts` und zeigt sie dem Nutzer: „Server behalten“ (lokal überschreiben) oder „Meine Version senden“ (erneut PUT mit der aktuellen Server-Revision als Basis). **Nie stilles Überschreiben.**
-- Löschen: `DELETE /agents/me/checks/{token}` mit `base_revision`; Server setzt `deleted_at` (Tombstone), Log-Eintrag `delete`. Umgekehrt: Server-Löschung kommt als `delete` im Pull; der Agent löscht lokal **inklusive Messdaten** erst nach Bestätigung aller offenen Messpunkte (sonst Outbox leeren zuerst).
-- Dieselben Regeln für Kanäle (`/agents/me/channels/{id}`) und Wartungsfenster.
+- Konflikt (`base_revision` veraltet): `conflict {id, server: {...}, revision}`. Agent speichert beide Versionen in `hc_conflicts` und zeigt sie dem Nutzer: „Server behalten“ (lokal überschreiben) oder „Meine Version senden“ (erneut PUT mit der aktuellen Server-Revision als Basis). **Nie stilles Überschreiben.**
+- Löschen: `propose {op:"delete"}` mit `base_revision`; Server setzt `deleted_at` (Tombstone), Log-Eintrag `delete`. Umgekehrt: Server-Löschung kommt als `delete` im Pull; der Agent löscht lokal **inklusive Messdaten** erst nach Bestätigung aller offenen Messpunkte (sonst Outbox leeren zuerst).
+- Dieselben Regeln für Kanäle (`entity:"channel"`) und Wartungsfenster (`entity:"maintenance"`). Bei einem Repair (3.6) stehen dieselben Operationen als HTTPS `PUT/DELETE /v1/agents/me/{checks,channels,maintenance}/{id}` bereit.
 
 ### 3.5 Messergebnisse: Agent → Server
 
 - Agent sammelt Messpunkte in der Outbox (`hc_measurements` selbst ist die Outbox: alles mit `agent_seq > last_ack_seq` ist unbestätigt).
-- Alle 30 s oder ab 100 Punkten: `POST /agents/me/measurements` mit `[{seq, token, time, status, latency_ms, reason, message, family, details, flags}]`, höchstens 500 je Batch.
-- Server: `INSERT IGNORE` (Primärschlüssel enthält `agent_seq`), verwirft Punkte mit `time > now + 5 min` (`reason: future`), antwortet `{ack_seq: <höchste verarbeitete seq>, rejected:[seq...]}`. Agent speichert `ack_seq`.
-- Zustand: Der Agent ist für `state_local` zuständig und meldet Statuswechsel als Ereignisse (`POST /agents/me/events`, idempotent über `event_id`; Antwort `{accepted:[...], duplicates:[...]}`). Der Server leitet aus Ereignissen `state_local`, `down_since`, `incident_id` ab. checkd pflegt `state_online`.
+- Alle 30 s oder ab 100 Punkten: Nachricht `measurements {batch:[{seq, token, time, status, latency_ms, reason, message, family, details, flags}]}`, höchstens 500 je Batch, nächster Batch erst nach dem `ack`.
+- Server: `INSERT IGNORE` (Primärschlüssel enthält `agent_seq`), verwirft Punkte mit `time > now + 5 min` (`reason: future`), antwortet `ack {ack_seq: <höchste verarbeitete seq>, rejected:[seq...]}`. Agent speichert `ack_seq`.
+- Zustand: Der Agent ist für `state_local` zuständig und meldet Statuswechsel als Ereignisse (Nachricht `events {batch}`, idempotent über `event_id`; `ack {accepted:[...], duplicates:[...]}`). Der Server leitet aus Ereignissen `state_local`, `down_since`, `incident_id` ab. hub pflegt `state_online`.
 - **Gesamtzustand** `state` eines Checks mit `execution both`: down, wenn einer der beiden down ist; Diagnose im Portal: „intern OK, extern gestört → Router/Freigabe/CDN“.
-- Rückwirkende Punkte (Agent war offline): werden nach `time` einsortiert; Aggregate der betroffenen Stunden/Tage werden von checkd nachgerechnet (Markierung in `hc2_dirty_hours`).
+- Rückwirkende Punkte (Agent war offline): werden nach `time` einsortiert; Aggregate der betroffenen Stunden/Tage werden von hub nachgerechnet (Markierung in `hc2_dirty_hours`).
 - Zeit: Agent sendet UTC aus NTP-Zeit; `received_at` setzt der Server. Abweichung > 5 min → Warnung im Portal und im Agent („Uhr des Agents weicht ab“).
 
 ### 3.6 Vollabgleich (Repair)
@@ -257,49 +278,66 @@ Agent                                   api_v2.php                              
 Auslöser: `revision_gap`, Erstverknüpfung, nach Wiederherstellung der Agent-Datenbank, manuell.
 
 1. Outbox hochladen (Messpunkte und Ereignisse), bis `ack_seq` aktuell ist. Offene Konfigurations-Vorschläge als Konflikte vorlegen, nicht verwerfen.
-2. `GET /agents/me/config` liefert alles: Checks (eigene und Sicht auf andere), Kanäle (Server-Kanäle nur Typ/Name/Flags, eigene Agent-Kanäle mit entschlüsselter Konfiguration, außer `secret_only_local`), Wartungsfenster, Agent-Einstellungen, `revision`.
+2. `GET /v1/agents/me/config` liefert alles: Checks (eigene und Sicht auf andere), Kanäle (Server-Kanäle nur Typ/Name/Flags, eigene Agent-Kanäle mit entschlüsselter Konfiguration, außer `secret_only_local`), Wartungsfenster, Agent-Einstellungen, `revision`.
 3. Agent ersetzt seine Konfiguration (lokale Zustände und Messdaten bleiben), setzt `last_revision`.
-4. `GET /agents/me/results?since=<time>` holt Online-Ergebnisse (Aggregate und letzte Ereignisse) für die lokale Ansicht; roh nur die letzten 24 h.
+4. `GET /v1/agents/me/results?since=<time>` holt Online-Ergebnisse (Aggregate und letzte Ereignisse) für die lokale Ansicht; roh nur die letzten 24 h.
 
-Erstverknüpfung = Repair mit vorherigem `POST /agents/me/bootstrap`: der Agent lädt seine lokalen Checks, Kanäle und Wartungsfenster hoch, der Server legt sie mit `execution local`, `agent_id` an (Token-Kollisionen siehe 3.1), ohne Limitprüfung. Danach gilt der Server als führend.
+Erstverknüpfung = Repair mit vorherigem `POST /v1/agents/me/bootstrap`: der Agent lädt seine lokalen Checks, Kanäle und Wartungsfenster hoch, der Server legt sie mit `execution local`, `agent_id` an (Token-Kollisionen siehe 3.1), ohne Limitprüfung. Danach gilt der Server als führend.
 
 ### 3.7 Heartbeat und Agent-Ausfall
 
-- Jeder Pull aktualisiert `last_seen`. checkd setzt `online = 0`, wenn `last_seen` älter als 3 Minuten ist, und erzeugt ein Ereignis `agent_offline` (Kanäle: Server-Kanäle des Accounts, `ipv64_mail` als Standard). Rückkehr: `agent_online` mit Dauer.
+- Jeder `pong` erneuert den Redis-Key `hc2:online:<agent_id>` (TTL 90 s); `hc2_agents.last_seen` wird gebündelt geschrieben. Beim sauberen Schließen setzt das gateway `online = 0` erst nach 60 s Karenz (der Agent verbindet sich meist sofort mit der anderen Instanz).
+- Der checker mit Slot 0 prüft alle 30 s: `online = 1` in MySQL, aber kein Redis-Key → `online = 0`, Ereignis `agent_offline` (Kanäle: Server-Kanäle des Accounts, `ipv64_mail` als Standard). Rückkehr: `agent_online` mit Dauer. Stirbt eine hub-Instanz, laufen die Keys ihrer Agents nach 90 s ab, sofern die Agents nicht längst neu verbunden sind.
 - Während ein Agent offline ist, bleiben seine lokalen Checks im letzten Zustand und werden im Portal grau mit „Agent offline seit …“ gezeigt; sie lösen keine eigenen Alarme aus.
 
-### 3.8 Kommandos Server → Agent (`commands` im Pull)
+### 3.8 Kommandos Server → Agent (`command` über den Socket)
 
-`run_check {token}`, `pause {token}`, `resume {token}`, `set_log_level {level, minutes}`, `enable_module {name}`, `disable_module {name}`, `set_remote_mgmt`, `update_available {version, url}`, `repair`. Der Agent führt nur aus, was sein lokaler Schalter „Remote-Verwaltung“ erlaubt (`off`: nichts, `read`: nur `update_available`/`repair`, `full`: alles) und antwortet mit `POST /agents/me/commands/{id}/result`.
+`run_check {token}`, `pause {token}`, `resume {token}`, `set_log_level {level, minutes}`, `enable_module {name}`, `disable_module {name}`, `set_remote_mgmt`, `update_available {version, url}`, `repair`. Der Agent führt nur aus, was sein lokaler Schalter „Remote-Verwaltung“ erlaubt (`off`: nichts, `read`: nur `update_available`/`repair`, `full`: alles) und antwortet mit `command_result {id, ok, output}`. Kommandos für nicht verbundene Agents warten in `hc2_commands` (1 h, dann verfallen).
 
 ---
 
-## 4. API v2: Endpunkte für Agents (Ergänzung zu api_v2.php)
+## 4. ipv64-hub: Endpunkte und Nachrichten für Agents
 
-Auth: `Authorization: Bearer ipv64ag_...`. Antworten wie in der API v2 (`{data, meta}`, Fehler RFC 9457). Ratenbegrenzung: eigener Bucket je Agent-Token (600/min), Batchgrößen begrenzt.
+Host `agents.ipv64.net`, Auth `Authorization: Bearer ipv64ag_...` (außer Link-Start/Poll und Push). Antworten wie in der API v2 (`{data, meta}`, Fehler RFC 9457). Ratenbegrenzung je Agent-Token und je IP, Batchgrößen begrenzt. Alles unter `/v1/`, damit spätere Protokolländerungen neben dem alten laufen können.
+
+**HTTPS**
 
 | Methode | Pfad | Body / Antwort |
 | --- | --- | --- |
-| POST | `/agents/link/start` | `{agent_id, name, version}` → `{code, poll_secret, expires_at, interval}` (ohne Auth, 5/min je IP) |
-| POST | `/agents/link/poll` | `{code, poll_secret}` → `202 pending` oder `{agent_token, account, name, location, remote_mgmt}` |
-| GET | `/agents/me` | Agent-Daten, Limits, `remote_mgmt`, `server_time` |
-| PATCH | `/agents/me` | `{name, location, version, timezone, modules, outbox_size}` |
-| POST | `/agents/me/bootstrap` | `{checks:[...], channels:[...], maintenance:[...]}` → `{renamed:[{old_token,new_token}], revision}` |
-| GET | `/agents/me/config` | Vollabgleich (3.6) |
-| GET | `/agents/me/pull?since=&wait=` | Long-Poll (3.3): Änderungen, Sendeaufträge, Kommandos; `204` ohne Neuigkeiten; `409 revision_gap` |
-| PUT/DELETE | `/agents/me/checks/{token}` | mit `base_revision` (3.4); `409 conflict` liefert Server-Version |
-| PUT/DELETE | `/agents/me/channels/{id}`, `/agents/me/maintenance/{id}` | wie Checks |
-| POST | `/agents/me/measurements` | Batch ≤ 500 → `{ack_seq, rejected}` |
-| POST | `/agents/me/events` | Batch → `{accepted, duplicates}` |
-| POST | `/agents/me/deliveries` | Zustellprotokoll der Agent-Kanäle (append-only, idempotent über `event_id+channel_id`) |
-| POST | `/agents/me/send-orders/{id}/done` | `{ok, error}` |
-| POST | `/agents/me/commands/{id}/result` | `{ok, output}` |
-| GET | `/agents/me/results?since=` | Online-Ergebnisse für die lokale Ansicht |
-| POST | `/agents/me/unlink` | Entkoppeln (Token widerrufen, Checks bleiben beim Account mit `execution online` oder werden gelöscht, Parameter `keep_checks`) |
-| GET | `/push/{token}` und `POST` | Heartbeat (ersetzt `health.php`, der weiter funktioniert) |
-| GET | `/agent/latest.json` | Versionsdatei (statisch) |
+| POST | `/v1/agents/link/start` | `{agent_id, name, version}` → `{code, poll_secret, expires_at, interval}` (ohne Auth, 5/min je IP) |
+| POST | `/v1/agents/link/poll` | `{code, poll_secret}` → `202 pending` oder `{agent_token, account, name, location, remote_mgmt, ws_url}` |
+| GET | `/v1/agents/me` | Agent-Daten, Limits, `remote_mgmt`, `server_time` |
+| PATCH | `/v1/agents/me` | `{name, location, version, timezone, modules, outbox_size}` |
+| POST | `/v1/agents/me/bootstrap` | `{checks:[...], channels:[...], maintenance:[...]}` → `{renamed:[{old_token,new_token}], revision}` |
+| GET | `/v1/agents/me/config` | Vollabgleich (3.6) |
+| PUT/DELETE | `/v1/agents/me/checks/{token}`, `/channels/{id}`, `/maintenance/{id}` | mit `base_revision` (3.4), nur für Repair; `409 conflict` liefert Server-Version |
+| POST | `/v1/agents/me/measurements`, `/events`, `/deliveries` | wie die Socket-Nachrichten, für den Nachlauf nach langer Offline-Zeit (große Outbox) |
+| GET | `/v1/agents/me/results?since=` | Online-Ergebnisse für die lokale Ansicht |
+| POST | `/v1/agents/me/unlink` | Entkoppeln (Token widerrufen; Checks bleiben beim Account mit `execution online` oder werden gelöscht, Parameter `keep_checks`) |
+| GET | `/v1/ws` | WebSocket (3.3) |
+| GET/POST | `/v1/push/{token}` | Heartbeat (gleichwertig zu `health.php?token=`, das weiter funktioniert) |
+| GET | `/v1/health` | für den Load Balancer: `{status, role, connections}` |
 
-Portal/Fremdsoftware (Session oder API-Key) bekommen dieselben Ressourcen unter `/healthchecks2/...` (Vorschlag: nach der Umstellung übernimmt der Pfad `/healthchecks` der API v2 das neue Modell; bis dahin v2-Pfad `/hc2/checks` usw.). Die Agent-eigene JSON-API bleibt identisch zur Serverseite (gleiche Feldnamen), damit Skripte lokal und online gleich aussehen.
+`https://ipv64.net/agent/latest.json` (Versionsdatei) bleibt eine statische Datei im Portal.
+
+**WebSocket-Nachrichten** (`t`)
+
+| Richtung | `t` | Inhalt | Antwort |
+| --- | --- | --- | --- |
+| S→A | `hello` | `server_time, revision, account, remote_mgmt` | – |
+| S→A | `config` | `revision, changes[]` | `ack` |
+| S→A | `send_order` | `id, channel_id, payload` (Nachricht, die der Agent über seinen Kanal schickt) | `order_done {id, ok, error}` |
+| S→A | `command` | `id, name, args` (3.8) | `command_result` |
+| S→A | `revision_gap` | – | Agent macht Repair |
+| S→A | `ping` / `bye` | – | `pong` / Reconnect |
+| A→S | `measurements` | `batch[]` ≤ 500 | `ack {ack_seq, rejected}` |
+| A→S | `events` | `batch[]` | `ack {accepted, duplicates}` |
+| A→S | `propose` | `entity, op, id, base_revision, data` | `ack {revision, data}` oder `conflict` |
+| A→S | `deliveries` | Zustellprotokoll der Agent-Kanäle, idempotent über `event_id+channel_id` | `ack` |
+| A→S | `notify` | `channel_type (ipv64_mail/ipv64_sms), channel_id, event` → hub verschickt über ipv64 (5) | `ack {ok, error}` |
+| A→S | `status` | `version, modules, timezone, outbox_size, local_time` (alle 5 min) | – |
+
+Portal/Fremdsoftware (Session oder API-Key) bekommen dieselben Ressourcen über `api_v2.php` (Vorschlag: nach der Umstellung übernimmt der Pfad `/healthchecks` der API v2 das neue Modell; bis dahin v2-Pfad `/hc2/checks` usw.). Die Agent-eigene JSON-API bleibt identisch zur Serverseite (gleiche Feldnamen), damit Skripte lokal und online gleich aussehen.
 
 ---
 
@@ -307,15 +345,17 @@ Portal/Fremdsoftware (Session oder API-Key) bekommen dieselben Ressourcen unter 
 
 | Ereignis | Standalone | Verknüpft, Agent online | Verknüpft, Agent offline |
 | --- | --- | --- | --- |
-| Lokaler Check down/up | Agent sendet über Agent-Kanäle | Agent meldet Ereignis an Server; **Server** sendet Server-Kanäle und `ipv64_mail`/`ipv64_sms`; Agent-Kanäle sendet der Agent selbst sofort (kein Umweg, kein Sendeauftrag nötig) | Agent sendet Agent-Kanäle lokal (Fallback) und meldet das Ereignis später nach; Server sendet seine Kanäle beim Nachmelden **nur, wenn das Ereignis jünger als 15 min ist** (sonst nur Protokoll) |
-| Online-Check down/up | – | checkd sendet Server-Kanäle; Agent-Kanäle als Sendeauftrag an den Agent (Pull) | Sendeauftrag bleibt liegen, verfällt nach 1 h |
-| Agent offline/online | – | checkd über Server-Kanäle | – |
+| Lokaler Check down/up | Agent sendet über Agent-Kanäle (inkl. Pushover) | Agent meldet Ereignis an Server; **Server** sendet Server-Kanäle und `ipv64_mail`/`ipv64_sms`; Agent-Kanäle sendet der Agent selbst sofort (kein Umweg, kein Sendeauftrag nötig) | Agent sendet Agent-Kanäle lokal (Fallback) und meldet das Ereignis später nach; Server sendet seine Kanäle beim Nachmelden **nur, wenn das Ereignis jünger als 15 min ist** (sonst nur Protokoll) |
+| Online-Check down/up | – | hub sendet Server-Kanäle; Agent-Kanäle als `send_order` über den Socket | Sendeauftrag bleibt liegen, verfällt nach 1 h |
+| Agent offline/online | – | hub über Server-Kanäle | – |
 
 - Deduplizierung über `event_id` in `hc2_deliveries (event_id, channel_id)` und im Agent `nf_deliveries`.
 - `ipv64_mail`: Absender wie heute (`send_mail`), Empfänger Account-Adresse oder verifizierte Adresse eines Kanals vom Typ `ipv64_mail` mit `config.email`. Nach der Verknüpfung automatisch angelegt und Standard.
 - `ipv64_sms`: wie `send_sms` heute, Nummer verifiziert, Tageslimit `sms_limit`.
 - Ruhezeiten, Sammelmeldungen, Wiederholungen, Flattern: gleiche Regeln wie im Agent, Einstellungen je Account (`hc2_settings` oder `settings`-Tabelle, Schlüssel `notify.*`).
-- Agent-Paket `notify` bekommt zwei weitere Sender: `pushover` und `app` (Firebase, wie heute `mobil`), damit die Typen auf beiden Seiten gleich sind.
+- **Pushover** wird ein normaler Kanaltyp im Agent-Paket `notify` (direkt an die Pushover-API mit dem Key des Nutzers, funktioniert standalone) und damit automatisch auch auf dem Server.
+- **App** (Firebase, wie heute `mobil`) gibt es nur als Server-Kanal; den Firebase-Zugang hat nur ipv64.
+- **`ipv64_mail` / `ipv64_sms`** im Agent: Kanaltypen, die nur mit Verknüpfung aktiv sind. Der Agent schickt `notify {channel_type, event}` über den Socket, der hub versendet über die ipv64-Infrastruktur (Absender, Empfänger = verifizierte Adresse/Nummer des Accounts, Tageslimit `sms_limit`). Ohne Verbindung landet die Nachricht in der Outbox und wird beim Verbinden nachgeholt, wenn das Ereignis jünger als 15 min ist. Standalone-Nutzer sehen diese Typen mit dem Hinweis „benötigt ipv64-Verknüpfung“.
 
 ---
 
@@ -337,7 +377,7 @@ Pfade während der Umstellung unter `/healthchecks2/...`, nach Abschluss überne
 
 ### 3.9 Umwandeln lokal ↔ online (Portal und Agent)
 
-- lokal → online: Server prüft Limit, führt über checkd einen Testlauf aus (`hc2_testruns`, Ergebnis innerhalb 30 s), private Ziele (RFC 1918, `.local`, `localhost`) werden abgewiesen mit Hinweis auf CDN. Erfolg → `execution = online`, `agent_id` bleibt als Herkunft, Messhistorie bleibt (Zeitleiste markiert „ab hier online“).
+- lokal → online: Server prüft Limit, führt über hub einen Testlauf aus (`hc2_testruns`, Ergebnis innerhalb 30 s), private Ziele (RFC 1918, `.local`, `localhost`) werden abgewiesen mit Hinweis auf CDN. Erfolg → `execution = online`, `agent_id` bleibt als Herkunft, Messhistorie bleibt (Zeitleiste markiert „ab hier online“).
 - online → lokal: Nutzer wählt Agent; Agent bekommt den Check per Pull, führt Testlauf aus, meldet Ergebnis; erst dann `execution = local`.
 - beides: beide Seiten messen, zwei Zustände, ein Gesamtzustand.
 
@@ -348,10 +388,10 @@ Pfade während der Umstellung unter `/healthchecks2/...`, nach Abschluss überne
 | Schritt | Inhalt | Rückweg |
 | --- | --- | --- |
 | M0 | Tabellen `hc2_*` anlegen, `users.hc2` Flag, `latest.json` ausliefern | – |
-| M1 | `ipv64-checkd` deployen (Go, systemd, zwei Server, Lease), zunächst ohne Nutzer | Dienst stoppen |
+| M1 | `ipv64-hub` deployen (Go, systemd, zwei Server, nginx davor, Redis), zunächst ohne Nutzer; Lasttest mit simulierten Agents | Dienst stoppen |
 | M2 | Migrationsskript `bots/hc2_migrate.php <userid>`: kopiert Checks, Events (7 Tage), Incidents, Integrationen; setzt `users.hc2 = 1`; alte Bots überspringen Accounts mit `hc2 = 1` (`JOIN users ... WHERE hc2 = 0`) | Flag auf 0, alte Bots übernehmen wieder (hc2-Daten bleiben) |
 | M3 | Neue Portalseiten unter `/healthchecks2`, Menü zeigt je nach Flag alt oder neu; `health.php` schreibt bei `hc2 = 1` nach `hc2_measurements` + Redis | Flag |
-| M4 | API v2: Agent-Endpunkte, Device-Code, `/link`; Agent-Release mit Sync | Agent entkoppeln |
+| M4 | hub: Agent-Endpunkte und WebSocket, Device-Code; Portal: `/link`, `/agents`; Agent-Release mit Sync | Agent entkoppeln |
 | M5 | Testaccounts (Dennis, Beta-Nutzer) umstellen, zwei Wochen Schattenbetrieb: alte Bots laufen für diese Accounts **zusätzlich weiter, aber ohne Alarme** (Schattenmodus-Flag), Vergleich der Zustände in einem Bot `hc2_compare.php` | Flag |
 | M6 | Alle Accounts in Wellen (Free zuletzt), Vergleich beobachten | Flag je Account |
 | M7 | Alte Bots abschalten, alte Seiten auf neue umleiten, `integrations.php` abschalten, API v2 Healthcheck-Pfade auf neues Modell | Backup der alten Tabellen bleibt 90 Tage |
@@ -364,7 +404,8 @@ Push-URL `health.php?token=` bleibt dauerhaft; sie prüft `hc2` des Besitzers un
 
 - Agent-Token nur gehasht, einzeln widerrufbar, Scope auf den eigenen Agent (`agent_id` aus dem Token, nie aus dem Body).
 - Alle Agent-Endpunkte prüfen Besitz: Check-Token muss zum Account gehören; fremde Tokens → 404.
-- Ratenlimits: Link-Start 5/min je IP, Poll 20/min je Code, Pull 4/min je Agent, Messpunkte 500 je Batch und 60 Batches/min, ungültige Tokens 20/min je IP.
+- Ratenlimits: Link-Start 5/min je IP, Poll 20/min je Code, Verbindungsaufbau 10/min je Agent und 60/min je IP, Messpunkte 500 je Batch und 60 Batches/min, ungültige Tokens 20/min je IP. Je Instanz ein Verbindungslimit (Flag), darüber `503` mit `Retry-After`.
+- Der hub hat keine Sitzungen und kein HTML; er prüft nur Agent-Tokens. Der Nutzer-Teil (Login, `/link`, `/agents`) bleibt im Portal.
 - Remote-Verwaltung: Schalter am Agent, Standard `read`; remote angelegte Checks nur auf freigegebene Subnetze (Agent-Einstellung).
 - Geheimnisse von Kanälen: Server-Schlüssel in einer Datei außerhalb des Webroots, AES-GCM wie im Agent; `secret_only_local` respektieren.
 - Verifizierung Mail/SMS nur eingeloggt mit Code-Eingabe (Lücke `activate_integration` schließen).
@@ -377,30 +418,26 @@ Push-URL `health.php?token=` bleibt dauerhaft; sie prüft `hc2` des Besitzers un
 | # | Paket | Repo | Abnahme |
 | --- | --- | --- | --- |
 | 1 | `latest.json` + Versionsprüfung | ipv64 | Agent zeigt Version |
-| 2 | `hc2_*` DDL, Migrationsskript, `users.hc2` | ipv64 | Testaccount migriert, Vergleich alt/neu identisch |
-| 3 | `cmd/checkd`: MySQL-Store-Adapter für `scheduler.Store`, Lease, Konfig-Log-Polling, Push-Watchdog, Aggregation | Agent-Repo | Online-Checks eines Testaccounts laufen über checkd, Pillen im Portal |
-| 4 | `notify`: Sender `pushover`, `app`, `ipv64_mail`, `ipv64_sms` (Server-Backends über HTTP-Hook in PHP oder direkt SMTP/SMS-Gateway) | Agent-Repo | Testnachrichten je Typ |
+| 2 | `hc2_*` DDL, Migrationsskript, `users.hc2`, Redis-Publish im Portal | ipv64 | Testaccount migriert, Vergleich alt/neu identisch |
+| 3 | `cmd/hub` Rolle **checker**: MySQL-Adapter für `scheduler.Store`, `hc2_nodes`/Slots/Leases, Konfig-Log + Redis, Push-Watchdog, Aggregation, Agent-Ausfall | Agent-Repo | Online-Checks eines Testaccounts laufen über zwei hub-Instanzen; eine stoppen → die andere übernimmt binnen 30 s |
+| 4 | `notify`: `pushover` (Agent + Server), `app`, `ipv64_mail`, `ipv64_sms` (Server, Backend über SMTP/SMS-Gateway wie heute), Agent-Weiterleitung `notify` | Agent-Repo | Testnachrichten je Typ, lokal und über hub |
 | 5 | Portal: `/notifications` (Kanäle), Verifizierung | ipv64 | Alte Integrationen migriert, Test-Button |
 | 6 | Portal: `/healthchecks2` Übersicht, Detail, Formular, Wartung, Störungen, Statusseite auf `hc2` | ipv64 | Feature-Parität zur alten Seite plus neue Typen |
-| 7 | API v2: Agent-Endpunkte, Device-Code, `/link`, `/agents` | ipv64 | Postman-Durchlauf nach Abschnitt 4 |
-| 8 | Agent: `internal/sync` echter Client (Link, Pull, Push, Outbox, Konflikte, Repair), UI „ipv64-Verknüpfung“, Ausführungsort-Badge | Agent-Repo | Verknüpfen, offline arbeiten, nachmelden, Konflikt auflösen |
+| 7 | `cmd/hub` Rolle **gateway**: WebSocket, Device-Code, HTTPS-Abgleich, Redis-Fanout, Batch-Writer; Portal `/link`, `/agents`; nginx-Konfiguration; Lasttest `cmd/hubload` mit 10.000 simulierten Agents | Agent-Repo + ipv64 | Lasttest ohne Fehler, Instanz-Neustart ohne Datenverlust (Messpunkte kommen per Outbox nach) |
+| 8 | Agent: `internal/sync` echter Client (Link, WebSocket, Outbox, Konflikte, Repair, Reconnect-Backoff), UI „ipv64-Verknüpfung“, Ausführungsort-Badge, Kanaltypen `ipv64_mail`/`ipv64_sms` | Agent-Repo | Verknüpfen, offline arbeiten, nachmelden, Konflikt auflösen, hub-Wechsel unbemerkt |
 | 9 | Schattenbetrieb und Vergleichsbot | ipv64 | Zwei Wochen ohne Abweichung |
 | 10 | Rollout in Wellen, Abschaltung alt | ipv64 | Alte Bots aus |
 
-Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10. Pakete 3/4 (Go) und 5/6 (PHP) können parallel laufen.
+Reihenfolge: 1 → 2 → 3 → 4 → 7 → 8 → 5 → 6 → 9 → 10. Pakete 3/4/7/8 (Go) und 5/6 (PHP) können parallel laufen; 7 und 8 werden gegeneinander getestet.
 
 ---
 
-## 10. Entscheidungen (Stand 2026-10-10)
+## 10. Entscheidungen (Stand 2026-10-10, Dennis)
 
-Festgelegt: (1) Rohdaten 7 Tage in MySQL. (2) Limits nur für Online-Checks aus der User-Class, lokal unbegrenzt, keine Agent-Obergrenze. (3) Neue Seiten unter `/healthchecks2`; wie und wann umgestellt wird, bleibt offen (Migrationsweg denkbar). (5) DNS-Failover bleibt beim Online-System, Agent-Checks sind dafür keine Quelle. (6) Kein zweiter Standort jetzt, Spalte `location` bleibt vorbereitet. Offen: (4) Pushover/App im Agent, (7) Long-Poll – Erklärung angefragt.
-
-Ursprüngliche Fragen:
-
-1. **Rohdaten der Online-Checks:** 7 Tage in MySQL wie geplant, oder weiter Influx? (Plan: MySQL.)
-2. **Agents je Tarif:** Free 1, VIP 3, Business 10, Company 25? Und zählen Checks mit `execution both` doppelt? (Plan: einfach.)
-3. **Pfad der neuen Seiten:** `/healthchecks2` während der Umstellung, danach `/healthcheck`? Oder gleich `/monitoring`?
-4. **Pushover und App im Agent:** jetzt mit aufnehmen (gleiche Typen überall) oder nur serverseitig?
-5. **DNS-Failover** liest künftig `hc2_checks.state`. Soll der Failover-Monitor auch lokale Agent-Checks als Quelle erlauben? (Plan: ja, Zustand kommt ohnehin an.)
-6. **Standorte für Online-Checks** (zweiter checkd an anderem Ort) in dieser Runde oder später? (Plan: später, Spalte `location` jetzt schon.)
-7. **Long-Poll vs. WebSocket:** Long-Poll über PHP wie geplant; WebSocket nur, wenn die PHP-Worker knapp werden.
+1. **Rohdaten der Online-Checks:** 7 Tage in MySQL.
+2. **Limits:** nur für Online-Checks, wie bisher aus der User-Class; lokal im Container unbegrenzt; keine Obergrenze für Agents je Account.
+3. **Pfad:** neue Seiten unter `/healthchecks2`; wie und wann umgestellt wird (Migrationsweg), bleibt offen.
+4. **Pushover** auch im Agent (Standalone ohne ipv64-Account muss vollwertig sein). **App** nur serverseitig. **E-Mail und SMS über ipv64** als Agent-Kanäle, die nur verknüpft funktionieren.
+5. **DNS-Failover** bleibt beim Online-System; Agent-Checks sind dafür keine Quelle.
+6. **Kein zweiter Standort** für Online-Checks jetzt; Spalte `location` und Slot-Verteilung sind darauf vorbereitet (ein weiterer Check-Server wäre nur eine weitere hub-Instanz mit eigenem `location`).
+7. **Transport:** kein Long-Poll über PHP, sondern ein eigener Go-Dienst `ipv64-hub` mit WebSocket, von Anfang an für viele tausend Agents und mehrere gleichwertige Instanzen ausgelegt (L4, L9, Abschnitt 1).
