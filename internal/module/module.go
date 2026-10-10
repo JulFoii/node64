@@ -41,13 +41,20 @@ type Module interface {
 	Info() Info
 	// Migrations liefert die Datenbankaenderungen des Moduls (eigener Scope).
 	Migrations() []store.Migration
-	// Routes registriert die HTTP-Handler. guard umhuellt jeden Handler und
-	// antwortet mit 404, solange das Modul deaktiviert ist.
-	Routes(mux *http.ServeMux, guard func(http.Handler) http.Handler)
+	// Routes registriert die HTTP-Handler. g.Enabled umhuellt jeden Handler und
+	// antwortet mit 404, solange das Modul deaktiviert ist; g.Auth verlangt
+	// eine Anmeldung (Sitzung oder API-Key).
+	Routes(mux *http.ServeMux, g Guards)
 	// Start startet Hintergrundarbeit; ctx wird bei Stop abgebrochen.
 	Start(ctx context.Context) error
 	// Stop beendet alles sauber. Nach Stop laufen keine Goroutines mehr.
 	Stop(ctx context.Context) error
+}
+
+// Guards sind die Middleware-Funktionen, die der Kern den Modulen gibt.
+type Guards struct {
+	Enabled func(http.Handler) http.Handler
+	Auth    func(http.Handler) http.Handler
 }
 
 // Status ist der Zustand eines Moduls fuer die Anzeige.
@@ -103,7 +110,7 @@ func (r *Registry) Register(m Module) {
 
 // Routes registriert die Handler aller Module. Der Guard liefert 404, solange
 // ein Modul deaktiviert ist; so bleiben die Pfade stabil.
-func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler) {
+func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler, auth func(http.Handler) http.Handler) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, name := range r.order {
@@ -117,7 +124,7 @@ func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler) {
 				next.ServeHTTP(w, req)
 			})
 		}
-		e.mod.Routes(mux, guard)
+		e.mod.Routes(mux, Guards{Enabled: guard, Auth: auth})
 	}
 }
 
@@ -292,8 +299,8 @@ func (r *Registry) setErr(e *entry, err error) {
 // "demnaechst" erscheint.
 type Placeholder struct{ I Info }
 
-func (p Placeholder) Info() Info                                           { i := p.I; i.Available = false; return i }
-func (Placeholder) Migrations() []store.Migration                          { return nil }
-func (Placeholder) Routes(*http.ServeMux, func(http.Handler) http.Handler) {}
-func (Placeholder) Start(context.Context) error                            { return ErrNotAvailable }
-func (Placeholder) Stop(context.Context) error                             { return nil }
+func (p Placeholder) Info() Info                  { i := p.I; i.Available = false; return i }
+func (Placeholder) Migrations() []store.Migration { return nil }
+func (Placeholder) Routes(*http.ServeMux, Guards) {}
+func (Placeholder) Start(context.Context) error   { return ErrNotAvailable }
+func (Placeholder) Stop(context.Context) error    { return nil }

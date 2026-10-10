@@ -4,7 +4,7 @@ Ein leichtgewichtiger Docker-Container für das Heimnetz: Health-Checks (als Upt
 
 Ein einziges Go-Binary, SQLite, eingebettete Weboberfläche, keine externen Abhängigkeiten zur Laufzeit. Läuft auf amd64 und arm64, auch auf einem Raspberry Pi.
 
-**Stand: Phase 1 (Grundgerüst).** Setup, Login, Modulsystem, Datenbank mit Migrationen und Backups, Einstellungen, Audit-Log und Logs sind fertig. Das Modul Health-Checks folgt in Phase 2.
+**Stand: Phase 2 (Check-Bot, Scheduler, API).** Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log und Logs (Phase 1) sowie alle Check-Typen, der Scheduler mit Retry, Stabilisierung, Flatter-Schutz, Abhängigkeiten und Wartungsfenstern, Verdichtung und die lokale JSON-API (Phase 2) sind fertig. Die Oberfläche für Health-Checks folgt in Phase 3, Benachrichtigungen in Phase 4.
 
 ## Schnellstart
 
@@ -39,12 +39,36 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    # Für ICMP-Checks (ab Phase 2) ohne Root: unprivilegiertes Ping erlauben
-    # sysctls:
-    #   - net.ipv4.ping_group_range=0 65535
+    # Für ICMP-Checks ohne Root: unprivilegiertes Ping erlauben
+    sysctls:
+      - net.ipv4.ping_group_range=0 65535
 volumes:
   ipv64-agent-data:
 ```
+
+## Health-Checks per API
+
+Das Modul wird in den Einstellungen aktiviert. Die API nutzt die Sitzung der Oberfläche (später zusätzlich API-Keys). Check-Typen: `http`, `keyword`, `icmp`, `tcp`, `port`, `cert`, `push`.
+
+```bash
+# Check anlegen
+curl -X POST http://localhost:8080/api/checks -H "Content-Type: application/json" -d '{
+  "name": "Webseite", "type": "http", "target": "https://example.com/",
+  "interval_seconds": 60, "retries": 1, "stabilize": 3,
+  "params": {"accept_status": "200-299"}
+}'
+# Liste, Details, Messpunkte, Ereignisse, Statistik
+curl http://localhost:8080/api/checks
+curl http://localhost:8080/api/checks/<token>/measurements?limit=50
+curl http://localhost:8080/api/checks/<token>/stats?range=24h
+# Heartbeat (Push-Check): der Dienst meldet sich selbst
+curl http://localhost:8080/api/push/<token>
+curl "http://localhost:8080/api/push/<token>?status=down&msg=backup+failed"
+```
+
+Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents`, `GET /api/events`, `GET /api/incidents`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`.
+
+ICMP-Checks brauchen im Container entweder unprivilegiertes Ping (`sysctls: net.ipv4.ping_group_range=0 65535`, siehe compose oben) oder `cap_add: NET_RAW`.
 
 ## Umgebungsvariablen
 

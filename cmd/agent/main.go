@@ -22,6 +22,7 @@ import (
 	_ "time/tzdata" // Zeitzonen im Binary, das Laufzeit-Image hat keine
 
 	"github.com/ipv64net/agent/internal/config"
+	"github.com/ipv64net/agent/internal/healthchecks"
 	"github.com/ipv64net/agent/internal/i18n"
 	"github.com/ipv64net/agent/internal/logging"
 	"github.com/ipv64net/agent/internal/module"
@@ -92,6 +93,7 @@ func run() error {
 	}
 
 	modules := module.NewRegistry(st, logger.Slog())
+	modules.Register(healthchecks.New(st, logger.Slog(), nil, Version))
 	registerModules(modules)
 	modules.StartEnabled(ctx)
 	defer modules.StopAll()
@@ -108,10 +110,8 @@ func run() error {
 	return err
 }
 
-// registerModules meldet alle Module an. Im ersten Entwurf sind alle ausser
-// Health-Checks Platzhalter; Health-Checks folgt in Phase 2.
+// registerModules meldet die Platzhalter an, die erst spaeter kommen.
 func registerModules(r *module.Registry) {
-	r.Register(module.Placeholder{I: module.Info{Name: "healthchecks", TitleKey: "nav.healthchecks", Icon: "bi-heart-pulse", Path: "/healthchecks", Order: 10}})
 	r.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Path: "/dyndns", Order: 20}})
 	r.Register(module.Placeholder{I: module.Info{Name: "proxy", TitleKey: "nav.proxy", Icon: "bi-diagram-3", Path: "/proxy", Order: 30}})
 	r.Register(module.Placeholder{I: module.Info{Name: "link", TitleKey: "nav.link", Icon: "bi-cloud", Path: "/link", Order: 90}})

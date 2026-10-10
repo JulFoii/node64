@@ -1,0 +1,818 @@
+package healthchecks
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ipv64net/agent/internal/checks"
+	"github.com/ipv64net/agent/internal/scheduler"
+)
+
+var tokenRe = regexp.MustCompile(`^[A-Za-z0-9]{32}$`)
+
+// ---------------------------------------------------------------- JSON-Darstellung
+
+// checkJSON ist die API-Darstellung eines Checks (Ein- und Ausgabe).
+type checkJSON struct {
+	Token                 string          `json:"token,omitempty"`
+	Name                  string          `json:"name"`
+	Type                  string          `json:"type"`
+	Target                string          `json:"target"`
+	Params                json.RawMessage `json:"params,omitempty"`
+	IntervalSeconds       *int            `json:"interval_seconds,omitempty"`
+	RetryIntervalSeconds  *int            `json:"retry_interval_seconds,omitempty"`
+	Retries               *int            `json:"retries,omitempty"`
+	ConnectTimeoutSeconds *float64        `json:"connect_timeout_seconds,omitempty"`
+	TimeoutSeconds        *float64        `json:"timeout_seconds,omitempty"`
+	Invert                *bool           `json:"invert,omitempty"`
+	Stabilize             *int            `json:"stabilize,omitempty"`
+	IPMode                string          `json:"ip_mode,omitempty"`
+	Tags                  []string        `json:"tags"`
+	Description           string          `json:"description"`
+	Paused                *bool           `json:"paused,omitempty"`
+	Parent                *string         `json:"parent,omitempty"`
+	Critical              *bool           `json:"critical,omitempty"`
+	Execution             string          `json:"execution,omitempty"`
+	NotifyDown            *bool           `json:"notify_down,omitempty"`
+	NotifyUp              *bool           `json:"notify_up,omitempty"`
+	Channels              []int64         `json:"channels"`
+	RepeatMinutes         *int            `json:"repeat_minutes,omitempty"`
+	Revision              int64           `json:"revision,omitempty"`
+	CreatedAt             *time.Time      `json:"created_at,omitempty"`
+	UpdatedAt             *time.Time      `json:"updated_at,omitempty"`
+	PushURL               string          `json:"push_url,omitempty"`
+	State                 *stateJSON      `json:"state,omitempty"`
+}
+
+type stateJSON struct {
+	State           string    `json:"state"`
+	Since           time.Time `json:"since"`
+	LastCheckAt     time.Time `json:"last_check_at"`
+	NextCheckAt     time.Time `json:"next_check_at"`
+	LastStatus      string    `json:"last_status"`
+	LastLatencyMS   float64   `json:"last_latency_ms"`
+	LastReason      string    `json:"last_reason"`
+	LastMessage     string    `json:"last_message"`
+	ConsecutiveFail int       `json:"consecutive_fail"`
+	ConsecutiveOK   int       `json:"consecutive_ok"`
+	LastPushAt      time.Time `json:"last_push_at"`
+	DownSince       time.Time `json:"down_since"`
+	IncidentID      int64     `json:"incident_id,omitempty"`
+	Maintenance     bool      `json:"maintenance"`
+}
+
+func (m *Module) toJSON(c *Check, r *http.Request) checkJSON {
+	iv, riv, re, st, rp := int(c.Interval.Seconds()), int(c.RetryInterval.Seconds()), c.Retries, c.Stabilize, c.RepeatMinutes
+	ct, tt := c.ConnectTimeout.Seconds(), c.TotalTimeout.Seconds()
+	inv, pa, cr, nd, nu := c.Invert, c.Paused, c.Critical, c.NotifyDown, c.NotifyUp
+	parent := c.Parent
+	created, updated := c.CreatedAt, c.UpdatedAt
+	rt := c.Runtime
+	if s := m.scheduler(); s != nil {
+		if live, ok := s.Runtime(c.Token); ok {
+			rt = live
+		}
+	}
+	out := checkJSON{Token: c.Token, Name: c.Name, Type: string(c.Type), Target: c.Target, Params: c.Params,
+		IntervalSeconds: &iv, RetryIntervalSeconds: &riv, Retries: &re, ConnectTimeoutSeconds: &ct, TimeoutSeconds: &tt,
+		Invert: &inv, Stabilize: &st, IPMode: string(c.IPMode), Tags: c.Tags, Description: c.Description, Paused: &pa, Parent: &parent,
+		Critical: &cr, Execution: c.Execution, NotifyDown: &nd, NotifyUp: &nu, Channels: c.Channels, RepeatMinutes: &rp,
+		Revision: c.Revision, CreatedAt: &created, UpdatedAt: &updated,
+		State: &stateJSON{State: string(rt.State), Since: rt.Since, LastCheckAt: rt.LastCheck, NextCheckAt: rt.NextCheck, LastStatus: string(rt.LastStatus),
+			LastLatencyMS: msf(rt.LastLatency), LastReason: string(rt.LastReason), LastMessage: rt.LastMessage, ConsecutiveFail: rt.ConsecutiveFail,
+			ConsecutiveOK: rt.ConsecutiveOK, LastPushAt: rt.LastPush, DownSince: rt.DownSince, IncidentID: rt.Incident,
+			Maintenance: m.st.InMaintenance(r.Context(), c.Token, time.Now())}}
+	if out.Tags == nil {
+		out.Tags = []string{}
+	}
+	if out.Channels == nil {
+		out.Channels = []int64{}
+	}
+	if c.Type == checks.TypePush {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		out.PushURL = scheme + "://" + r.Host + "/api/push/" + c.Token
+	}
+	return out
+}
+
+// apply uebertraegt Eingaben auf einen Check und prueft sie.
+func (m *Module) apply(c *Check, in checkJSON, create bool) error {
+	if create {
+		c.Interval, c.RetryInterval, c.Retries, c.Stabilize = checks.DefaultInterval, 20*time.Second, 1, 3
+		c.ConnectTimeout, c.TotalTimeout = checks.DefaultConnectTimeout, checks.DefaultTotalTimeout
+		c.IPMode, c.Execution, c.NotifyDown, c.NotifyUp = checks.IPAuto, "local", true, true
+	}
+	c.Name = strings.TrimSpace(in.Name)
+	if c.Name == "" || len(c.Name) > 200 {
+		return errors.New("name is required (max 200 characters)")
+	}
+	c.Type = checks.Type(strings.ToLower(strings.TrimSpace(in.Type)))
+	c.Target = strings.TrimSpace(in.Target)
+	if len(in.Params) > 0 {
+		var tmp any
+		if err := json.Unmarshal(in.Params, &tmp); err != nil {
+			return fmt.Errorf("params: %w", err)
+		}
+		c.Params = in.Params
+	} else if create {
+		c.Params = json.RawMessage("{}")
+	}
+	if in.IntervalSeconds != nil {
+		c.Interval = time.Duration(*in.IntervalSeconds) * time.Second
+	}
+	if in.RetryIntervalSeconds != nil {
+		c.RetryInterval = time.Duration(*in.RetryIntervalSeconds) * time.Second
+	}
+	if in.Retries != nil {
+		c.Retries = *in.Retries
+	}
+	if in.ConnectTimeoutSeconds != nil {
+		c.ConnectTimeout = time.Duration(*in.ConnectTimeoutSeconds * float64(time.Second))
+	}
+	if in.TimeoutSeconds != nil {
+		c.TotalTimeout = time.Duration(*in.TimeoutSeconds * float64(time.Second))
+	}
+	if in.Invert != nil {
+		c.Invert = *in.Invert
+	}
+	if in.Stabilize != nil {
+		c.Stabilize = *in.Stabilize
+	}
+	if in.IPMode != "" {
+		c.IPMode = checks.IPMode(in.IPMode)
+	}
+	if in.Tags != nil {
+		c.Tags = nil
+		for _, t := range in.Tags {
+			if t = strings.TrimSpace(t); t != "" && !strings.Contains(t, ",") {
+				c.Tags = append(c.Tags, t)
+			}
+		}
+	}
+	c.Description = strings.TrimSpace(in.Description)
+	if in.Paused != nil {
+		c.Paused = *in.Paused
+	}
+	if in.Parent != nil {
+		c.Parent = strings.TrimSpace(*in.Parent)
+	}
+	if in.Critical != nil {
+		c.Critical = *in.Critical
+	}
+	if in.NotifyDown != nil {
+		c.NotifyDown = *in.NotifyDown
+	}
+	if in.NotifyUp != nil {
+		c.NotifyUp = *in.NotifyUp
+	}
+	if in.Channels != nil {
+		c.Channels = in.Channels
+	}
+	if in.RepeatMinutes != nil {
+		c.RepeatMinutes = *in.RepeatMinutes
+	}
+	if in.Execution != "" && in.Execution != "local" {
+		return errors.New("execution: only local is available in this version")
+	}
+	// Grenzen
+	if c.Type != checks.TypePush {
+		if c.Interval < checks.MinInterval || c.Interval > 24*time.Hour {
+			return fmt.Errorf("interval_seconds must be between %d and 86400", int(checks.MinInterval.Seconds()))
+		}
+		if c.RetryInterval < 5*time.Second || c.RetryInterval > c.Interval {
+			return errors.New("retry_interval_seconds must be between 5 and interval_seconds")
+		}
+	}
+	if c.Retries < 0 || c.Retries > 10 {
+		return errors.New("retries must be between 0 and 10")
+	}
+	if c.Stabilize < 1 || c.Stabilize > 20 {
+		return errors.New("stabilize must be between 1 and 20")
+	}
+	if c.ConnectTimeout < 500*time.Millisecond || c.ConnectTimeout > 60*time.Second {
+		return errors.New("connect_timeout_seconds must be between 0.5 and 60")
+	}
+	if c.TotalTimeout < c.ConnectTimeout || c.TotalTimeout > 120*time.Second {
+		return errors.New("timeout_seconds must be between connect_timeout_seconds and 120")
+	}
+	if c.RepeatMinutes < 0 || c.RepeatMinutes > 1440 {
+		return errors.New("repeat_minutes must be between 0 and 1440")
+	}
+	if len(c.Description) > 2000 {
+		return errors.New("description too long")
+	}
+	if c.Parent != "" && (!tokenRe.MatchString(c.Parent) || c.Parent == c.Token) {
+		return errors.New("parent must be the token of another check")
+	}
+	return checks.Validate(c.Definition())
+}
+
+// parentCycle prueft, ob parent (transitiv) auf token zurueckfuehrt.
+func (m *Module) parentCycle(r *http.Request, token, parent string) (bool, error) {
+	seen := map[string]bool{token: true}
+	for parent != "" {
+		if seen[parent] {
+			return true, nil
+		}
+		seen[parent] = true
+		p, err := m.st.Check(r.Context(), parent)
+		if err != nil {
+			return false, err
+		}
+		if p == nil {
+			return false, errors.New("parent check not found")
+		}
+		parent = p.Parent
+	}
+	return false, nil
+}
+
+// ---------------------------------------------------------------- Handler
+
+type apiError struct {
+	Error string `json:"error"`
+	Field string `json:"field,omitempty"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, apiError{Error: msg})
+}
+
+func readJSON(r *http.Request, v any) error {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 256<<10))
+	if err != nil {
+		return err
+	}
+	if len(b) == 0 {
+		return errors.New("empty body")
+	}
+	return json.Unmarshal(b, v)
+}
+
+func actor(r *http.Request) string {
+	if a := r.Header.Get("X-Agent-Actor"); a != "" {
+		return a
+	}
+	return "api"
+}
+
+func (m *Module) load(w http.ResponseWriter, r *http.Request) *Check {
+	token := r.PathValue("token")
+	if !tokenRe.MatchString(token) {
+		writeErr(w, http.StatusNotFound, "check not found")
+		return nil
+	}
+	c, err := m.st.Check(r.Context(), token)
+	if err != nil {
+		m.log.Error("load check", "err", err)
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return nil
+	}
+	if c == nil {
+		writeErr(w, http.StatusNotFound, "check not found")
+		return nil
+	}
+	return c
+}
+
+func (m *Module) apiList(w http.ResponseWriter, r *http.Request) {
+	list, err := m.st.Checks(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	q := r.URL.Query()
+	out := make([]checkJSON, 0, len(list))
+	for _, c := range list {
+		j := m.toJSON(c, r)
+		if t := q.Get("type"); t != "" && j.Type != t {
+			continue
+		}
+		if s := q.Get("state"); s != "" && j.State.State != s {
+			continue
+		}
+		if tag := q.Get("tag"); tag != "" && !contains(j.Tags, tag) {
+			continue
+		}
+		if s := strings.ToLower(q.Get("q")); s != "" && !strings.Contains(strings.ToLower(j.Name+" "+j.Target+" "+strings.Join(j.Tags, " ")), s) {
+			continue
+		}
+		out = append(out, j)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Module) apiGet(w http.ResponseWriter, r *http.Request) {
+	if c := m.load(w, r); c != nil {
+		writeJSON(w, http.StatusOK, m.toJSON(c, r))
+	}
+}
+
+func (m *Module) apiCreate(w http.ResponseWriter, r *http.Request) {
+	var in checkJSON
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	c := &Check{Token: NewToken(), UpdatedBy: actor(r)}
+	if err := m.apply(c, in, true); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if c.Parent != "" {
+		if cyc, err := m.parentCycle(r, c.Token, c.Parent); err != nil || cyc {
+			writeErr(w, http.StatusUnprocessableEntity, "parent: "+errText(err, "would create a cycle"))
+			return
+		}
+	}
+	if err := m.st.Insert(r.Context(), c); err != nil {
+		m.log.Error("insert check", "err", err)
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	c, _ = m.st.Check(r.Context(), c.Token)
+	if s := m.scheduler(); s != nil {
+		s.Upsert(c.SchedulerCheck(), nil)
+	}
+	m.audit(r, "check.create", c)
+	writeJSON(w, http.StatusCreated, m.toJSON(c, r))
+}
+
+func errText(err error, def string) string {
+	if err != nil {
+		return err.Error()
+	}
+	return def
+}
+
+func (m *Module) apiUpdate(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	var in checkJSON
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	oldType := c.Type
+	c.UpdatedBy = actor(r)
+	if err := m.apply(c, in, false); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if c.Parent != "" {
+		if cyc, err := m.parentCycle(r, c.Token, c.Parent); err != nil || cyc {
+			writeErr(w, http.StatusUnprocessableEntity, "parent: "+errText(err, "would create a cycle"))
+			return
+		}
+	}
+	if err := m.st.Update(r.Context(), c); err != nil {
+		m.log.Error("update check", "err", err)
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if s := m.scheduler(); s != nil {
+		var rt *scheduler.Runtime
+		if oldType == c.Type {
+			if live, ok := s.Runtime(c.Token); ok {
+				rt = &live
+			}
+		}
+		s.Upsert(c.SchedulerCheck(), rt)
+	}
+	m.audit(r, "check.update", c)
+	c, _ = m.st.Check(r.Context(), c.Token)
+	writeJSON(w, http.StatusOK, m.toJSON(c, r))
+}
+
+func (m *Module) apiDelete(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	if s := m.scheduler(); s != nil {
+		s.Remove(c.Token)
+	}
+	if err := m.st.Delete(r.Context(), c.Token); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	m.audit(r, "check.delete", c)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused bool) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	if err := m.st.SetPaused(r.Context(), c.Token, paused, actor(r)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	c, _ = m.st.Check(r.Context(), c.Token)
+	if s := m.scheduler(); s != nil {
+		s.Upsert(c.SchedulerCheck(), nil)
+	}
+	m.audit(r, map[bool]string{true: "check.pause", false: "check.resume"}[paused], c)
+	writeJSON(w, http.StatusOK, m.toJSON(c, r))
+}
+
+func (m *Module) apiPause(w http.ResponseWriter, r *http.Request)  { m.setPaused(w, r, true) }
+func (m *Module) apiResume(w http.ResponseWriter, r *http.Request) { m.setPaused(w, r, false) }
+
+func (m *Module) apiRun(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	if c.Type == checks.TypePush {
+		writeErr(w, http.StatusConflict, "push checks cannot be run manually")
+		return
+	}
+	if s := m.scheduler(); s == nil || !s.RunNow(c.Token) {
+		writeErr(w, http.StatusConflict, "scheduler not running")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (m *Module) apiClone(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	n := *c
+	n.Token = NewToken()
+	n.Name = c.Name + " (copy)"
+	n.Paused = true
+	n.Revision = 0
+	n.UpdatedBy = actor(r)
+	n.Runtime = scheduler.Runtime{}
+	if err := m.st.Insert(r.Context(), &n); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	nc, _ := m.st.Check(r.Context(), n.Token)
+	if s := m.scheduler(); s != nil {
+		s.Upsert(nc.SchedulerCheck(), nil)
+	}
+	m.audit(r, "check.clone", nc)
+	writeJSON(w, http.StatusCreated, m.toJSON(nc, r))
+}
+
+func (m *Module) apiMeasurements(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+	from, to := parseTime(q.Get("from")), parseTime(q.Get("to"))
+	list, err := m.st.Measurements(r.Context(), c.Token, from, to, limit, before)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if list == nil {
+		list = []Measurement{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func parseTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+func (m *Module) apiEvents(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	m.events(w, r, c.Token)
+}
+
+func (m *Module) apiAllEvents(w http.ResponseWriter, r *http.Request) { m.events(w, r, "") }
+
+func (m *Module) events(w http.ResponseWriter, r *http.Request, token string) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	list, err := m.st.Events(r.Context(), token, limit, before)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if list == nil {
+		list = []Event{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (m *Module) apiIncidents(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	m.incidents(w, r, c.Token)
+}
+
+func (m *Module) apiAllIncidents(w http.ResponseWriter, r *http.Request) { m.incidents(w, r, "") }
+
+func (m *Module) incidents(w http.ResponseWriter, r *http.Request, token string) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	list, err := m.st.Incidents(r.Context(), token, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if list == nil {
+		list = []Incident{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (m *Module) apiStats(w http.ResponseWriter, r *http.Request) {
+	c := m.load(w, r)
+	if c == nil {
+		return
+	}
+	rng := r.URL.Query().Get("range")
+	if rng == "" {
+		rng = "24h"
+	}
+	st, err := m.st.Stats(r.Context(), c.Token, rng, time.Now().UTC())
+	if err != nil {
+		if _, ok := ranges[rng]; !ok {
+			writeErr(w, http.StatusBadRequest, "range must be one of 1h, 24h, 7d, 30d, 1y")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (m *Module) apiTypes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, checks.Types)
+}
+
+// ---------------------------------------------------------------- Wartungsfenster
+
+type maintenanceIn struct {
+	Name        string   `json:"name"`
+	StartAt     string   `json:"start_at"`
+	EndAt       string   `json:"end_at"`
+	Repeat      string   `json:"repeat"`
+	RepeatUntil string   `json:"repeat_until"`
+	Tokens      []string `json:"tokens"`
+	Active      *bool    `json:"active"`
+}
+
+func (m *Module) maintenanceFrom(in maintenanceIn, mw *Maintenance) error {
+	mw.Name = strings.TrimSpace(in.Name)
+	if mw.Name == "" || len(mw.Name) > 200 {
+		return errors.New("name is required")
+	}
+	st, err := time.Parse(time.RFC3339, in.StartAt)
+	if err != nil {
+		return errors.New("start_at must be RFC 3339")
+	}
+	en, err := time.Parse(time.RFC3339, in.EndAt)
+	if err != nil {
+		return errors.New("end_at must be RFC 3339")
+	}
+	if !en.After(st) {
+		return errors.New("end_at must be after start_at")
+	}
+	if en.Sub(st) > 30*24*time.Hour {
+		return errors.New("a window may last at most 30 days")
+	}
+	mw.StartAt, mw.EndAt = st.UTC(), en.UTC()
+	switch in.Repeat {
+	case "", "none":
+		mw.Repeat = "none"
+	case "daily", "weekly", "monthly":
+		mw.Repeat = in.Repeat
+	default:
+		return errors.New("repeat must be none, daily, weekly or monthly")
+	}
+	mw.RepeatUntil = time.Time{}
+	if in.RepeatUntil != "" {
+		u, err := time.Parse(time.RFC3339, in.RepeatUntil)
+		if err != nil {
+			return errors.New("repeat_until must be RFC 3339")
+		}
+		mw.RepeatUntil = u.UTC()
+	}
+	mw.Tokens = nil
+	for _, t := range in.Tokens {
+		if !tokenRe.MatchString(t) {
+			return errors.New("tokens must be check tokens")
+		}
+		mw.Tokens = append(mw.Tokens, t)
+	}
+	mw.Active = in.Active == nil || *in.Active
+	return nil
+}
+
+func (m *Module) apiMaintenanceList(w http.ResponseWriter, r *http.Request) {
+	list, err := m.st.MaintenanceList(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if list == nil {
+		list = []Maintenance{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (m *Module) apiMaintenanceCreate(w http.ResponseWriter, r *http.Request) {
+	var in maintenanceIn
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	var mw Maintenance
+	if err := m.maintenanceFrom(in, &mw); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := m.st.MaintenanceInsert(r.Context(), &mw); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	m.auditText(r, "maintenance.create", mw.Name)
+	writeJSON(w, http.StatusCreated, mw)
+}
+
+func (m *Module) apiMaintenanceUpdate(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	list, _ := m.st.MaintenanceList(r.Context())
+	var mw *Maintenance
+	for i := range list {
+		if list[i].ID == id {
+			mw = &list[i]
+		}
+	}
+	if mw == nil {
+		writeErr(w, http.StatusNotFound, "maintenance window not found")
+		return
+	}
+	var in maintenanceIn
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	if err := m.maintenanceFrom(in, mw); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := m.st.MaintenanceUpdate(r.Context(), mw); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	m.auditText(r, "maintenance.update", mw.Name)
+	writeJSON(w, http.StatusOK, mw)
+}
+
+func (m *Module) apiMaintenanceDelete(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err := m.st.MaintenanceDelete(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	m.auditText(r, "maintenance.delete", strconv.FormatInt(id, 10))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------- Push
+
+// pushLimiter: je Token hoechstens 60 Meldungen pro Minute, Mindestabstand 1 s.
+type pushLimiter struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+	cnt  map[string]int
+	win  time.Time
+}
+
+func newPushLimiter() *pushLimiter {
+	return &pushLimiter{last: map[string]time.Time{}, cnt: map[string]int{}, win: time.Now()}
+}
+
+func (l *pushLimiter) allow(token string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if now.Sub(l.win) > time.Minute {
+		l.cnt = map[string]int{}
+		l.win = now
+		if len(l.last) > 10000 {
+			l.last = map[string]time.Time{}
+		}
+	}
+	if now.Sub(l.last[token]) < time.Second || l.cnt[token] >= 60 {
+		return false
+	}
+	l.last[token] = now
+	l.cnt[token]++
+	return true
+}
+
+// apiPush nimmt einen Heartbeat an. Die Antwort ist fuer bekannte und
+// unbekannte Tokens gleich, damit Tokens nicht erraten werden koennen.
+func (m *Module) apiPush(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	w.Header().Set("Cache-Control", "no-store")
+	if !tokenRe.MatchString(token) || !m.push.allow(token) {
+		if tokenRe.MatchString(token) {
+			m.log.Debug("push rate limited", "token", token)
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	q := r.URL.Query()
+	status := checks.Status(strings.ToLower(q.Get("status")))
+	if status != checks.Down {
+		status = checks.Up
+	}
+	msg := strings.TrimSpace(q.Get("msg"))
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	details := map[string]any{}
+	if r.Method == http.MethodPost && r.Body != nil {
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if len(b) > 0 {
+			var v any
+			if json.Unmarshal(b, &v) == nil {
+				details["payload"] = v
+			} else {
+				details["payload"] = string(b)
+			}
+		}
+	}
+	if ip := r.RemoteAddr; ip != "" {
+		details["from"] = ip
+	}
+	if s := m.scheduler(); s != nil {
+		if !s.Push(r.Context(), token, status, msg, details) {
+			m.log.Debug("push for unknown token", "token", token)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------- Audit
+
+func (m *Module) audit(r *http.Request, action string, c *Check) {
+	m.auditText(r, action, c.Name+" ("+c.Token+")")
+}
+
+func (m *Module) auditText(r *http.Request, action, target string) {
+	ip := r.RemoteAddr
+	if h, _, err := splitHostPort(ip); err == nil {
+		ip = h
+	}
+	if err := m.core.Audit(r.Context(), auditEntry(actor(r), action, target, ip)); err != nil {
+		m.log.Error("audit", "err", err)
+	}
+}

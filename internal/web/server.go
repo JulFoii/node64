@@ -110,9 +110,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /logs/download", s.auth(s.logsDownload))
 
 	// Module registrieren ihre Pfade selbst; deaktiviert = 404
-	s.Modules.Routes(s.mux, http.HandlerFunc(s.notFound))
+	s.Modules.Routes(s.mux, http.HandlerFunc(s.notFound), s.authHandler)
 	s.mux.HandleFunc("/", s.notFound)
 }
+
+// authHandler ist auth fuer beliebige Handler (Module).
+func (s *Server) authHandler(next http.Handler) http.Handler { return s.auth(next.ServeHTTP) }
 
 func cacheControl(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
