@@ -44,8 +44,18 @@ Optional für `maintenance`/`start` der neuen Welt: `?status=down&msg=…` melde
 Die früher beschriebenen Ein-Zeilen-Änderungen sind **nicht mehr nötig** und sollten zurückgenommen werden, damit die alte Welt wirklich unberührt bleibt:
 
 - `bots/healthcheck_web_live.php`, `healthcheck_tcp_live.php`, `healthcheck_pings_live.php`: die Zeile `AND u.hc2 = 0` wieder entfernen.
-- `dbconnect.php`, `healthcheck_check()`: die beiden Abfragen wieder auf `SELECT * FROM healthchecks WHERE status = 3 AND type = 'health'` bzw. `... WHERE alarm_time <= NOW() AND status = 1 AND type = 'health'` zurücksetzen.
-- `health.php`: die Zeile `hc2_push_mirror(...)` entfernen (ersetzt durch Schritt 2).
+- `dbconnect.php`, `healthcheck_check()`: die beiden `prepare`-Zeilen wieder auf das Original. Stelle 1 (Funktionsanfang, Kommentar `//Warning zu Alarm`):
+
+  ```php
+  	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE status = 3 AND type = 'health'");
+  ```
+
+  Stelle 2 (Kommentar `//Normal zu Warning`):
+
+  ```php
+  	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE alarm_time <= NOW() AND status = 1 AND type = 'health'");
+  ```
+- `health.php`: die Zeile `hc2_push_mirror(...)` (stand nach `$healthcheck = $statement->fetch();`) entfernen; die neue Zeile aus Schritt 2 steht als **erste Zeile im `if`-Block**, vor `$healthtoken = $key;`.
 - `bots/hc2_migrate.php`: löschen, falls kopiert.
 
 ## Prüfen
