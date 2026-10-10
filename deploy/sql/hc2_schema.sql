@@ -1,27 +1,12 @@
--- Healthchecks 2.0: neue Tabellen hc2_* fuer ipv64.net (MariaDB 10.5, InnoDB, utf8mb4).
--- Phase 1, Paket S2. Idempotent: kann mehrfach ausgefuehrt werden (IF NOT EXISTS).
--- Alte Tabellen (healthchecks, healthcheck_events, integrations, ...) bleiben unveraendert.
+-- Healthchecks 2.0: Tabellen hc2_* in der EIGENEN Datenbank (von Dennis angelegt, Benutzer ipv64_hc).
+-- MariaDB 10.5+, InnoDB, utf8mb4. Phase 1, Paket S2. Idempotent (IF NOT EXISTS), mehrfach ausfuehrbar.
+-- Vorher: USE <name der neuen Datenbank>;  (oder im Client die Datenbank waehlen)
+-- Alte Tabellen in der Hauptdatenbank bleiben unveraendert; die Aenderungen an users/user_class
+-- und die Sicht hc2_users_v stehen in ipv64_main.sql (Hauptdatenbank).
 -- Zeiten in den hc2_*-Tabellen sind UTC (DATETIME(3)); das Portal rechnet beim Anzeigen um.
 -- Token ist VARCHAR(50) wie healthchecks.healthtoken, damit alte Tokens 1:1 uebernommen werden.
 
 SET NAMES utf8mb4;
-
--- ---------------------------------------------------------------- Accounts / Klassen
--- Flag je Account: 0 = altes System, 1 = Healthchecks 2.0; hc2_shadow = alte Bots pruefen ohne Alarm mit (Phase 5)
-ALTER TABLE `users`
-  ADD COLUMN IF NOT EXISTS `hc2` TINYINT NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS `hc2_shadow` TINYINT NOT NULL DEFAULT 0;
-
--- Online-Standorte je Check: Standard 1, ab Supporter (und VIP/Premium/Business/Company) 2
-ALTER TABLE `user_class`
-  ADD COLUMN IF NOT EXISTS `hc_locations` TINYINT NOT NULL DEFAULT 1;
-UPDATE `user_class` SET `hc_locations` = 2 WHERE `id` IN (2,3,4,5,6) AND `hc_locations` = 1;
-
--- Sicht fuer den hub: keine Passwort-Hashes, nur was er braucht
-CREATE OR REPLACE VIEW `hc2_users_v` AS
-  SELECT u.`id`, u.`email`, u.`user_class`, u.`hc2`, u.`hc2_shadow`,
-         c.`healthcheck_limit`, c.`hc_locations`, c.`sms_limit`
-  FROM `users` u JOIN `user_class` c ON c.`id` = u.`user_class`;
 
 -- ---------------------------------------------------------------- Standorte / Knoten
 CREATE TABLE IF NOT EXISTS `hc2_locations` (

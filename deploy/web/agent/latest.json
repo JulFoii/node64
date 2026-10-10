@@ -3,5 +3,17 @@
   "published": "2026-10-10",
   "url": "https://github.com/ipv64net/agent/releases",
   "image": "ghcr.io/ipv64net/agent:0.5.1",
-  "notes": "Erster Entwurf: Healthchecks standalone mit lokaler API, Benachrichtigungen, 2FA, Backup."
+  "notes": "Erster Entwurf: Healthchecks standalone mit lokaler API, Benachrichtigungen, 2FA, Backup.",
+  "endpoints": [
+    {
+      "location": "fsn",
+      "name": "Falkenstein",
+      "url": "https://hc-srv01.ipv64.net"
+    },
+    {
+      "location": "nbg",
+      "name": "Nürnberg",
+      "url": "https://hc-srv02.ipv64.net"
+    }
+  ]
 }
