@@ -260,7 +260,7 @@ Agent                                   ipv64-hub (HTTPS)                       
 - Lokale Änderung bei bestehender Verbindung: Agent sendet `propose {entity:"check", op:"upsert", id, base_revision, data}` mit `base_revision` (die Revision, die er zuletzt gesehen hat) und dem vollen Objekt. Server: wenn `base_revision == aktuelle revision` → speichern, neue Revision, `ack {revision, data}` mit dem gespeicherten Objekt; der Agent übernimmt die Antwort (Write-Through). Erst dann gilt die Änderung lokal; die Oberfläche zeigt bis dahin „wird gespeichert“.
 - Ohne Verbindung: Änderung in die lokale Outbox (`hc_outbox`: `kind=check_upsert|check_delete|channel_upsert|...`, `payload`, `base_revision`), Oberfläche zeigt „ausstehend“. Beim Wiederverbinden Replay in Reihenfolge.
 - Konflikt (`base_revision` veraltet): `conflict {id, server: {...}, revision}`. Agent speichert beide Versionen in `hc_conflicts` und zeigt sie dem Nutzer: „Server behalten“ (lokal überschreiben) oder „Meine Version senden“ (erneut PUT mit der aktuellen Server-Revision als Basis). **Nie stilles Überschreiben.**
-- Löschen: `propose {op:"delete"}` mit `base_revision`; Server setzt `deleted_at` (Tombstone), Log-Eintrag `delete`. Umgekehrt: Server-Löschung kommt als `delete` im Pull; der Agent löscht lokal **inklusive Messdaten** erst nach Bestätigung aller offenen Messpunkte (sonst Outbox leeren zuerst).
+- Löschen: `propose {op:"delete"}` mit `base_revision`; Server setzt `deleted_at` (Tombstone), Log-Eintrag `delete`. Umgekehrt: Server-Löschung kommt als `delete` in einer `config`-Nachricht; der Agent löscht lokal **inklusive Messdaten** erst nach Bestätigung aller offenen Messpunkte (sonst Outbox leeren zuerst).
 - Dieselben Regeln für Kanäle (`entity:"channel"`) und Wartungsfenster (`entity:"maintenance"`). Bei einem Repair (3.6) stehen dieselben Operationen als HTTPS `PUT/DELETE /v1/agents/me/{checks,channels,maintenance}/{id}` bereit.
 
 ### 3.5 Messergebnisse: Agent → Server
@@ -378,7 +378,7 @@ Pfade während der Umstellung unter `/healthchecks2/...`, nach Abschluss überne
 ### 3.9 Umwandeln lokal ↔ online (Portal und Agent)
 
 - lokal → online: Server prüft Limit, führt über hub einen Testlauf aus (`hc2_testruns`, Ergebnis innerhalb 30 s), private Ziele (RFC 1918, `.local`, `localhost`) werden abgewiesen mit Hinweis auf CDN. Erfolg → `execution = online`, `agent_id` bleibt als Herkunft, Messhistorie bleibt (Zeitleiste markiert „ab hier online“).
-- online → lokal: Nutzer wählt Agent; Agent bekommt den Check per Pull, führt Testlauf aus, meldet Ergebnis; erst dann `execution = local`.
+- online → lokal: Nutzer wählt Agent; Agent bekommt den Check über den Socket, führt Testlauf aus, meldet Ergebnis; erst dann `execution = local`.
 - beides: beide Seiten messen, zwei Zustände, ein Gesamtzustand.
 
 ---
