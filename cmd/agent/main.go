@@ -13,10 +13,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 	_ "time/tzdata" // Zeitzonen im Binary, das Laufzeit-Image hat keine
@@ -233,13 +235,26 @@ func healthcheck() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", cfg.HTTPPort)
+	// Bind-Adresse verwenden, wenn gesetzt; sonst beide Loopbacks probieren
+	// (Container ohne IPv4 oder ohne IPv6 sollen beide gesund gemeldet werden).
+	hosts := []string{"127.0.0.1", "::1"}
+	if cfg.BindAddr != "" && cfg.BindAddr != "0.0.0.0" && cfg.BindAddr != "::" {
+		hosts = []string{cfg.BindAddr}
+	}
+	scheme, port := "http", cfg.HTTPPort
 	client := &http.Client{Timeout: 4 * time.Second}
 	if cfg.HTTPPort == 0 {
-		url = fmt.Sprintf("https://127.0.0.1:%d/api/health", cfg.HTTPSPort)
+		scheme, port = "https", cfg.HTTPSPort
 		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // eigenes selbstsigniertes Zertifikat
 	}
-	resp, err := client.Get(url)
+	var resp *http.Response
+
+	for _, h := range hosts {
+		resp, err = client.Get(fmt.Sprintf("%s://%s/api/health", scheme, net.JoinHostPort(h, strconv.Itoa(port))))
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "unhealthy:", err)
 		return 1

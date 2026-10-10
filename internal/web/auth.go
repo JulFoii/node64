@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -141,6 +142,17 @@ func (l *loginLimiter) cleanup() {
 			delete(l.buckets, k)
 		}
 	}
+}
+
+// ipKey ist der Schluessel fuer Ratelimits je Adresse: IPv4 einzeln, IPv6
+// als /64-Praefix, weil ein Anschluss dort ueblicherweise ein ganzes /64 hat
+// und sonst jede Anfrage mit neuer Adresse das Limit umgehen koennte.
+func ipKey(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return ip
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 // ipLimiter begrenzt Anfragen je IP (Standard 600 pro Minute, Burst 300).

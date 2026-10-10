@@ -791,6 +791,9 @@ func (m *Module) apiPush(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if ip := r.RemoteAddr; ip != "" {
+		if h, _, err := splitHostPort(ip); err == nil {
+			ip = h
+		}
 		details["from"] = ip
 	}
 	if s := m.scheduler(); s != nil {

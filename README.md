@@ -95,6 +95,23 @@ ICMP-Checks brauchen im Container entweder unprivilegiertes Ping (`sysctls: net.
 - **Schutz:** Login-Ratelimit, Ratelimit je IP für alle Anfragen, Push-URLs mit Mindestabstand, höchstens 60 Nachrichten je Kanal und Stunde.
 - **Updates:** Optional prüft der Agent täglich eine Versionsdatei bei ipv64.net. Es werden keine Daten gesendet.
 
+## IPv4 und IPv6
+
+Der Agent ist durchgehend Dual-Stack: die Oberfläche lauscht auf IPv4 und IPv6, jeder Check hat einen Modus (`auto`, `ipv4`, `ipv6`, `both` = zwei getrennte Ergebnisse), ICMP pingt v4 und v6, Benachrichtigungen und die spätere ipv64-Verknüpfung nutzen beides. Vor jedem Check prüft der Agent, ob die jeweilige Adressfamilie im Container überhaupt erreichbar ist, damit ein fehlendes IPv6 im Docker-Netz nicht als Störung des Ziels gemeldet wird.
+
+Docker gibt Containern standardmäßig **kein IPv6**. Damit Checks per IPv6 laufen, dem Netz IPv6 geben (Docker 27+, compose):
+
+```yaml
+networks:
+  default:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd00:64::/64   # ULA, Docker übernimmt NAT66
+```
+
+Alternativ `network_mode: host`. `net.ipv4.ping_group_range` gilt trotz des Namens auch für ICMPv6.
+
 ## Umgebungsvariablen
 
 | Variable | Standard | Bedeutung |

@@ -151,7 +151,7 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	f := s.formValues(r, "username", "password", "next")
 	v.Form = map[string]string{"username": f["username"], "next": safeNext(f["next"])}
 	ip := s.clientIP(r)
-	keys := []string{"ip:" + ip, "user:" + strings.ToLower(f["username"])}
+	keys := []string{"ip:" + ipKey(ip), "user:" + strings.ToLower(f["username"])}
 	if wait := s.limiter.retryAfter(keys...); wait > 0 {
 		secs := int(wait.Seconds()) + 1
 		w.Header().Set("Retry-After", strconv.Itoa(secs))

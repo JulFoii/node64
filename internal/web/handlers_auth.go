@@ -54,7 +54,7 @@ func (s *Server) loginTOTPSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.clientIP(r)
-	keys := []string{"totp:" + ip, "totp:user:" + strconv.FormatInt(u.ID, 10)}
+	keys := []string{"totp:" + ipKey(ip), "totp:user:" + strconv.FormatInt(u.ID, 10)}
 	v := s.view(r, "login.title")
 	v.Form["next"] = safeNext(r.PostFormValue("next"))
 	if wait := s.limiter.retryAfter(keys...); wait > 0 {

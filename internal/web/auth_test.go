@@ -51,3 +51,15 @@ func TestSafeNext(t *testing.T) {
 		}
 	}
 }
+
+func TestIPKey(t *testing.T) {
+	if ipKey("192.0.2.7") != "192.0.2.7" {
+		t.Fatal("ipv4 must stay unchanged")
+	}
+	if a, b := ipKey("2001:db8:1:2:aaaa::1"), ipKey("2001:db8:1:2:bbbb::9"); a != b || a != "2001:db8:1:2::/64" {
+		t.Fatalf("ipv6 must map to /64: %s %s", a, b)
+	}
+	if ipKey("not an ip") != "not an ip" {
+		t.Fatal("garbage must pass through")
+	}
+}

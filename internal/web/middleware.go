@@ -74,7 +74,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 // rateLimit schuetzt UI und API vor Ueberlastung (je IP).
 func (s *Server) rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/static/") && !s.ipLimit.allow(s.clientIP(r)) {
+		if !strings.HasPrefix(r.URL.Path, "/static/") && !s.ipLimit.allow(ipKey(s.clientIP(r))) {
 			s.log.Warn("request rate limited", "ip", s.clientIP(r), "path", r.URL.Path)
 			w.Header().Set("Retry-After", "10")
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
@@ -111,7 +111,7 @@ func (s *Server) session(next http.Handler) http.Handler {
 						return
 					}
 				}
-				s.limiter.fail("apikey:" + s.clientIP(r))
+				s.limiter.fail("apikey:" + ipKey(s.clientIP(r)))
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				http.Error(w, `{"error":"invalid api key"}`, http.StatusUnauthorized)
 				return
