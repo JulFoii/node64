@@ -134,8 +134,8 @@ func run() error {
 
 // registerModules meldet die Platzhalter an, die erst spaeter kommen.
 func registerModules(r *module.Registry) {
-	r.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Path: "/dyndns", Order: 20}})
-	r.Register(module.Placeholder{I: module.Info{Name: "proxy", TitleKey: "nav.proxy", Icon: "bi-diagram-3", Path: "/proxy", Order: 30}})
+	r.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Image: "dyndns64.webp", Path: "/dyndns", Order: 20}})
+	r.Register(module.Placeholder{I: module.Info{Name: "proxy", TitleKey: "nav.proxy", Icon: "bi-diagram-3", Image: "cdn64.webp", Path: "/proxy", Order: 30}})
 	r.Register(module.Placeholder{I: module.Info{Name: "link", TitleKey: "nav.link", Icon: "bi-cloud", Path: "/link", Order: 90}})
 }
 

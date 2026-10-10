@@ -143,6 +143,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /logout", s.logout)
 	s.authRoutes()
 	s.backupRoutes()
+	s.apiRoutes()
 
 	s.mux.Handle("GET /{$}", s.auth(s.dashboard))
 	s.mux.Handle("GET /settings", s.auth(s.settings))
@@ -162,6 +163,7 @@ func (s *Server) routes() {
 	// Module registrieren ihre Pfade selbst; deaktiviert = 404
 	s.Modules.Routes(s.mux, http.HandlerFunc(s.notFound), module.Guards{
 		Auth: s.authHandler, Render: s.renderModule, T: s.tr, Flash: s.flash, Actor: s.actor, CSRF: csrfToken, Lang: s.lang, Timezone: s.location,
+		Translate: s.I18n.T,
 	})
 	s.mux.HandleFunc("/", s.notFound)
 }

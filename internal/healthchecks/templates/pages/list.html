@@ -40,10 +40,14 @@
 </form>
 
 {{if not $d.Rows}}
-<div class="card"><div class="card-body text-center text-body-secondary py-5">
-	<i class="bi bi-heart-pulse fs-1 d-block mb-2"></i>
-	{{if $d.Total}}{{.T "hc.empty_filter"}}{{else}}{{.T "hc.empty"}}{{end}}
-	{{if not $d.Total}}<div class="mt-3"><a class="btn btn-primary" href="/healthchecks/new">{{.T "hc.new"}}</a></div>{{end}}
+<div class="card"><div class="card-body text-center text-body-secondary py-4">
+	{{if $d.Total}}<i class="bi bi-heart-pulse fs-1 d-block mb-2"></i>{{.T "hc.empty_filter"}}
+	{{else}}
+	<img src="/static/img/healthcheck_service_monitoring_ipv64.png" alt="" class="img-fluid rounded shadow-sm mb-3 hc-empty-img">
+	<div>{{.T "hc.empty"}}</div>
+	<div class="small mt-1">{{.T "hc.empty_hint"}}</div>
+	<div class="mt-3"><a class="btn btn-primary" href="/healthchecks/new">{{.T "hc.new"}}</a></div>
+	{{end}}
 </div></div>
 {{else}}
 {{$qs := print "&q=" $f.q "&state=" $f.state "&type=" $f.type "&tag=" $f.tag}}
@@ -81,7 +85,7 @@
 		</td>
 		<td data-label="{{$.T "common.type"}}"><span class="badge text-bg-light">{{$.T (print "hc.type." $c.Type)}}</span></td>
 		<td data-label="{{$.T "hc.latency"}}" class="text-end text-nowrap">{{if gt .Latency 0.0}}{{ms .Latency}} ms{{else}}–{{end}}</td>
-		<td data-label="{{$.T "hc.recent"}}" class="hc-beats"><div class="beats">{{range .Pills}}<span class="beat beat-{{.Class}}" title="{{.Title}}"></span>{{end}}</div></td>
+		<td data-label="{{$.T "hc.recent"}}" class="hc-beats"><div class="beats">{{range .Pills}}<span class="beat beat-{{.Class}}" data-bs-toggle="tooltip" data-tip-label="{{.Label}}" data-tip-when="{{.When}}" data-tip-ms="{{.Latency}}" data-tip-msg="{{.Message}}"></span>{{end}}</div></td>
 		<td data-label="{{$.T "hc.changed"}}" class="small text-nowrap" title="{{$.Time .Changed}}">{{$.Ago .Changed}}</td>
 		<td data-label="{{$.T "common.actions"}}" class="text-end text-nowrap">
 			{{if eq .State "paused"}}
@@ -113,4 +117,4 @@
 {{end}}
 {{end}}
 {{end}}
-{{define "scripts"}}<script src="/static/js/healthchecks.js"></script>{{end}}
+{{define "scripts"}}<script src="/static/js/healthchecks.js?v={{.Version}}"></script>{{end}}

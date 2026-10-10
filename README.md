@@ -1,10 +1,10 @@
 # ipv64 Agent
 
-Ein leichtgewichtiger Docker-Container für das Heimnetz: Health-Checks (als Uptime-Kuma-Alternative), später DynDNS-Updater und Reverse-Proxy, standalone oder verknüpft mit einem [ipv64.net](https://ipv64.net)-Account.
+Ein leichtgewichtiger Docker-Container für das Heimnetz: Healthchecks (als Uptime-Kuma-Alternative), später DynDNS-Updater und Reverse-Proxy, standalone oder verknüpft mit einem [ipv64.net](https://ipv64.net)-Account.
 
 Ein einziges Go-Binary, SQLite, eingebettete Weboberfläche, keine externen Abhängigkeiten zur Laufzeit. Läuft auf amd64 und arm64, auch auf einem Raspberry Pi.
 
-**Stand: Phase 5 (Betrieb).** Der erste Entwurf ist vollständig: Kern mit Setup, Login, Zwei-Faktor-Anmeldung (TOTP mit Wiederherstellungscodes), API-Keys, Modulsystem, Datenbank mit Migrationen, Backup und Wiederherstellung, Export und Import der Konfiguration, Audit-Log, Logs mit Log-Level je Bereich, Versionsprüfung per Opt-in. Health-Checks mit allen Typen, Scheduler, Oberfläche, Wartungsfenstern und JSON-API. Benachrichtigungen über E-Mail, Telegram, Discord, ntfy, Gotify und Webhook. Was ipv64.net für die Verknüpfung bauen muss, steht in [docs/SYNC.md](docs/SYNC.md).
+**Stand: Phase 5 (Betrieb).** Der erste Entwurf ist vollständig: Kern mit Setup, Login, Zwei-Faktor-Anmeldung (TOTP mit Wiederherstellungscodes), API-Keys, Modulsystem, Datenbank mit Migrationen, Backup und Wiederherstellung, Export und Import der Konfiguration, Audit-Log, Logs mit Log-Level je Bereich, Versionsprüfung per Opt-in. Healthchecks mit allen Typen, Scheduler, Oberfläche, Wartungsfenstern und JSON-API. Benachrichtigungen über E-Mail, Telegram, Discord, ntfy, Gotify und Webhook. Was ipv64.net für die Verknüpfung bauen muss, steht in [docs/SYNC.md](docs/SYNC.md).
 
 ## Benachrichtigungen
 
@@ -54,13 +54,21 @@ volumes:
   ipv64-agent-data:
 ```
 
-## Health-Checks per API
+## Lokale API
 
-Das Modul wird in den Einstellungen aktiviert. Die API nutzt die Sitzung der Oberfläche (später zusätzlich API-Keys). Check-Typen: `http`, `keyword`, `icmp`, `tcp`, `port`, `cert`, `push`.
+Der Agent stellt alles, was die Oberfläche kann, auch als JSON-API im eigenen Netz bereit: Status, Module, Einstellungen, Audit-Log, Logs, Backup, Benachrichtigungskanäle und das komplette Healthchecks-Modul. Die Referenz liegt im Agent unter `/api/docs`, die maschinenlesbare Beschreibung (OpenAPI 3.1) unter `/api/openapi.json`.
+
+Anmeldung mit einem API-Key aus den Einstellungen (`Authorization: Bearer ipv64a_…`) oder mit der Browser-Sitzung. Ohne Anmeldung erreichbar sind nur `/api/health` (für Docker) und `/api/push/{token}` (Heartbeats).
+
+![Healthchecks](internal/web/static/img/healthcheck_service_monitoring_ipv64.png)
+
+### Healthchecks per API
+
+Das Modul wird in den Einstellungen aktiviert. Check-Typen: `http`, `keyword`, `icmp`, `tcp`, `port`, `cert`, `push`.
 
 ```bash
 # Check anlegen
-curl -X POST http://localhost:8080/api/checks -H "Content-Type: application/json" -d '{
+curl -X POST http://localhost:8080/api/checks -H "Authorization: Bearer ipv64a_…" -H "Content-Type: application/json" -d '{
   "name": "Webseite", "type": "http", "target": "https://example.com/",
   "interval_seconds": 60, "retries": 1, "stabilize": 3,
   "params": {"accept_status": "200-299"}
@@ -74,7 +82,7 @@ curl http://localhost:8080/api/push/<token>
 curl "http://localhost:8080/api/push/<token>?status=down&msg=backup+failed"
 ```
 
-Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents`, `GET /api/events`, `GET /api/incidents`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`.
+Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents`, `GET /api/events`, `GET /api/incidents`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`, `GET|POST /api/channels`, `POST /api/channels/{id}/test`, `GET /api/status`, `GET|PUT /api/settings`, `GET /api/backup`. Alles mit Parametern und Antworten unter `/api/docs`.
 
 ICMP-Checks brauchen im Container entweder unprivilegiertes Ping (`sysctls: net.ipv4.ping_group_range=0 65535`, siehe compose oben) oder `cap_add: NET_RAW`.
 

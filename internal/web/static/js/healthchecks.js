@@ -1,4 +1,4 @@
-// Health-Checks: Formular, Liste und Detail-Chart. Vanilla-JS, keine externen Quellen.
+// Healthchecks: Formular, Liste und Detail-Chart. Vanilla-JS, keine externen Quellen.
 (function () {
 	"use strict";
 
@@ -15,6 +15,22 @@
 		};
 		typeSel.addEventListener("change", update);
 		update();
+	}
+
+	// Tooltips der Pillen: Inhalt aus data-Attributen, hier maskiert und als HTML gesetzt
+	if (window.bootstrap && bootstrap.Tooltip) {
+		var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+		document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+			var title = el.getAttribute("data-bs-title") || el.getAttribute("title") || "";
+			if (el.hasAttribute("data-tip-label")) {
+				var cls = (el.className.match(/beat-(up|down|maintenance|dependent)/) || [])[1] || "";
+				title = '<strong class="hc-tip-' + cls + '">' + esc(el.getAttribute("data-tip-label")) + "</strong>";
+				if (el.getAttribute("data-tip-ms")) { title += " · " + esc(el.getAttribute("data-tip-ms")); }
+				title += "<br>" + esc(el.getAttribute("data-tip-when"));
+				if (el.getAttribute("data-tip-msg")) { title += '<br><span class="hc-tip-msg">' + esc(el.getAttribute("data-tip-msg")) + "</span>"; }
+			}
+			new bootstrap.Tooltip(el, { title: title, html: true, customClass: "hc-tip", container: "body", delay: { show: 80, hide: 0 } });
+		});
 	}
 
 	// Rueckfrage vor Loeschen und Massenaktionen

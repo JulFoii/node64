@@ -46,8 +46,11 @@ func (m *Module) uiRoutes(mux *http.ServeMux, g module.Guards) {
 
 // Pill ist eine Messung in der Pillenleiste.
 type Pill struct {
-	Class string // up, down, stabilizing, paused, maintenance, dependent
-	Title string
+	Class   string // up, down, maintenance, dependent
+	Label   string // Statuswort fuer den Tooltip
+	When    string // Zeitpunkt, formatiert
+	Latency string // "12.3 ms" oder leer
+	Message string // gekuerzte Meldung
 }
 
 type row struct {
@@ -100,8 +103,9 @@ func (m *Module) rowOf(ctx context.Context, lang string, c *Check, pills map[str
 
 // pillsFor liefert die letzten n Messungen je Check als Pillen (aelteste zuerst).
 func (m *Module) pillsFor(ctx context.Context, lang string, loc *time.Location, n int) (map[string][]Pill, error) {
-	rows, err := m.st.r.QueryContext(ctx, `SELECT token, time, status, latency_ms, flags FROM (
-		SELECT token, time, status, latency_ms, flags, row_number() OVER (PARTITION BY token ORDER BY agent_seq DESC) AS rn FROM hc_measurements
+	tr := m.translator(lang)
+	rows, err := m.st.r.QueryContext(ctx, `SELECT token, time, status, latency_ms, flags, reason, message FROM (
+		SELECT token, time, status, latency_ms, flags, reason, message, row_number() OVER (PARTITION BY token ORDER BY agent_seq DESC) AS rn FROM hc_measurements
 	) WHERE rn <= ? ORDER BY token, time`, n)
 	if err != nil {
 		return nil, err
@@ -109,33 +113,39 @@ func (m *Module) pillsFor(ctx context.Context, lang string, loc *time.Location, 
 	defer rows.Close()
 	out := map[string][]Pill{}
 	for rows.Next() {
-		var token, t string
+		var token, t, reason, message string
 		var status, flags int
 		var lat float64
-		if err := rows.Scan(&token, &t, &status, &lat, &flags); err != nil {
+		if err := rows.Scan(&token, &t, &status, &lat, &flags, &reason, &message); err != nil {
 			return nil, err
 		}
-		class := "down"
+		class, label := "down", tr("hc.state.down")
 		if status == 1 {
-			class = "up"
+			class, label = "up", tr("hc.state.up")
 		}
 		if flags&FlagMaintenance != 0 {
 			class = "maintenance"
+			label += " · " + tr("hc.maintenance")
 		} else if flags&FlagDependent != 0 {
 			class = "dependent"
+			label += " · " + tr("hc.state.dependent")
 		}
 		ts := pt(t)
 		if loc != nil {
 			ts = ts.In(loc)
 		}
-		title := ts.Format("02.01. 15:04:05")
+		when := ts.Format("02.01.2006 15:04:05")
 		if lang != "de" {
-			title = ts.Format("Jan 2 15:04:05")
+			when = ts.Format("2006-01-02 15:04:05")
 		}
+		pl := Pill{Class: class, Label: label, When: when, Message: message}
 		if lat > 0 {
-			title += fmt.Sprintf(" · %.1f ms", lat)
+			pl.Latency = fmt.Sprintf("%.1f ms", lat)
 		}
-		out[token] = append(out[token], Pill{Class: class, Title: title})
+		if r := []rune(message); len(r) > 90 {
+			pl.Message = string(r[:90]) + "…"
+		}
+		out[token] = append(out[token], pl)
 	}
 	return out, rows.Err()
 }
@@ -853,4 +863,14 @@ func (m *Module) channels(ctx context.Context) ([]*notify.Channel, error) {
 		return nil, nil
 	}
 	return m.notifyStore.Channels(ctx)
+}
+
+// translator liefert eine Uebersetzungsfunktion fuer eine feste Sprache.
+func (m *Module) translator(lang string) func(key string, args ...any) string {
+	return func(key string, args ...any) string {
+		if m.g.Translate != nil {
+			return m.g.Translate(lang, key, args...)
+		}
+		return key
+	}
 }

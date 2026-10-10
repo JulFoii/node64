@@ -30,6 +30,8 @@ type Info struct {
 	TitleKey string
 	// Icon ist eine Bootstrap-Icon-Klasse, z. B. "bi-heart-pulse".
 	Icon string
+	// Image ist optional ein Logo (Pfad unter /static/img), das statt des Icons gezeigt wird.
+	Image string
 	// Path ist der Einstiegspfad in der Oberflaeche.
 	Path string
 	// Available false = Platzhalter ("demnaechst"), kann nicht aktiviert werden.
@@ -74,6 +76,8 @@ type Guards struct {
 	Lang func(r *http.Request) string
 	// Timezone liefert die Zeitzone des Benutzers.
 	Timezone func(r *http.Request) *time.Location
+	// Translate uebersetzt fuer eine feste Sprache (z. B. fuer Tooltips, Hintergrundjobs).
+	Translate func(lang, key string, args ...any) string
 }
 
 // Templater liefert die Seiten-Templates eines Moduls (pages/*.html).

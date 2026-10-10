@@ -1,4 +1,4 @@
-// Package healthchecks ist das Modul Health-Checks: Datenhaltung, Scheduler-
+// Package healthchecks ist das Modul Healthchecks: Datenhaltung, Scheduler-
 // Anbindung, lokale JSON-API und (ab Phase 3) die Oberflaeche.
 package healthchecks
 
@@ -156,7 +156,7 @@ func (m *Module) Start(ctx context.Context) error {
 	m.sched.Start(ctx)
 	m.wg.Add(1)
 	go m.housekeeping(ctx)
-	m.log.Info("health checks loaded", "count", len(list))
+	m.log.Info("healthchecks loaded", "count", len(list))
 	return nil
 }
 

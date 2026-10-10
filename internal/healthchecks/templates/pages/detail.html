@@ -36,7 +36,7 @@
 
 <div class="card mb-3">
 	<div class="card-body">
-		<div class="beats mb-2">{{range $d.Pills}}<span class="beat beat-lg beat-{{.Class}}" title="{{.Title}}"></span>{{end}}{{if not $d.Pills}}<span class="text-body-secondary small">{{.T "hc.no_data"}}</span>{{end}}</div>
+		<div class="beats mb-2">{{range $d.Pills}}<span class="beat beat-lg beat-{{.Class}}" data-bs-toggle="tooltip" data-tip-label="{{.Label}}" data-tip-when="{{.When}}" data-tip-ms="{{.Latency}}" data-tip-msg="{{.Message}}"></span>{{end}}{{if not $d.Pills}}<span class="text-body-secondary small">{{.T "hc.no_data"}}</span>{{end}}</div>
 		<div class="row g-2 text-center">
 			{{range $d.Ranges}}
 			<div class="col-4">
@@ -151,4 +151,4 @@ curl -fsS "{{$d.PushURL}}?status=down&amp;msg=backup+failed"</pre>
 	</div>
 </div>
 {{end}}
-{{define "scripts"}}<script src="/static/js/chart.umd.js"></script><script src="/static/js/healthchecks.js"></script>{{end}}
+{{define "scripts"}}<script src="/static/js/chart.umd.js"></script><script src="/static/js/healthchecks.js?v={{.Version}}"></script>{{end}}

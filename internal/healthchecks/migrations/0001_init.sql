@@ -1,4 +1,4 @@
--- Modul Health-Checks. Zeiten als "2006-01-02T15:04:05.000Z" (UTC, feste Breite,
+-- Modul Healthchecks. Zeiten als "2006-01-02T15:04:05.000Z" (UTC, feste Breite,
 -- damit Zeichenkettenvergleiche der Zeitreihenfolge entsprechen).
 
 CREATE TABLE IF NOT EXISTS hc_checks (

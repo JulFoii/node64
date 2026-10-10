@@ -28,6 +28,8 @@ type View struct {
 	Sync     agentsync.State
 	SetupRun bool
 	Data     any
+	Scheme   string
+	Host     string
 	Errors   map[string]string
 	Form     map[string]string
 	loc      *time.Location
@@ -37,6 +39,7 @@ type NavItem struct {
 	Key       string
 	Path      string
 	Icon      string
+	Image     string
 	Available bool
 	Enabled   bool
 	Active    bool
@@ -128,6 +131,10 @@ func (s *Server) view(r *http.Request, titleKey string) *View {
 	v := &View{s: s, Lang: s.lang(r), Path: r.URL.Path, User: currentUser(r), CSRF: csrfToken(r), Version: s.Version,
 		Errors: map[string]string{}, Form: map[string]string{}, loc: s.location(r), Sync: s.Sync.State()}
 	v.Title = v.T(titleKey)
+	v.Scheme, v.Host = "http", r.Host
+	if r.TLS != nil {
+		v.Scheme = "https"
+	}
 	if c, err := r.Cookie(themeCookie); err == nil && (c.Value == "light" || c.Value == "dark") {
 		v.Theme = c.Value
 	}
@@ -147,13 +154,14 @@ func (s *Server) view(r *http.Request, titleKey string) *View {
 func (s *Server) nav(r *http.Request) []NavItem {
 	items := []NavItem{{Key: "nav.dashboard", Path: "/", Icon: "bi-speedometer2", Available: true, Enabled: true}}
 	for _, m := range s.Modules.List(r.Context()) {
-		items = append(items, NavItem{Key: m.Info.TitleKey, Path: m.Info.Path, Icon: m.Info.Icon, Available: m.Info.Available, Enabled: m.Running})
+		items = append(items, NavItem{Key: m.Info.TitleKey, Path: m.Info.Path, Icon: m.Info.Icon, Image: m.Info.Image, Available: m.Info.Available, Enabled: m.Running})
 	}
 	items = append(items,
 		NavItem{Key: "nav.notifications", Path: "/notifications", Icon: "bi-bell", Available: true, Enabled: s.Notify != nil},
 		NavItem{Key: "nav.settings", Path: "/settings", Icon: "bi-gear", Available: true, Enabled: true},
 		NavItem{Key: "nav.audit", Path: "/audit", Icon: "bi-journal-text", Available: true, Enabled: true},
 		NavItem{Key: "nav.logs", Path: "/logs", Icon: "bi-terminal", Available: true, Enabled: true},
+		NavItem{Key: "nav.api", Path: "/api/docs", Icon: "bi-code-slash", Available: true, Enabled: true},
 	)
 	for i := range items {
 		p := items[i].Path

@@ -10,7 +10,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
-    "healthchecks": "Health Checks",
+    "healthchecks": "Healthchecks",
     "dyndns": "DynDNS",
     "proxy": "Reverse Proxy",
     "link": "ipv64 Link",
@@ -27,7 +27,8 @@
     "theme_dark": "Dark",
     "theme_auto": "Automatic",
     "standalone": "Standalone, not linked",
-    "version": "Version {version}"
+    "version": "Version {version}",
+    "api": "API"
   },
   "common": {
     "save": "Save",
@@ -110,7 +111,7 @@
     "uptime": "Running since",
     "database": "Database",
     "modules": "Modules",
-    "no_modules": "No module is active yet. Enable Health Checks in the settings.",
+    "no_modules": "No module is active yet. Enable Healthchecks in the settings.",
     "link_status": "ipv64 link",
     "not_linked": "Not linked. The agent runs standalone.",
     "ok": "OK",
@@ -186,7 +187,7 @@
     "setup_done": "Setup is already complete."
   },
   "module": {
-    "healthchecks": "Health Checks",
+    "healthchecks": "Healthchecks",
     "dyndns": "DynDNS Updater",
     "proxy": "Reverse Proxy",
     "link": "ipv64 Link"
@@ -195,7 +196,7 @@
     "new": "New check",
     "edit": "Edit check",
     "missing": "This check does not exist.",
-    "empty": "No health checks yet. Create the first one.",
+    "empty": "No healthchecks yet. Create the first one.",
     "empty_filter": "No check matches the filter.",
     "filter": "Filter",
     "reset": "Reset",
@@ -355,7 +356,8 @@
       "repeat_monthly": "monthly",
       "all_hint": "no selection = all",
       "deleted": "Maintenance window deleted."
-    }
+    },
+    "empty_hint": "Push, HTTP(S), keyword, ping, TCP, port and certificate. Everything stays in your network."
   },
   "notify": {
     "subject": {
@@ -520,5 +522,9 @@
     "password_needed": "The file is encrypted, please enter the password.",
     "password_wrong": "The password does not match the file.",
     "imported": "{count} items imported."
+  },
+  "api": {
+    "title": "Local API",
+    "public": "no auth"
   }
 }

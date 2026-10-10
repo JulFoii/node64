@@ -1,0 +1,27 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+	<h1 class="h4 mb-0">{{.T "api.title"}}</h1>
+	<a class="btn btn-outline-secondary btn-sm" href="/api/openapi.json" target="_blank"><i class="bi bi-filetype-json"></i> openapi.json</a>
+</div>
+<p class="text-body-secondary">{{index $d.Info "description"}}</p>
+<div class="card mb-3"><div class="card-body">
+<pre class="mb-0 small">curl -H "Authorization: Bearer ipv64a_…" {{.Scheme}}://{{.Host}}/api/checks
+curl -X POST -H "Authorization: Bearer ipv64a_…" -H "Content-Type: application/json" \
+  -d '{"name":"Web","type":"http","target":"https://example.com/","interval_seconds":60}' {{.Scheme}}://{{.Host}}/api/checks</pre>
+</div></div>
+{{range $tag := $d.Order}}
+<h2 class="h5 mt-4">{{$tag}}</h2>
+<div class="table-responsive"><table class="table table-sm table-hover">
+	<tbody>
+	{{range index $d.Groups $tag}}
+	<tr>
+		<td class="text-nowrap" style="width:1%"><span class="badge {{if eq .Method "GET"}}text-bg-success{{else if eq .Method "DELETE"}}text-bg-danger{{else if eq .Method "PUT"}}text-bg-warning{{else}}text-bg-primary{{end}} method">{{.Method}}</span></td>
+		<td class="text-nowrap"><code>/api{{.Path}}</code>{{if .Public}} <span class="badge text-bg-light">{{$.T "api.public"}}</span>{{end}}</td>
+		<td>{{.Summary}}{{if .Description}}<div class="small text-body-secondary">{{.Description}}</div>{{end}}</td>
+	</tr>
+	{{end}}
+	</tbody>
+</table></div>
+{{end}}
+{{end}}

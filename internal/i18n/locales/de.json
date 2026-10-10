@@ -6,11 +6,11 @@
   },
   "app": {
     "name": "ipv64 Agent",
-    "tagline": "Health-Checks, DynDNS und mehr im eigenen Netz"
+    "tagline": "Healthchecks, DynDNS und mehr im eigenen Netz"
   },
   "nav": {
     "dashboard": "Dashboard",
-    "healthchecks": "Health-Checks",
+    "healthchecks": "Healthchecks",
     "dyndns": "DynDNS",
     "proxy": "Reverse-Proxy",
     "link": "ipv64-Verknüpfung",
@@ -27,7 +27,8 @@
     "theme_dark": "Dunkel",
     "theme_auto": "Automatisch",
     "standalone": "Standalone, nicht verknüpft",
-    "version": "Version {version}"
+    "version": "Version {version}",
+    "api": "API"
   },
   "common": {
     "save": "Speichern",
@@ -110,7 +111,7 @@
     "uptime": "Läuft seit",
     "database": "Datenbank",
     "modules": "Module",
-    "no_modules": "Noch kein Modul aktiv. Aktiviere Health-Checks in den Einstellungen.",
+    "no_modules": "Noch kein Modul aktiv. Aktiviere Healthchecks in den Einstellungen.",
     "link_status": "ipv64-Verknüpfung",
     "not_linked": "Nicht verknüpft. Der Agent läuft standalone.",
     "ok": "OK",
@@ -186,7 +187,7 @@
     "setup_done": "Die Einrichtung ist bereits abgeschlossen."
   },
   "module": {
-    "healthchecks": "Health-Checks",
+    "healthchecks": "Healthchecks",
     "dyndns": "DynDNS-Updater",
     "proxy": "Reverse-Proxy",
     "link": "ipv64-Verknüpfung"
@@ -195,7 +196,7 @@
     "new": "Neuer Check",
     "edit": "Check bearbeiten",
     "missing": "Diesen Check gibt es nicht.",
-    "empty": "Noch keine Health-Checks. Lege den ersten an.",
+    "empty": "Noch keine Healthchecks. Lege den ersten an.",
     "empty_filter": "Kein Check passt zum Filter.",
     "filter": "Filtern",
     "reset": "Zurücksetzen",
@@ -355,7 +356,8 @@
       "repeat_monthly": "monatlich",
       "all_hint": "keine Auswahl = alle",
       "deleted": "Wartungsfenster gelöscht."
-    }
+    },
+    "empty_hint": "Push, HTTP(S), Keyword, Ping, TCP, Port und Zertifikat. Alles bleibt in deinem Netz."
   },
   "notify": {
     "subject": {
@@ -520,5 +522,9 @@
     "password_needed": "Die Datei ist verschlüsselt, bitte das Passwort angeben.",
     "password_wrong": "Das Passwort passt nicht zur Datei.",
     "imported": "{count} Einträge importiert."
+  },
+  "api": {
+    "title": "Lokale API",
+    "public": "ohne Anmeldung"
   }
 }
