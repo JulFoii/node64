@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -51,10 +52,59 @@ type Module interface {
 	Stop(ctx context.Context) error
 }
 
-// Guards sind die Middleware-Funktionen, die der Kern den Modulen gibt.
+// Guards sind Middleware und Hilfen, die der Kern den Modulen gibt.
 type Guards struct {
+	// Enabled antwortet mit 404, solange das Modul deaktiviert ist.
 	Enabled func(http.Handler) http.Handler
-	Auth    func(http.Handler) http.Handler
+	// Auth verlangt eine Anmeldung.
+	Auth func(http.Handler) http.Handler
+	// Render zeigt eine Seite des Moduls im Layout des Kerns. page ist
+	// "<modul>/<name>" (Datei pages/<name>.html im Templates-FS des Moduls).
+	Render func(w http.ResponseWriter, r *http.Request, status int, page, titleKey string, data any)
+	// T uebersetzt in der Sprache des Aufrufers.
+	T func(r *http.Request, key string, args ...any) string
+	// Flash merkt eine Meldung fuer die naechste Seite.
+	Flash func(w http.ResponseWriter, r *http.Request, kind, text string)
+	// Actor ist der angemeldete Benutzername (fuer Audit).
+	Actor func(r *http.Request) string
+	// CSRF liefert den Token fuer Formulare.
+	CSRF func(r *http.Request) string
+	// Lang liefert die Sprache des Aufrufers.
+	Lang func(r *http.Request) string
+	// Timezone liefert die Zeitzone des Benutzers.
+	Timezone func(r *http.Request) *time.Location
+}
+
+// Templater liefert die Seiten-Templates eines Moduls (pages/*.html).
+type Templater interface {
+	Templates() fs.FS
+}
+
+// DashboardProvider liefert Kacheln fuer das Dashboard des Kerns.
+type DashboardProvider interface {
+	Dashboard(ctx context.Context) (*DashboardInfo, error)
+}
+
+// DashboardInfo sind die Zahlen eines Moduls fuer das Dashboard.
+type DashboardInfo struct {
+	Module    string
+	TitleKey  string
+	Path      string
+	OK        int
+	Down      int
+	Paused    int
+	Other     int
+	Incidents []IncidentInfo
+}
+
+// IncidentInfo ist eine Stoerung in Kurzform.
+type IncidentInfo struct {
+	Name      string
+	Path      string
+	StartedAt time.Time
+	EndedAt   time.Time
+	Open      bool
+	Message   string
 }
 
 // Status ist der Zustand eines Moduls fuer die Anzeige.
@@ -110,12 +160,13 @@ func (r *Registry) Register(m Module) {
 
 // Routes registriert die Handler aller Module. Der Guard liefert 404, solange
 // ein Modul deaktiviert ist; so bleiben die Pfade stabil.
-func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler, auth func(http.Handler) http.Handler) {
+func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler, base Guards) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, name := range r.order {
 		e := r.entries[name]
-		guard := func(next http.Handler) http.Handler {
+		g := base
+		g.Enabled = func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if !r.IsRunning(name) {
 					notFound.ServeHTTP(w, req)
@@ -124,7 +175,7 @@ func (r *Registry) Routes(mux *http.ServeMux, notFound http.Handler, auth func(h
 				next.ServeHTTP(w, req)
 			})
 		}
-		e.mod.Routes(mux, Guards{Enabled: guard, Auth: auth})
+		e.mod.Routes(mux, g)
 	}
 }
 
@@ -198,6 +249,17 @@ func (r *Registry) List(ctx context.Context) []Status {
 		r.mu.Unlock()
 		s.Enabled, _ = r.st.ModuleEnabled(ctx, name)
 		out = append(out, s)
+	}
+	return out
+}
+
+// Modules liefert alle Module in Menuereihenfolge.
+func (r *Registry) Modules() []Module {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Module, 0, len(r.order))
+	for _, name := range r.order {
+		out = append(out, r.entries[name].mod)
 	}
 	return out
 }

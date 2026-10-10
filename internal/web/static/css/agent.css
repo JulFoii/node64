@@ -92,3 +92,24 @@ a { color: var(--bs-primary); }
 	.table-cards td::before { content: attr(data-label); font-weight: 600; color: var(--bs-secondary-color); flex: 0 0 40%; }
 	.table-cards td.text-nowrap { white-space: normal !important; }
 }
+
+/* Dashboard-Kacheln */
+.tile { border-left: 4px solid var(--bs-secondary); color: var(--bs-body-color); }
+.tile:hover { background: var(--bs-tertiary-bg); }
+.tile-ok { border-left-color: var(--bs-success); }
+.tile-down { border-left-color: var(--bs-danger); }
+.tile-paused { border-left-color: var(--bs-secondary); }
+.tile-other { border-left-color: var(--bs-info); }
+
+/* Health-Checks */
+.hc-target { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.hc-beats { min-width: 140px; }
+.hc-state-up { background: var(--bs-success) !important; color: #fff; }
+.hc-state-down, .hc-state-flapping { background: var(--bs-danger) !important; color: #fff; }
+.hc-state-stabilizing, .hc-state-dependent { background: var(--bs-info) !important; color: #fff; }
+.hc-state-pending, .hc-state-paused { background: var(--bs-secondary) !important; color: #fff; }
+.hc-chart-wrap { position: relative; height: 280px; }
+.hc-json { max-height: 320px; overflow: auto; font-size: .8rem; background: var(--bs-tertiary-bg); }
+.hc-exec { font-weight: 500; }
+th a { color: inherit; text-decoration: none; }
+th a:hover { text-decoration: underline; }

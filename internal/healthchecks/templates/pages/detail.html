@@ -1,0 +1,153 @@
+{{define "content"}}
+{{$d := .Data}}
+{{$c := $d.Row.Check}}
+{{$j := $d.JSON}}
+<div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+	<div>
+		<div class="small"><a href="/healthchecks">{{.T "nav.healthchecks"}}</a></div>
+		<h1 class="h4 mb-1">{{$c.Name}} <span class="badge hc-state-{{$d.Row.State}}">{{$.T (print "hc.state." $d.Row.State)}}</span>
+			{{if $d.Row.Retrying}}<i class="bi bi-arrow-repeat text-warning fs-6" title="{{.T "hc.retrying"}}"></i>{{end}}
+			{{if $d.Row.Maint}}<span class="badge text-bg-secondary"><i class="bi bi-wrench"></i> {{.T "hc.maintenance"}}</span>{{end}}
+		</h1>
+		<div class="text-body-secondary small">
+			<span class="badge text-bg-light">{{.T (print "hc.type." $c.Type)}}</span>
+			<span class="badge text-bg-light hc-exec"><i class="bi bi-house"></i> {{.T "hc.execution.local"}}</span>
+			{{range $c.Tags}}<span class="badge rounded-pill text-bg-secondary">{{.}}</span> {{end}}
+			{{if $c.Target}}<code class="ms-1">{{$c.Target}}</code>{{end}}
+		</div>
+	</div>
+	<form method="post" action="/healthchecks/{{$c.Token}}/action" class="d-flex gap-1 flex-wrap">
+		<input type="hidden" name="_csrf" value="{{.CSRF}}">
+		<a class="btn btn-sm btn-outline-primary" href="/healthchecks/{{$c.Token}}/edit"><i class="bi bi-pencil"></i> {{.T "hc.edit"}}</a>
+		{{if eq $d.Row.State "paused"}}<button class="btn btn-sm btn-outline-success" name="action" value="resume"><i class="bi bi-play-fill"></i> {{.T "hc.action.resume"}}</button>
+		{{else}}<button class="btn btn-sm btn-outline-secondary" name="action" value="pause"><i class="bi bi-pause-fill"></i> {{.T "hc.action.pause"}}</button>{{end}}
+		{{if ne (print $c.Type) "push"}}<button class="btn btn-sm btn-outline-secondary" name="action" value="run"><i class="bi bi-lightning-charge"></i> {{.T "hc.action.run"}}</button>{{end}}
+		<button class="btn btn-sm btn-outline-secondary" name="action" value="clone"><i class="bi bi-files"></i> {{.T "hc.action.clone"}}</button>
+		<button class="btn btn-sm btn-outline-danger" name="action" value="delete" data-confirm="{{.T "hc.delete_confirm" "name" $c.Name}}"><i class="bi bi-trash"></i> {{.T "common.delete"}}</button>
+	</form>
+</div>
+
+{{if $d.Row.Message}}
+<div class="alert {{if eq $d.Row.Status "up"}}alert-success{{else}}alert-danger{{end}} py-2 small">
+	<strong>{{$d.Row.Reason}}</strong> · {{$d.Row.Message}}
+	{{if $d.Row.Check.Runtime.LastCheck}}<span class="text-body-secondary">· {{.Time $d.Row.Check.Runtime.LastCheck}}</span>{{end}}
+</div>
+{{end}}
+
+<div class="card mb-3">
+	<div class="card-body">
+		<div class="beats mb-2">{{range $d.Pills}}<span class="beat beat-lg beat-{{.Class}}" title="{{.Title}}"></span>{{end}}{{if not $d.Pills}}<span class="text-body-secondary small">{{.T "hc.no_data"}}</span>{{end}}</div>
+		<div class="row g-2 text-center">
+			{{range $d.Ranges}}
+			<div class="col-4">
+				<div class="border rounded p-2">
+					<div class="small text-body-secondary">{{$.T (print "hc.range." .Range)}}</div>
+					<div class="fs-5 fw-semibold {{if lt .UpPercent 99.0}}text-warning{{end}}{{if lt .UpPercent 95.0}} text-danger{{end}}">{{if .Count}}{{pct .UpPercent}} %{{else}}–{{end}}</div>
+					<div class="small text-body-secondary">{{if .Count}}Ø {{ms .AvgMS}} ms{{else}}{{$.T "hc.no_data"}}{{end}}</div>
+				</div>
+			</div>
+			{{end}}
+		</div>
+	</div>
+</div>
+
+<div class="row g-3">
+	<div class="col-xl-8">
+		<div class="card mb-3">
+			<div class="card-header d-flex justify-content-between align-items-center">
+				<span><i class="bi bi-graph-up"></i> {{.T "hc.latency"}}</span>
+				<div class="btn-group btn-group-sm" role="group" id="hc-ranges">
+					<button type="button" class="btn btn-outline-secondary active" data-range="24h">24 h</button>
+					<button type="button" class="btn btn-outline-secondary" data-range="7d">7 d</button>
+					<button type="button" class="btn btn-outline-secondary" data-range="30d">30 d</button>
+				</div>
+			</div>
+			<div class="card-body"><div class="hc-chart-wrap"><canvas id="hc-chart" data-token="{{$c.Token}}" data-label-latency="{{.T "hc.latency"}}" data-label-up="{{.T "hc.availability"}}"></canvas></div></div>
+		</div>
+
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-clock-history"></i> {{.T "hc.events"}}</div>
+			{{if $d.Events}}
+			<div class="table-responsive"><table class="table table-sm table-striped mb-0 table-cards">
+				<thead><tr><th>{{.T "common.time"}}</th><th>{{.T "hc.event"}}</th><th>{{.T "hc.reason"}}</th><th>{{.T "common.details"}}</th></tr></thead>
+				<tbody>
+				{{range $d.Events}}
+				<tr>
+					<td data-label="{{$.T "common.time"}}" class="text-nowrap">{{$.Time .Time}}</td>
+					<td data-label="{{$.T "hc.event"}}"><span class="badge hc-state-{{.To}}">{{$.T (print "hc.state." .To)}}</span> <span class="small text-body-secondary">{{.Kind}}{{if .Silent}} · {{$.T "hc.silent"}}{{end}}{{if .Maintenance}} · {{$.T "hc.maintenance"}}{{end}}</span></td>
+					<td data-label="{{$.T "hc.reason"}}"><code>{{.Reason}}</code></td>
+					<td data-label="{{$.T "common.details"}}" class="small text-break">{{.Message}}{{if .DurationSec}} <span class="text-body-secondary">({{$.T "hc.downtime"}}: {{.DurationSec}} s)</span>{{end}}</td>
+				</tr>
+				{{end}}
+				</tbody>
+			</table></div>
+			{{else}}<div class="card-body small text-body-secondary">{{.T "hc.no_events"}}</div>{{end}}
+		</div>
+	</div>
+
+	<div class="col-xl-4">
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-sliders"></i> {{.T "hc.settings"}}</div>
+			<div class="card-body small">
+				<dl class="row mb-0">
+					{{if ne (print $c.Type) "push"}}
+					<dt class="col-6">{{.T "hc.form.interval"}}</dt><dd class="col-6">{{$j.IntervalSeconds}} s</dd>
+					<dt class="col-6">{{.T "hc.form.retry_interval"}}</dt><dd class="col-6">{{$j.RetryIntervalSeconds}} s</dd>
+					<dt class="col-6">{{.T "hc.form.timeout"}}</dt><dd class="col-6">{{$j.ConnectTimeoutSeconds}} / {{$j.TimeoutSeconds}} s</dd>
+					<dt class="col-6">{{.T "hc.form.ip_mode"}}</dt><dd class="col-6">{{.T (print "hc.ipmode." $c.IPMode)}}</dd>
+					{{end}}
+					<dt class="col-6">{{.T "hc.form.retries"}}</dt><dd class="col-6">{{$c.Retries}}</dd>
+					<dt class="col-6">{{.T "hc.form.stabilize"}}</dt><dd class="col-6">{{$c.Stabilize}}</dd>
+					{{if $c.Invert}}<dt class="col-6">{{.T "hc.form.invert"}}</dt><dd class="col-6">{{.T "common.yes"}}</dd>{{end}}
+					{{if $c.Critical}}<dt class="col-6">{{.T "hc.form.critical"}}</dt><dd class="col-6">{{.T "common.yes"}}</dd>{{end}}
+					{{if $d.ParentName}}<dt class="col-6">{{.T "hc.form.parent"}}</dt><dd class="col-6"><a href="/healthchecks/{{$c.Parent}}">{{$d.ParentName}}</a></dd>{{end}}
+					{{if $d.Children}}<dt class="col-6">{{.T "hc.children"}}</dt><dd class="col-6">{{range $d.Children}}<a href="/healthchecks/{{.Token}}">{{.Name}}</a><br>{{end}}</dd>{{end}}
+					{{range $k, $v := $d.Params}}{{if ne $k "basic_password"}}<dt class="col-6 text-truncate">{{$k}}</dt><dd class="col-6 text-break">{{$v}}</dd>{{end}}{{end}}
+					<dt class="col-6">{{.T "hc.next_check"}}</dt><dd class="col-6">{{if $d.Row.NextAt.IsZero}}–{{else}}{{.Time $d.Row.NextAt}}{{end}}</dd>
+					<dt class="col-6">Token</dt><dd class="col-6"><code class="small">{{$c.Token}}</code></dd>
+				</dl>
+				{{if $c.Description}}<p class="mt-2 mb-0">{{$c.Description}}</p>{{end}}
+			</div>
+		</div>
+
+		{{if $d.PushURL}}
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-broadcast"></i> {{.T "hc.push.title"}}</div>
+			<div class="card-body small">
+				<p>{{.T "hc.push.hint"}}</p>
+				<input class="form-control form-control-sm font-monospace mb-2" value="{{$d.PushURL}}" readonly data-copy>
+				<pre class="hc-json border rounded p-2 mb-0">curl -fsS "{{$d.PushURL}}"
+curl -fsS "{{$d.PushURL}}?status=down&amp;msg=backup+failed"</pre>
+			</div>
+		</div>
+		{{end}}
+
+		{{if $d.Incidents}}
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-exclamation-triangle"></i> {{.T "hc.incidents"}}</div>
+			<ul class="list-group list-group-flush small">
+			{{range $d.Incidents}}
+				<li class="list-group-item">
+					{{if .Open}}<span class="badge text-bg-danger">{{$.T "hc.open"}}</span>{{else}}<span class="badge text-bg-success">{{$.T "hc.closed"}}</span>{{end}}
+					{{$.Time .StartedAt}}{{if not .Open}} – {{$.Time .EndedAt}}{{end}}
+					<div class="text-body-secondary">{{.Message}}</div>
+				</li>
+			{{end}}
+			</ul>
+		</div>
+		{{end}}
+
+		{{if $d.Last}}
+		<div class="card mb-3">
+			<div class="card-header"><i class="bi bi-braces"></i> {{.T "hc.last_raw"}}</div>
+			<div class="card-body small">
+				<div class="mb-1">{{.Time $d.Last.Time}} · <strong>{{$d.Last.Status}}</strong> · {{ms $d.Last.LatencyMS}} ms · <code>{{$d.Last.Reason}}</code>{{if $d.Last.Family}} · {{$d.Last.Family}}{{end}}</div>
+				<div class="mb-2">{{$d.Last.Message}}</div>
+				{{if $d.LastJSON}}<pre class="hc-json border rounded p-2 mb-0">{{$d.LastJSON}}</pre>{{end}}
+			</div>
+		</div>
+		{{end}}
+	</div>
+</div>
+{{end}}
+{{define "scripts"}}<script src="/static/js/chart.umd.js"></script><script src="/static/js/healthchecks.js"></script>{{end}}

@@ -1,6 +1,13 @@
 {
-  "lang": { "name": "Deutsch", "de": "Deutsch", "en": "Englisch" },
-  "app": { "name": "ipv64 Agent", "tagline": "Health-Checks, DynDNS und mehr im eigenen Netz" },
+  "lang": {
+    "name": "Deutsch",
+    "de": "Deutsch",
+    "en": "Englisch"
+  },
+  "app": {
+    "name": "ipv64 Agent",
+    "tagline": "Health-Checks, DynDNS und mehr im eigenen Netz"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "healthchecks": "Health-Checks",
@@ -58,7 +65,10 @@
     "seconds": "Sekunden"
   },
   "time": {
-    "days": { "one": "1 Tag", "other": "{count} Tage" },
+    "days": {
+      "one": "1 Tag",
+      "other": "{count} Tage"
+    },
     "ago": "vor {duration}",
     "in": "in {duration}"
   },
@@ -104,7 +114,8 @@
     "down": "Gestört",
     "paused": "Pausiert",
     "last_incidents": "Letzte Störungen",
-    "no_incidents": "Keine Störungen."
+    "no_incidents": "Keine Störungen.",
+    "other": "Sonstige"
   },
   "settings": {
     "title": "Einstellungen",
@@ -169,5 +180,150 @@
     "dyndns": "DynDNS-Updater",
     "proxy": "Reverse-Proxy",
     "link": "ipv64-Verknüpfung"
+  },
+  "hc": {
+    "new": "Neuer Check",
+    "edit": "Check bearbeiten",
+    "missing": "Diesen Check gibt es nicht.",
+    "empty": "Noch keine Health-Checks. Lege den ersten an.",
+    "empty_filter": "Kein Check passt zum Filter.",
+    "filter": "Filtern",
+    "reset": "Zurücksetzen",
+    "tags": "Tags",
+    "latency": "Latenz",
+    "availability": "Verfügbarkeit",
+    "recent": "Letzte Messungen",
+    "changed": "Letzte Änderung",
+    "retrying": "Fehlversuch, wird wiederholt",
+    "maintenance": "Wartung",
+    "silent": "ohne Benachrichtigung",
+    "events": "Ereignisse",
+    "event": "Ereignis",
+    "reason": "Grund",
+    "no_events": "Noch keine Ereignisse.",
+    "no_data": "Noch keine Daten",
+    "downtime": "Dauer",
+    "settings": "Einstellungen",
+    "next_check": "Nächste Prüfung",
+    "children": "Abhängige Checks",
+    "incidents": "Störungen",
+    "open": "offen",
+    "closed": "beendet",
+    "last_raw": "Letzte Messung im Detail",
+    "delete_confirm": "Check „{name}“ mit allen Messdaten löschen?",
+    "execution": {
+      "local": "lokal"
+    },
+    "execution_hint": "Wird von diesem Agent geprüft",
+    "range": {
+      "24h": "24 Stunden",
+      "30d": "30 Tage",
+      "1y": "1 Jahr"
+    },
+    "state": {
+      "up": "OK",
+      "down": "Gestört",
+      "stabilizing": "Stabilisiert sich",
+      "flapping": "Flattert",
+      "dependent": "Abhängig gestört",
+      "pending": "Wartet",
+      "paused": "Pausiert",
+      "unstable": "Instabil"
+    },
+    "type": {
+      "http": "HTTP(S)",
+      "keyword": "Keyword",
+      "icmp": "Ping (ICMP)",
+      "tcp": "TCP",
+      "port": "Port",
+      "cert": "Zertifikat",
+      "push": "Push / Heartbeat"
+    },
+    "ipmode": {
+      "auto": "Automatisch (nach DNS)",
+      "ipv4": "Nur IPv4",
+      "ipv6": "Nur IPv6",
+      "both": "IPv4 und IPv6 (zwei Ergebnisse)"
+    },
+    "action": {
+      "pause": "Pausieren",
+      "resume": "Fortsetzen",
+      "run": "Jetzt prüfen",
+      "clone": "Klonen"
+    },
+    "done": {
+      "pause": "„{name}“ pausiert.",
+      "resume": "„{name}“ fortgesetzt.",
+      "run": "„{name}“ wird jetzt geprüft.",
+      "clone": "„{name}“ kopiert. Die Kopie ist pausiert.",
+      "delete": "„{name}“ gelöscht."
+    },
+    "run_push": "Push-Checks werden vom Dienst selbst gemeldet.",
+    "bulk": {
+      "selected": "Ausgewählte:",
+      "apply": "Anwenden",
+      "done": "{count} Checks geändert."
+    },
+    "form": {
+      "general": "Allgemein",
+      "target": "Ziel",
+      "target_hint": "URL, Hostname, IP oder host:port, je nach Typ.",
+      "push_hint": "Der Dienst ruft nach dem Speichern regelmäßig die Push-URL auf. Bleibt der Aufruf länger als Periode plus Kulanz aus, gilt der Check als gestört.",
+      "parent": "Übergeordneter Check",
+      "parent_hint": "Ist der übergeordnete Check gestört, alarmiert dieser nicht selbst.",
+      "description": "Beschreibung",
+      "method": "Methode",
+      "accept_status": "Erlaubte Statuscodes",
+      "max_redirects": "Redirects",
+      "follow_redirects": "folgen",
+      "keyword": "Suchbegriff",
+      "keyword_absent": "Begriff darf nicht vorkommen",
+      "basic_user": "Basic-Auth Benutzer",
+      "basic_password": "Basic-Auth Passwort",
+      "headers": "Header (eine Zeile je Header)",
+      "body": "Body",
+      "insecure_tls": "Zertifikatsfehler ignorieren",
+      "count": "Pakete",
+      "max_loss": "Max. Verlust %",
+      "max_latency": "Max. Latenz ms",
+      "icmp_hint": "Ping braucht im Container unprivilegiertes ICMP (ping_group_range) oder CAP_NET_RAW.",
+      "port": "Port",
+      "send": "Senden",
+      "expect": "Erwartete Antwort enthält",
+      "tcp_tls": "TLS-Handshake nach dem Verbinden",
+      "port_expect": "Erwartung",
+      "port_open": "Port ist offen",
+      "port_closed": "Port ist geschlossen",
+      "min_days": "Mindestens Tage gültig",
+      "server_name": "Servername (SNI)",
+      "skip_chain": "Kette nicht prüfen (eigene CA)",
+      "skip_hostname": "Hostname nicht prüfen",
+      "period": "Periode (s)",
+      "grace": "Kulanz (s)",
+      "timing": "Intervall und Timeouts",
+      "interval": "Intervall",
+      "retry_interval": "Intervall bei Störung",
+      "connect_timeout": "Timeout Verbindung",
+      "timeout": "Timeout gesamt",
+      "ip_mode": "IP-Version",
+      "alerting": "Alarmierung",
+      "retries": "Wiederholungen vor Alarm",
+      "retries_hint": "0 = sofort alarmieren",
+      "stabilize": "Stabilisieren",
+      "stabilize_hint": "Erfolge in Folge, bis wieder OK",
+      "notify_down": "Bei Störung benachrichtigen",
+      "notify_up": "Bei Erholung benachrichtigen",
+      "critical": "Kritisch",
+      "critical_hint": "Alarmiert auch in Ruhezeiten.",
+      "invert": "Invertieren",
+      "invert_hint": "Gestört gilt als OK und umgekehrt.",
+      "paused": "Pausiert",
+      "repeat": "Erneut alarmieren alle",
+      "repeat_hint": "0 = nur einmal"
+    },
+    "push": {
+      "title": "Push-URL",
+      "hint": "Diese URL regelmäßig aufrufen, z. B. per Cron. Mit ?status=down meldet der Dienst selbst eine Störung."
+    }
   }
 }

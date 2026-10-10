@@ -255,9 +255,19 @@ func TestMaintenanceWindows(t *testing.T) {
 }
 
 func TestAggregation(t *testing.T) {
-	m, _ := newTestModule(t)
+	// Eigener Store ohne gestartetes Modul, sonst laeuft die Start-Verdichtung parallel
+	dir := t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	core, err := store.Open(context.Background(), filepath.Join(dir, "agent.db"), filepath.Join(dir, "backups"), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { core.Close() })
+	if err := core.Migrate(context.Background(), Name, New(core, log, nil, "test").Migrations()); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
-	st := m.st
+	st := NewStore(core)
 	c := &Check{Token: NewToken(), Type: checks.TypeHTTP, Name: "a", Target: "http://x/", Params: json.RawMessage("{}"), Interval: time.Minute, RetryInterval: 20 * time.Second,
 		ConnectTimeout: time.Second, TotalTimeout: 2 * time.Second, Stabilize: 1, IPMode: checks.IPAuto}
 	if err := st.Insert(ctx, c); err != nil {

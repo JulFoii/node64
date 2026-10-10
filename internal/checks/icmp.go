@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,9 @@ func (c *icmpChecker) modes() []bool {
 	defer c.mu.Unlock()
 	if c.privileged != nil {
 		return []bool{*c.privileged}
+	}
+	if runtime.GOOS == "windows" {
+		return []bool{true} // Windows kennt kein unprivilegiertes ICMP ueber UDP
 	}
 	return []bool{false, true}
 }

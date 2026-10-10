@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,7 +70,19 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) parseTemplates() error {
 	funcs := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
+		"add":   func(a, b int) int { return a + b },
+		"sub":   func(a, b int) int { return a - b },
+		"pct":   func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) },
+		"ms":    func(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) },
+		"join":  strings.Join,
+		"split": strings.Fields,
+		"seq": func(n int) []int {
+			out := make([]int, n)
+			for i := range out {
+				out[i] = i
+			}
+			return out
+		},
 	}
 	pages, err := fs.Glob(templateFS, "templates/pages/*.html")
 	if err != nil {
@@ -83,6 +96,29 @@ func (s *Server) parseTemplates() error {
 			return fmt.Errorf("template %s: %w", name, err)
 		}
 		s.pages[name] = t
+	}
+	// Seiten der Module: "<modul>/<name>" mit demselben Layout
+	for _, m := range s.Modules.Modules() {
+		tp, ok := m.(module.Templater)
+		if !ok {
+			continue
+		}
+		mfs := tp.Templates()
+		mpages, err := fs.Glob(mfs, "pages/*.html")
+		if err != nil {
+			return err
+		}
+		for _, p := range mpages {
+			name := m.Info().Name + "/" + p[len("pages/"):len(p)-len(".html")]
+			t, err := template.New("layout.html").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html")
+			if err != nil {
+				return err
+			}
+			if _, err := t.ParseFS(mfs, p); err != nil {
+				return fmt.Errorf("module template %s: %w", name, err)
+			}
+			s.pages[name] = t
+		}
 	}
 	return nil
 }
@@ -110,7 +146,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /logs/download", s.auth(s.logsDownload))
 
 	// Module registrieren ihre Pfade selbst; deaktiviert = 404
-	s.Modules.Routes(s.mux, http.HandlerFunc(s.notFound), s.authHandler)
+	s.Modules.Routes(s.mux, http.HandlerFunc(s.notFound), module.Guards{
+		Auth: s.authHandler, Render: s.renderModule, T: s.tr, Flash: s.flash, Actor: s.actor, CSRF: csrfToken, Lang: s.lang, Timezone: s.location,
+	})
 	s.mux.HandleFunc("/", s.notFound)
 }
 

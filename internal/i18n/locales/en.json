@@ -1,6 +1,13 @@
 {
-  "lang": { "name": "English", "de": "German", "en": "English" },
-  "app": { "name": "ipv64 Agent", "tagline": "Health checks, DynDNS and more in your own network" },
+  "lang": {
+    "name": "English",
+    "de": "German",
+    "en": "English"
+  },
+  "app": {
+    "name": "ipv64 Agent",
+    "tagline": "Health checks, DynDNS and more in your own network"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "healthchecks": "Health Checks",
@@ -58,7 +65,10 @@
     "seconds": "seconds"
   },
   "time": {
-    "days": { "one": "1 day", "other": "{count} days" },
+    "days": {
+      "one": "1 day",
+      "other": "{count} days"
+    },
     "ago": "{duration} ago",
     "in": "in {duration}"
   },
@@ -104,7 +114,8 @@
     "down": "Down",
     "paused": "Paused",
     "last_incidents": "Recent incidents",
-    "no_incidents": "No incidents."
+    "no_incidents": "No incidents.",
+    "other": "Other"
   },
   "settings": {
     "title": "Settings",
@@ -169,5 +180,150 @@
     "dyndns": "DynDNS Updater",
     "proxy": "Reverse Proxy",
     "link": "ipv64 Link"
+  },
+  "hc": {
+    "new": "New check",
+    "edit": "Edit check",
+    "missing": "This check does not exist.",
+    "empty": "No health checks yet. Create the first one.",
+    "empty_filter": "No check matches the filter.",
+    "filter": "Filter",
+    "reset": "Reset",
+    "tags": "Tags",
+    "latency": "Latency",
+    "availability": "Availability",
+    "recent": "Recent checks",
+    "changed": "Last change",
+    "retrying": "Failed attempt, retrying",
+    "maintenance": "Maintenance",
+    "silent": "no notification",
+    "events": "Events",
+    "event": "Event",
+    "reason": "Reason",
+    "no_events": "No events yet.",
+    "no_data": "No data yet",
+    "downtime": "Duration",
+    "settings": "Settings",
+    "next_check": "Next check",
+    "children": "Dependent checks",
+    "incidents": "Incidents",
+    "open": "open",
+    "closed": "resolved",
+    "last_raw": "Last measurement in detail",
+    "delete_confirm": "Delete check “{name}” with all its data?",
+    "execution": {
+      "local": "local"
+    },
+    "execution_hint": "Checked by this agent",
+    "range": {
+      "24h": "24 hours",
+      "30d": "30 days",
+      "1y": "1 year"
+    },
+    "state": {
+      "up": "OK",
+      "down": "Down",
+      "stabilizing": "Stabilizing",
+      "flapping": "Flapping",
+      "dependent": "Dependent",
+      "pending": "Pending",
+      "paused": "Paused",
+      "unstable": "Unstable"
+    },
+    "type": {
+      "http": "HTTP(S)",
+      "keyword": "Keyword",
+      "icmp": "Ping (ICMP)",
+      "tcp": "TCP",
+      "port": "Port",
+      "cert": "Certificate",
+      "push": "Push / heartbeat"
+    },
+    "ipmode": {
+      "auto": "Automatic (by DNS)",
+      "ipv4": "IPv4 only",
+      "ipv6": "IPv6 only",
+      "both": "IPv4 and IPv6 (two results)"
+    },
+    "action": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "run": "Check now",
+      "clone": "Clone"
+    },
+    "done": {
+      "pause": "“{name}” paused.",
+      "resume": "“{name}” resumed.",
+      "run": "“{name}” is being checked now.",
+      "clone": "“{name}” cloned. The copy is paused.",
+      "delete": "“{name}” deleted."
+    },
+    "run_push": "Push checks are reported by the service itself.",
+    "bulk": {
+      "selected": "Selected:",
+      "apply": "Apply",
+      "done": "{count} checks changed."
+    },
+    "form": {
+      "general": "General",
+      "target": "Target",
+      "target_hint": "URL, hostname, IP or host:port, depending on the type.",
+      "push_hint": "After saving, the service calls the push URL regularly. If the call stays away longer than period plus grace, the check counts as down.",
+      "parent": "Parent check",
+      "parent_hint": "If the parent is down, this check does not alert on its own.",
+      "description": "Description",
+      "method": "Method",
+      "accept_status": "Accepted status codes",
+      "max_redirects": "Redirects",
+      "follow_redirects": "follow",
+      "keyword": "Keyword",
+      "keyword_absent": "Keyword must be absent",
+      "basic_user": "Basic auth user",
+      "basic_password": "Basic auth password",
+      "headers": "Headers (one per line)",
+      "body": "Body",
+      "insecure_tls": "Ignore certificate errors",
+      "count": "Packets",
+      "max_loss": "Max. loss %",
+      "max_latency": "Max. latency ms",
+      "icmp_hint": "Ping in a container needs unprivileged ICMP (ping_group_range) or CAP_NET_RAW.",
+      "port": "Port",
+      "send": "Send",
+      "expect": "Expected reply contains",
+      "tcp_tls": "TLS handshake after connecting",
+      "port_expect": "Expectation",
+      "port_open": "Port is open",
+      "port_closed": "Port is closed",
+      "min_days": "Valid for at least days",
+      "server_name": "Server name (SNI)",
+      "skip_chain": "Skip chain check (own CA)",
+      "skip_hostname": "Skip hostname check",
+      "period": "Period (s)",
+      "grace": "Grace (s)",
+      "timing": "Interval and timeouts",
+      "interval": "Interval",
+      "retry_interval": "Interval while down",
+      "connect_timeout": "Connect timeout",
+      "timeout": "Total timeout",
+      "ip_mode": "IP version",
+      "alerting": "Alerting",
+      "retries": "Retries before alert",
+      "retries_hint": "0 = alert immediately",
+      "stabilize": "Stabilize",
+      "stabilize_hint": "Successes in a row until OK again",
+      "notify_down": "Notify when down",
+      "notify_up": "Notify when recovered",
+      "critical": "Critical",
+      "critical_hint": "Alerts even during quiet hours.",
+      "invert": "Invert",
+      "invert_hint": "Down counts as OK and vice versa.",
+      "paused": "Paused",
+      "repeat": "Repeat alert every",
+      "repeat_hint": "0 = only once"
+    },
+    "push": {
+      "title": "Push URL",
+      "hint": "Call this URL regularly, e.g. from cron. With ?status=down the service reports an outage itself."
+    }
   }
 }

@@ -29,6 +29,8 @@ type Module struct {
 	notifier scheduler.Notifier
 	version  string
 
+	g module.Guards
+
 	mu     sync.Mutex
 	sched  *scheduler.Scheduler
 	cancel context.CancelFunc
@@ -163,13 +165,7 @@ func (m *Module) Routes(mux *http.ServeMux, g module.Guards) {
 	// Heartbeat: ohne Anmeldung, Antwort verraet nichts ueber den Token
 	mux.Handle("GET /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
 	mux.Handle("POST /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
-	// Oberflaeche folgt in Phase 3
-	mux.Handle("GET /healthchecks", api(m.pagePlaceholder))
-}
-
-func (m *Module) pagePlaceholder(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("Health-Checks: die Oberflaeche folgt in Phase 3. Die API ist unter /api/checks erreichbar.\n"))
+	m.uiRoutes(mux, g)
 }
 
 // logNotifier schreibt Ereignisse nur ins Log (bis Phase 4).

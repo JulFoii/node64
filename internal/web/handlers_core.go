@@ -212,6 +212,7 @@ type dashboardData struct {
 	StartedAt time.Time
 	DBSize    int64
 	Modules   []module.Status
+	Boards    []module.DashboardInfo
 }
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +226,22 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		DBSize:    s.Store.Size(),
 		Modules:   s.Modules.List(ctx),
 	}
+	d := v.Data.(dashboardData)
+	for _, m := range s.Modules.Modules() {
+		p, ok := m.(module.DashboardProvider)
+		if !ok || !s.Modules.IsRunning(m.Info().Name) {
+			continue
+		}
+		info, err := p.Dashboard(ctx)
+		if err != nil {
+			s.log.Error("dashboard data", "module", m.Info().Name, "err", err)
+			continue
+		}
+		if info != nil {
+			d.Boards = append(d.Boards, *info)
+		}
+	}
+	v.Data = d
 	s.render(w, r, http.StatusOK, "dashboard", v)
 }
 

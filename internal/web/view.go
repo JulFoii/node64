@@ -212,3 +212,23 @@ func (s *Server) audit(r *http.Request, action, target, details string) {
 
 // moduleStatuses ist eine Hilfe fuer Templates.
 func (s *Server) moduleStatuses(r *http.Request) []module.Status { return s.Modules.List(r.Context()) }
+
+// renderModule zeigt eine Modulseite im Layout des Kerns.
+func (s *Server) renderModule(w http.ResponseWriter, r *http.Request, status int, page, titleKey string, data any) {
+	v := s.view(r, titleKey)
+	v.Data = data
+	s.render(w, r, status, page, v)
+}
+
+// tr uebersetzt fuer die Sprache des Aufrufers (fuer Module).
+func (s *Server) tr(r *http.Request, key string, args ...any) string {
+	return s.I18n.T(s.lang(r), key, args...)
+}
+
+// actor ist der angemeldete Benutzername oder "-".
+func (s *Server) actor(r *http.Request) string {
+	if u := currentUser(r); u != nil {
+		return u.Username
+	}
+	return "-"
+}

@@ -4,7 +4,7 @@ Ein leichtgewichtiger Docker-Container für das Heimnetz: Health-Checks (als Upt
 
 Ein einziges Go-Binary, SQLite, eingebettete Weboberfläche, keine externen Abhängigkeiten zur Laufzeit. Läuft auf amd64 und arm64, auch auf einem Raspberry Pi.
 
-**Stand: Phase 2 (Check-Bot, Scheduler, API).** Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log und Logs (Phase 1) sowie alle Check-Typen, der Scheduler mit Retry, Stabilisierung, Flatter-Schutz, Abhängigkeiten und Wartungsfenstern, Verdichtung und die lokale JSON-API (Phase 2) sind fertig. Die Oberfläche für Health-Checks folgt in Phase 3, Benachrichtigungen in Phase 4.
+**Stand: Phase 3 (Oberfläche Health-Checks).** Fertig sind der Kern (Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log, Logs), alle Check-Typen mit Scheduler, Verdichtung und JSON-API sowie die Oberfläche: Liste mit Pillen, Filter, Sortierung und Massenaktionen, Formular je Typ, Detailseite mit Latenz-Chart, Verfügbarkeit, Ereignissen und Push-URL, Dashboard-Kacheln. Benachrichtigungen folgen in Phase 4, Wartungsfenster-Seite, Backup und 2FA in Phase 5.
 
 ## Schnellstart
 

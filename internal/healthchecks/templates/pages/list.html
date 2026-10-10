@@ -1,0 +1,115 @@
+{{define "content"}}
+{{$d := .Data}}
+{{$f := $d.Filter}}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+	<h1 class="h4 mb-0">{{.T "nav.healthchecks"}} <span class="text-body-secondary fs-6">{{$d.Total}}</span></h1>
+	<div class="d-flex gap-2">
+		<a class="btn btn-outline-secondary btn-sm" href="/healthchecks{{if $f.q}}?q={{$f.q}}{{end}}" title="{{.T "logs.refresh"}}"><i class="bi bi-arrow-clockwise"></i></a>
+		<a class="btn btn-primary btn-sm" href="/healthchecks/new"><i class="bi bi-plus-lg"></i> {{.T "hc.new"}}</a>
+	</div>
+</div>
+
+<form method="get" action="/healthchecks" class="row g-2 mb-3 align-items-end">
+	<div class="col-12 col-md-4">
+		<input class="form-control form-control-sm" type="search" name="q" value="{{$f.q}}" placeholder="{{.T "common.search"}} …">
+	</div>
+	<div class="col-6 col-md-2">
+		<select class="form-select form-select-sm" name="state">
+			<option value="">{{.T "common.status"}}: {{.T "common.all"}}</option>
+			{{range $d.States}}<option value="{{.}}"{{if eq . $f.state}} selected{{end}}>{{$.T (print "hc.state." .)}} ({{index $d.Counts .}})</option>{{end}}
+		</select>
+	</div>
+	<div class="col-6 col-md-2">
+		<select class="form-select form-select-sm" name="type">
+			<option value="">{{.T "common.type"}}: {{.T "common.all"}}</option>
+			{{range $d.Types}}<option value="{{.}}"{{if eq (print .) $f.type}} selected{{end}}>{{$.T (print "hc.type." .)}}</option>{{end}}
+		</select>
+	</div>
+	<div class="col-6 col-md-2">
+		<select class="form-select form-select-sm" name="tag">
+			<option value="">{{.T "hc.tags"}}: {{.T "common.all"}}</option>
+			{{range $d.Tags}}<option value="{{.}}"{{if eq . $f.tag}} selected{{end}}>{{.}}</option>{{end}}
+		</select>
+	</div>
+	<div class="col-6 col-md-2 d-flex gap-2">
+		<button class="btn btn-outline-secondary btn-sm" type="submit">{{.T "hc.filter"}}</button>
+		{{if or $f.q $f.state $f.type $f.tag}}<a class="btn btn-link btn-sm" href="/healthchecks">{{.T "hc.reset"}}</a>{{end}}
+	</div>
+	{{if $d.Sort}}<input type="hidden" name="sort" value="{{$d.Sort}}"><input type="hidden" name="dir" value="{{$d.Dir}}">{{end}}
+</form>
+
+{{if not $d.Rows}}
+<div class="card"><div class="card-body text-center text-body-secondary py-5">
+	<i class="bi bi-heart-pulse fs-1 d-block mb-2"></i>
+	{{if $d.Total}}{{.T "hc.empty_filter"}}{{else}}{{.T "hc.empty"}}{{end}}
+	{{if not $d.Total}}<div class="mt-3"><a class="btn btn-primary" href="/healthchecks/new">{{.T "hc.new"}}</a></div>{{end}}
+</div></div>
+{{else}}
+{{$qs := print "&q=" $f.q "&state=" $f.state "&type=" $f.type "&tag=" $f.tag}}
+<form method="post" action="/healthchecks/bulk" id="hc-bulk">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<div class="table-responsive">
+<table class="table table-hover table-sm align-middle table-cards hc-table">
+	<thead>
+		<tr>
+			<th style="width:1%"><input type="checkbox" class="form-check-input" id="hc-select-all" aria-label="all"></th>
+			<th><a href="?sort=state&dir={{if and (eq $d.Sort "state") (ne $d.Dir "desc")}}desc{{else}}asc{{end}}{{$qs}}">{{.T "common.status"}}</a></th>
+			<th><a href="?sort=name&dir={{if and (or (eq $d.Sort "name") (eq $d.Sort "")) (ne $d.Dir "desc")}}desc{{else}}asc{{end}}{{$qs}}">{{.T "common.name"}}</a></th>
+			<th><a href="?sort=type&dir={{if and (eq $d.Sort "type") (ne $d.Dir "desc")}}desc{{else}}asc{{end}}{{$qs}}">{{.T "common.type"}}</a></th>
+			<th class="text-end"><a href="?sort=latency&dir={{if and (eq $d.Sort "latency") (ne $d.Dir "desc")}}desc{{else}}asc{{end}}{{$qs}}">{{.T "hc.latency"}}</a></th>
+			<th>{{.T "hc.recent"}}</th>
+			<th><a href="?sort=changed&dir={{if and (eq $d.Sort "changed") (ne $d.Dir "desc")}}desc{{else}}asc{{end}}{{$qs}}">{{.T "hc.changed"}}</a></th>
+			<th class="text-end">{{.T "common.actions"}}</th>
+		</tr>
+	</thead>
+	<tbody>
+	{{range $d.Rows}}
+	{{$c := .Check}}
+	<tr>
+		<td data-label=""><input type="checkbox" class="form-check-input" name="tokens" value="{{$c.Token}}"></td>
+		<td data-label="{{$.T "common.status"}}">
+			<span class="badge hc-state-{{.State}}">{{$.T (print "hc.state." .State)}}</span>
+			{{if .Retrying}}<i class="bi bi-arrow-repeat text-warning" title="{{$.T "hc.retrying"}}"></i>{{end}}
+			{{if .Maint}}<i class="bi bi-wrench text-body-secondary" title="{{$.T "hc.maintenance"}}"></i>{{end}}
+		</td>
+		<td data-label="{{$.T "common.name"}}">
+			<a href="/healthchecks/{{$c.Token}}" class="fw-semibold">{{$c.Name}}</a>
+			<span class="badge text-bg-light hc-exec" title="{{$.T "hc.execution_hint"}}"><i class="bi bi-house"></i> {{$.T "hc.execution.local"}}</span>
+			{{range $c.Tags}}<span class="badge rounded-pill text-bg-secondary">{{.}}</span> {{end}}
+			<div class="small text-body-secondary hc-target" title="{{$c.Target}}">{{if $c.Target}}{{$c.Target}}{{else}}{{$.T "hc.type.push"}}{{end}}</div>
+		</td>
+		<td data-label="{{$.T "common.type"}}"><span class="badge text-bg-light">{{$.T (print "hc.type." $c.Type)}}</span></td>
+		<td data-label="{{$.T "hc.latency"}}" class="text-end text-nowrap">{{if gt .Latency 0.0}}{{ms .Latency}} ms{{else}}–{{end}}</td>
+		<td data-label="{{$.T "hc.recent"}}" class="hc-beats"><div class="beats">{{range .Pills}}<span class="beat beat-{{.Class}}" title="{{.Title}}"></span>{{end}}</div></td>
+		<td data-label="{{$.T "hc.changed"}}" class="small text-nowrap" title="{{$.Time .Changed}}">{{$.Ago .Changed}}</td>
+		<td data-label="{{$.T "common.actions"}}" class="text-end text-nowrap">
+			{{if eq .State "paused"}}
+			<button class="btn btn-sm btn-outline-success" form="act-{{$c.Token}}" name="action" value="resume" title="{{$.T "hc.action.resume"}}"><i class="bi bi-play-fill"></i></button>
+			{{else}}
+			<button class="btn btn-sm btn-outline-secondary" form="act-{{$c.Token}}" name="action" value="pause" title="{{$.T "hc.action.pause"}}"><i class="bi bi-pause-fill"></i></button>
+			{{end}}
+			{{if ne (print $c.Type) "push"}}<button class="btn btn-sm btn-outline-secondary" form="act-{{$c.Token}}" name="action" value="run" title="{{$.T "hc.action.run"}}"><i class="bi bi-lightning-charge"></i></button>{{end}}
+			<a class="btn btn-sm btn-outline-secondary" href="/healthchecks/{{$c.Token}}/edit" title="{{$.T "hc.edit"}}"><i class="bi bi-pencil"></i></a>
+		</td>
+	</tr>
+	{{end}}
+	</tbody>
+</table>
+</div>
+<div class="d-flex align-items-center gap-2 flex-wrap">
+	<span class="small text-body-secondary">{{.T "hc.bulk.selected"}}</span>
+	<select class="form-select form-select-sm w-auto" name="action">
+		<option value="pause">{{.T "hc.action.pause"}}</option>
+		<option value="resume">{{.T "hc.action.resume"}}</option>
+		<option value="run">{{.T "hc.action.run"}}</option>
+		<option value="delete">{{.T "common.delete"}}</option>
+	</select>
+	<button class="btn btn-sm btn-outline-primary" type="submit" data-confirm="{{.T "common.confirm"}}">{{.T "hc.bulk.apply"}}</button>
+</div>
+</form>
+{{range $d.Rows}}
+<form method="post" action="/healthchecks/{{.Check.Token}}/action" id="act-{{.Check.Token}}" class="d-none"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="list"></form>
+{{end}}
+{{end}}
+{{end}}
+{{define "scripts"}}<script src="/static/js/healthchecks.js"></script>{{end}}
