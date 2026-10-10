@@ -15,8 +15,9 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # Datenverzeichnis mit passenden Rechten fuer den Nicht-Root-Benutzer vorbereiten
 RUN mkdir -p /out/data && chown 65532:65532 /out/data
 
-# ---- CA-Zertifikate (Zeitzonen sind im Binary eingebettet)
-FROM alpine:3.22 AS certs
+# ---- CA-Zertifikate (Zeitzonen sind im Binary eingebettet). Laeuft auf der
+#      Build-Plattform, die Zertifikate sind architekturunabhaengig.
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS certs
 RUN apk add --no-cache ca-certificates
 
 # ---- Laufzeit: leeres Image, nur das Binary
