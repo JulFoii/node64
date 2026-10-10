@@ -1,20 +1,37 @@
 <?php
 // ---------------------------------------------------------------------------
 // Healthchecks 2.0 (hc2): Hilfsfunktionen fuer das Portal. Diesen Block ANS ENDE
-// von dbconnect.php anhaengen (vor einem evtl. schliessenden ?>), nichts anderes
+// von dbconnect.php anhaengen (falls die Datei mit einem schliessenden PHP-Tag endet: davor), nichts anderes
 // aendern. Alle Funktionen sind fehlertolerant: scheitert Redis, laeuft alles
 // weiter (der hub pollt hc2_config_log alle 2 s).
 // ---------------------------------------------------------------------------
 
-const HC2_DB         = 'ipv64_hc';        // neue Datenbank, gleicher MySQL-Server
-const HC2_REDIS_HOST = '10.10.0.11';      // Redis auf hc-srv02 (Nuernberg), privates Netz
-const HC2_REDIS_PORT = 6379;
-const HC2_REDIS_PASS_FILE = '/var/www/clients/client1/web58/private/hc2_redis.pass'; // Inhalt von /etc/ipv64-hub/redis.pass
-const HC2_KEY_FILE   = '/var/www/clients/client1/web58/private/hc2_secret.key';      // 32 Rohbytes, identisch mit secret.key auf den hubs
+defined('HC2_DB')           || define('HC2_DB', 'ipv64_hc');          // neue Datenbank, gleicher MySQL-Server
+defined('HC2_DB_HOST')      || define('HC2_DB_HOST', 'localhost');
+defined('HC2_DB_USER')      || define('HC2_DB_USER', 'ipv64_hc');
+defined('HC2_DB_PASS_FILE') || define('HC2_DB_PASS_FILE', '/var/www/clients/client1/web58/private/hc2_db.pass'); // Passwort von ipv64_hc, eine Zeile
+defined('HC2_REDIS_HOST')   || define('HC2_REDIS_HOST', '10.10.0.11');  // Redis auf hc-srv02 (Nuernberg), privates Netz
+defined('HC2_REDIS_PORT')   || define('HC2_REDIS_PORT', 6379);
+defined('HC2_REDIS_PASS_FILE') || define('HC2_REDIS_PASS_FILE', '/var/www/clients/client1/web58/private/hc2_redis.pass'); // Inhalt von /etc/ipv64-hub/redis.pass
+defined('HC2_KEY_FILE')     || define('HC2_KEY_FILE', '/var/www/clients/client1/web58/private/hc2_secret.key');      // 32 Rohbytes, identisch mit secret.key auf den hubs
+
+/**
+ * Eigene Verbindung zur hc2-Datenbank mit dem Benutzer ipv64_hc (darf ipv64_hc schreiben und ipv64 lesen).
+ * Der Portal-Benutzer braucht so keine zusaetzlichen Rechte. Wird erst beim ersten Aufruf geoeffnet.
+ */
+function hc2_pdo(): PDO {
+	static $hc = null;
+	if ($hc === null) {
+		$pass = is_file(HC2_DB_PASS_FILE) ? trim((string)file_get_contents(HC2_DB_PASS_FILE)) : '';
+		$hc = new PDO('mysql:host=' . HC2_DB_HOST . ';dbname=' . HC2_DB . ';charset=utf8mb4', HC2_DB_USER, $pass,
+			array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5));
+	}
+	return $hc;
+}
 
 /** Naechste Revision eines Accounts (streng steigend je Account). */
-function hc2_next_revision(PDO $pdo, int $userid): int {
-	$db = HC2_DB;
+function hc2_next_revision(int $userid): int {
+	$db = HC2_DB; $pdo = hc2_pdo();
 	$pdo->prepare("INSERT INTO `$db`.hc2_revisions (userid, next) VALUES (:u, 2) ON DUPLICATE KEY UPDATE next = next + 1")->execute(array('u' => $userid));
 	$st = $pdo->prepare("SELECT next - 1 FROM `$db`.hc2_revisions WHERE userid = :u"); $st->execute(array('u' => $userid));
 	return (int)$st->fetchColumn();
@@ -22,15 +39,15 @@ function hc2_next_revision(PDO $pdo, int $userid): int {
 
 /**
  * Konfigurationsaenderung protokollieren: schreibt die Revision an die Entitaet, eine Zeile ins
- * Config-Log und schickt das Redis-Signal. Aufruf NACH dem eigentlichen UPDATE/INSERT/DELETE,
- * in derselben Transaktion, wenn es eine gibt.
+ * Config-Log und schickt das Redis-Signal. Aufruf NACH dem eigentlichen UPDATE/INSERT/DELETE
+ * (alles ueber hc2_pdo(), eigene Verbindung).
  *   $entity: check | channel | maintenance | agent | settings
  *   $op:     upsert | delete
  * Liefert die vergebene Revision.
  */
-function hc2_log_change(PDO $pdo, int $userid, string $entity, string $entityId, string $op = 'upsert', string $origin = 'portal', ?string $agentId = null): int {
-	$db = HC2_DB;
-	$rev = hc2_next_revision($pdo, $userid);
+function hc2_log_change(int $userid, string $entity, string $entityId, string $op = 'upsert', string $origin = 'portal', ?string $agentId = null): int {
+	$db = HC2_DB; $pdo = hc2_pdo();
+	$rev = hc2_next_revision($userid);
 	$tables = array('check' => array('hc2_checks', 'token'), 'channel' => array('hc2_channels', 'id'), 'maintenance' => array('hc2_maintenance', 'id'));
 	if (isset($tables[$entity])) {
 		[$t, $col] = $tables[$entity];
@@ -66,11 +83,11 @@ function hc2_signal(string $channel, string $message): void {
  * hc2_checks existiert und der Besitzer hc2 = 1 hat. Alte Logik laeuft unveraendert weiter.
  * Liefert true, wenn gespiegelt wurde.
  */
-function hc2_push_mirror(PDO $pdo, $healthcheck, array $get): bool {
+function hc2_push_mirror($healthcheck, array $get): bool {
 	if (!is_array($healthcheck) || ($healthcheck['healthtoken'] ?? '') === '') { return false; }
 	try {
-		$db = HC2_DB;
-		$st = $pdo->prepare("SELECT c.token, u.hc2 FROM `$db`.hc2_checks c JOIN users u ON u.id = c.userid WHERE c.token = :t AND c.type = 'push' AND c.deleted_at IS NULL");
+		$db = HC2_DB; $pdo = hc2_pdo();
+		$st = $pdo->prepare("SELECT c.token, u.hc2 FROM `$db`.hc2_checks c JOIN `ipv64`.`users` u ON u.id = c.userid WHERE c.token = :t AND c.type = 'push' AND c.deleted_at IS NULL");
 		$st->execute(array('t' => $healthcheck['healthtoken']));
 		$row = $st->fetch(PDO::FETCH_ASSOC);
 		if (!$row || (int)$row['hc2'] !== 1) { return false; }

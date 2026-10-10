@@ -21,8 +21,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
 include("/var/www/clients/client1/web58/web/dbconnect.php");
 
-const HC2DB        = 'ipv64_hc';                                   // neue Datenbank (gleicher Server)
-const HC2_KEY_FILE = '/var/www/clients/client1/web58/private/hc2_secret.key';
+const HC2DB        = HC2_DB;                                       // neue Datenbank, Verbindung ueber hc2_pdo() aus dbconnect.php
 const RAW_DAYS     = 7;                                            // Rohdaten-Fenster wie im neuen System
 const LOCATIONS    = array('nbg', 'fsn');
 const PUSH_UNITS   = array(1 => 60, 2 => 3600, 3 => 86400);        // zeit2/grace2: 1=min, 2=h, 3=d
@@ -59,21 +58,11 @@ function slot(string $token): int { return crc32($token) % 1024; }
 
 /** Verschluesselung kompatibel zum Agent (internal/secrets): enc:v1:<base64raw(nonce12 + ciphertext + tag16)> */
 function hc2_key(): ?string {
-	static $key = false;
-	if ($key !== false) { return $key; }
 	$key = is_file(HC2_KEY_FILE) ? file_get_contents(HC2_KEY_FILE) : null;
 	if ($key !== null && strlen($key) !== 32) { throw new RuntimeException(HC2_KEY_FILE . ' muss genau 32 Bytes haben'); }
 	return $key;
 }
-function hc2_encrypt(string $plain): string {
-	if ($plain === '') { return ''; }
-	$key = hc2_key();
-	if ($key === null) { throw new RuntimeException('Schluesseldatei fehlt: ' . HC2_KEY_FILE); }
-	$nonce = random_bytes(12); $tag = '';
-	$ct = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $nonce, $tag, '', 16);
-	if ($ct === false) { throw new RuntimeException('openssl_encrypt fehlgeschlagen'); }
-	return 'enc:v1:' . rtrim(base64_encode($nonce . $ct . $tag), '=');
-}
+// hc2_encrypt() kommt aus dbconnect.php (hc2-Block)
 
 /** Kanal-Konfiguration je Typ: Felder wie im Agent (internal/notify/channel.go); geheime Felder verschluesselt */
 const SECRET_FIELDS = array('bot_token', 'webhook_url', 'token', 'password', 'app_token', 'user_key', 'headers', 'device_token');
@@ -112,22 +101,23 @@ function one(PDO $pdo, string $sql, array $p = array()) { $r = q($pdo, $sql, $p)
 // ---------------------------------------------------------------- Migration eines Accounts
 function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 	$uid = (int)$user['id']; $db = HC2DB; $now = now_utc();
+	$hc = hc2_pdo();   // schreibt nach ipv64_hc; $pdo liest nur die alten Tabellen
 	$class = one($pdo, "SELECT * FROM user_class WHERE id = :c", array('c' => $user['user_class'])) ?: array('hc_locations' => 1, 'healthcheck_limit' => 0);
 	$hcLocations = (int)($class['hc_locations'] ?? 1);
 	$stats = array('channels' => 0, 'checks' => 0, 'states' => 0, 'measurements' => 0, 'daily' => 0, 'incidents' => 0);
 	out("== Account $uid ({$user['email']}), Klasse {$user['user_class']}, Standorte je Check: $hcLocations" . ($dry ? ' [dry-run]' : ''));
 
-	if (!$dry) { $pdo->beginTransaction(); }
+	if (!$dry) { $hc->beginTransaction(); }
 	try {
 		// 1) Kanaele: Standardkanal "Account-E-Mail" (alt: integration "0") + alle Integrationen
 		$channelByLegacy = array();
-		$mailDefault = one($pdo, "SELECT id FROM `$db`.hc2_channels WHERE userid = :u AND type = 'ipv64_mail' AND legacy_integration_id = 0", array('u' => $uid));
+		$mailDefault = one($hc, "SELECT id FROM `$db`.hc2_channels WHERE userid = :u AND type = 'ipv64_mail' AND legacy_integration_id = 0", array('u' => $uid));
 		if ($mailDefault === null) {
 			if (!$dry) {
-				q($pdo, "INSERT INTO `$db`.hc2_channels (userid, type, name, config_enc, enabled, is_default, lang, verified, created_at, updated_at, legacy_integration_id)
+				q($hc, "INSERT INTO `$db`.hc2_channels (userid, type, name, config_enc, enabled, is_default, lang, verified, created_at, updated_at, legacy_integration_id)
 					VALUES (:u, 'ipv64_mail', 'Account-E-Mail', :cfg, 1, 1, 'de', 1, :t, :t, 0)",
 					array('u' => $uid, 'cfg' => json_encode(array('email' => $user['email'])), 't' => $now));
-				$channelByLegacy[0] = (int)$pdo->lastInsertId();
+				$channelByLegacy[0] = (int)$hc->lastInsertId();
 			}
 			$stats['channels']++;
 		} else { $channelByLegacy[0] = (int)$mailDefault['id']; }
@@ -135,18 +125,18 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 		foreach (q($pdo, "SELECT * FROM integrations WHERE userid = :u ORDER BY id", array('u' => $uid))->fetchAll(PDO::FETCH_ASSOC) as $in) {
 			$type = TYPE_MAP[$in['integration']] ?? null;
 			if ($type === null) { out("  ! Integration {$in['id']} Typ '{$in['integration']}' unbekannt, uebersprungen"); continue; }
-			$existing = one($pdo, "SELECT id FROM `$db`.hc2_channels WHERE userid = :u AND legacy_integration_id = :l", array('u' => $uid, 'l' => $in['id']));
+			$existing = one($hc, "SELECT id FROM `$db`.hc2_channels WHERE userid = :u AND legacy_integration_id = :l", array('u' => $uid, 'l' => $in['id']));
 			if ($existing !== null) { $channelByLegacy[(int)$in['id']] = (int)$existing['id']; continue; }
 			$o = json_decode((string)$in['options'], true); if (!is_array($o)) { $o = array(); }
 			$cfg = $dry ? array() : channel_config($type, $o);
 			$verified = ($type === 'ipv64_mail' || $type === 'ipv64_sms') ? ((int)$in['status'] === 1 ? 1 : 0) : 1;
 			if (!$dry) {
-				q($pdo, "INSERT INTO `$db`.hc2_channels (userid, type, name, config_enc, enabled, is_default, lang, verified, created_at, updated_at, last_used, legacy_integration_id)
+				q($hc, "INSERT INTO `$db`.hc2_channels (userid, type, name, config_enc, enabled, is_default, lang, verified, created_at, updated_at, last_used, legacy_integration_id)
 					VALUES (:u, :ty, :n, :cfg, :en, :def, 'de', :ver, :c, :c, :lu, :l)",
 					array('u' => $uid, 'ty' => $type, 'n' => mb_substr(dec($in['name']) !== '' ? dec($in['name']) : ucfirst($type), 0, 100), 'cfg' => json_encode($cfg, JSON_UNESCAPED_SLASHES),
 						'en' => (int)$in['status'] === 1 ? 1 : 0, 'def' => (int)$in['default_inte'] === 1 ? 1 : 0, 'ver' => $verified,
 						'c' => utc($in['add_time']) ?? $now, 'lu' => utc($in['last_used']), 'l' => $in['id']));
-				$channelByLegacy[(int)$in['id']] = (int)$pdo->lastInsertId();
+				$channelByLegacy[(int)$in['id']] = (int)$hc->lastInsertId();
 			}
 			$stats['channels']++;
 		}
@@ -200,7 +190,7 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 				'push' => $type === 'push' ? utc($h['last_update_time']) : null,
 			);
 			if (!$dry) {
-				q($pdo, "INSERT INTO `$db`.hc2_checks (token, userid, agent_id, execution, locations, policy, notify_degraded, slot, type, name, target, params,
+				q($hc, "INSERT INTO `$db`.hc2_checks (token, userid, agent_id, execution, locations, policy, notify_degraded, slot, type, name, target, params,
 						interval_sec, retry_interval_sec, retries, connect_timeout_ms, total_timeout_ms, invert, stabilize, ip_mode, tags, description, paused,
 						parent_token, critical, notify_down, notify_up, channels, repeat_minutes, revision, created_at, updated_at, updated_by, legacy_id,
 						state, state_since, last_check_at, next_check_at, last_status, last_push_at)
@@ -211,7 +201,7 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 					ON DUPLICATE KEY UPDATE legacy_id = VALUES(legacy_id)", $row);
 				// Zustand der Messstelle(n): alter Zustand gilt fuer jeden gewaehlten Standort
 				foreach (explode(',', $locations) as $loc) {
-					q($pdo, "INSERT IGNORE INTO `$db`.hc2_check_states (token, source, state, since, last_check_at, next_check_at, last_status, updated_at)
+					q($hc, "INSERT IGNORE INTO `$db`.hc2_check_states (token, source, state, since, last_check_at, next_check_at, last_status, updated_at)
 						VALUES (:t, :s, :st, :since, :last, :next, :ls, :now)",
 						array('t' => $token, 's' => 'loc:' . $loc, 'st' => $state === 'pending' ? 'pending' : $state, 'since' => $row['since'], 'last' => $row['last'], 'next' => $row['next'], 'ls' => $row['lstat'], 'now' => $now));
 					$stats['states']++;
@@ -228,9 +218,9 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 				$st = (int)$e['status'];
 				if ($st !== 1 && $st !== 3 && $st !== 4) { continue; }
 				$batch[] = array($token, 'legacy', (int)$e['id'], utc($e['event_time']), $st === 1 ? 1 : 0, (float)$e['latency'], $st === 1 ? '' : 'legacy', mb_substr(dec($e['text']), 0, 500), $now);
-				if (count($batch) >= 500) { $stats['measurements'] += insert_measurements($pdo, $batch, $dry); $batch = array(); }
+				if (count($batch) >= 500) { $stats['measurements'] += insert_measurements($batch, $dry); $batch = array(); }
 			}
-			if ($batch) { $stats['measurements'] += insert_measurements($pdo, $batch, $dry); }
+			if ($batch) { $stats['measurements'] += insert_measurements($batch, $dry); }
 
 			// 4) Aeltere Ereignisse als Tageswerte
 			$days = q($pdo, "SELECT DATE(event_time) d, COUNT(*) c, SUM(status = 1) up, MIN(NULLIF(latency,0)) mn, AVG(NULLIF(latency,0)) av, MAX(latency) mx
@@ -238,7 +228,7 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 				array('u' => $uid, 't' => $token, 's' => $sinceBerlin));
 			while ($d = $days->fetch(PDO::FETCH_ASSOC)) {
 				if (!$dry) {
-					q($pdo, "INSERT IGNORE INTO `$db`.hc2_daily (token, source, day, count, up_count, min_ms, avg_ms, max_ms) VALUES (:t, 'legacy', :d, :c, :up, :mn, :av, :mx)",
+					q($hc, "INSERT IGNORE INTO `$db`.hc2_daily (token, source, day, count, up_count, min_ms, avg_ms, max_ms) VALUES (:t, 'legacy', :d, :c, :up, :mn, :av, :mx)",
 						array('t' => $token, 'd' => $d['d'], 'c' => $d['c'], 'up' => $d['up'], 'mn' => $d['mn'], 'av' => $d['av'], 'mx' => $d['mx']));
 				}
 				$stats['daily']++;
@@ -246,9 +236,9 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 
 			// 5) Stoerungen
 			foreach (q($pdo, "SELECT * FROM healthcheck_incidents WHERE userid = :u AND healthtoken = :t ORDER BY id", array('u' => $uid, 't' => $token))->fetchAll(PDO::FETCH_ASSOC) as $inc) {
-				if (one($pdo, "SELECT id FROM `$db`.hc2_incidents WHERE legacy_id = :l", array('l' => $inc['id'])) !== null) { continue; }
+				if (one($hc, "SELECT id FROM `$db`.hc2_incidents WHERE legacy_id = :l", array('l' => $inc['id'])) !== null) { continue; }
 				if (!$dry) {
-					q($pdo, "INSERT INTO `$db`.hc2_incidents (token, userid, started_at, ended_at, reason, message, sources, legacy_id) VALUES (:t, :u, :s, :e, 'legacy', '', 'legacy', :l)",
+					q($hc, "INSERT INTO `$db`.hc2_incidents (token, userid, started_at, ended_at, reason, message, sources, legacy_id) VALUES (:t, :u, :s, :e, 'legacy', '', 'legacy', :l)",
 						array('t' => $token, 'u' => $uid, 's' => utc($inc['created_at']) ?? $now, 'e' => (int)$inc['status'] === 1 ? utc($inc['closed_at']) : null, 'l' => $inc['id']));
 				}
 				$stats['incidents']++;
@@ -257,15 +247,15 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 
 		// 6) Revisionen, Log, Flag
 		if (!$dry) {
-			q($pdo, "INSERT INTO `$db`.hc2_revisions (userid, next) VALUES (:u, 2) ON DUPLICATE KEY UPDATE next = GREATEST(next, 2)", array('u' => $uid));
+			q($hc, "INSERT INTO `$db`.hc2_revisions (userid, next) VALUES (:u, 2) ON DUPLICATE KEY UPDATE next = GREATEST(next, 2)", array('u' => $uid));
 			foreach ($stats as $k => $v) {
-				q($pdo, "INSERT INTO `$db`.hc2_migration_log (userid, time, step, count, note) VALUES (:u, :t, :s, :c, '')", array('u' => $uid, 't' => $now, 's' => $k, 'c' => $v));
+				q($hc, "INSERT INTO `$db`.hc2_migration_log (userid, time, step, count, note) VALUES (:u, :t, :s, :c, '')", array('u' => $uid, 't' => $now, 's' => $k, 'c' => $v));
 			}
+			$hc->commit();
 			if ($activate) { q($pdo, "UPDATE users SET hc2 = 1 WHERE id = :u", array('u' => $uid)); }
-			$pdo->commit();
 		}
 	} catch (Throwable $e) {
-		if (!$dry && $pdo->inTransaction()) { $pdo->rollBack(); }
+		if (!$dry && $hc->inTransaction()) { $hc->rollBack(); }
 		out("  FEHLER: " . $e->getMessage() . " (Account $uid zurueckgerollt)");
 		return;
 	}
@@ -274,13 +264,13 @@ function migrate_user(PDO $pdo, array $user, bool $dry, bool $activate): void {
 		$activate && !$dry ? ' -> hc2 = 1' : ''));
 }
 
-function insert_measurements(PDO $pdo, array $rows, bool $dry): int {
+function insert_measurements(array $rows, bool $dry): int {
 	if ($dry) { return count($rows); }
 	$sql = "INSERT IGNORE INTO `" . HC2DB . "`.hc2_measurements (token, source, agent_seq, time, status, latency_ms, reason, message, received_at) VALUES ";
 	$sql .= implode(',', array_fill(0, count($rows), '(?,?,?,?,?,?,?,?,?)'));
 	$flat = array();
 	foreach ($rows as $r) { array_push($flat, ...$r); }
-	$pdo->prepare($sql)->execute($flat);
+	hc2_pdo()->prepare($sql)->execute($flat);
 	return count($rows);
 }
 

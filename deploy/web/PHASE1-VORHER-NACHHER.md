@@ -17,6 +17,8 @@ chmod 640 /var/www/clients/client1/web58/private/hc2_secret.key
 ```bash
 # Redis-Passwort (Inhalt von /etc/ipv64-hub/redis.pass auf hc-srv02)
 # -> /var/www/clients/client1/web58/private/hc2_redis.pass (chmod 640)
+# Passwort des MySQL-Benutzers ipv64_hc (siehe Schritt 5)
+# -> /var/www/clients/client1/web58/private/hc2_db.pass (chmod 640)
 ```
 
 Die Schlüsseldatei kopiere ich anschließend auf beide hubs nach `/var/lib/ipv64-hub/secret.key` (sag Bescheid, wenn sie liegt – oder lege sie auf hc-srv01 unter `/root/hc2_secret.key` ab, dann verteile ich sie).
@@ -104,7 +106,7 @@ Nachher:
 	$statement = $pdo->prepare("SELECT * FROM healthchecks WHERE BINARY healthtoken = :key");
 	$result = $statement->execute(array('key' => $key));
 	$healthcheck = $statement->fetch();
-	hc2_push_mirror($pdo, $healthcheck, $_GET);
+	hc2_push_mirror($healthcheck, $_GET);
 ```
 
 ## 4. Migrationsskript
@@ -123,13 +125,13 @@ php /var/www/clients/client1/web58/web/bots/hc2_migrate.php test@schroederdennis
 
 `--activate` erst, wenn der hub läuft (Phase 2). Ein zweiter Lauf ändert nichts (idempotent). Das Skript braucht `hc2_secret.key` aus Schritt 1, sobald der Account Integrationen mit Geheimnissen hat.
 
-## 5. Rechte für den Portal-Benutzer
+## 5. Zugang zur hc2-Datenbank
 
-Der MySQL-Benutzer aus `dbconnect.php` braucht Rechte auf die neue Datenbank:
+Das Portal nutzt für `ipv64_hc` eine **eigene Verbindung mit dem Benutzer `ipv64_hc`** (öffnet sich erst beim ersten hc2-Aufruf, z. B. einem Heartbeat). Der Portal-Benutzer braucht keine neuen Rechte. Nur das Passwort ablegen:
 
-```sql
-GRANT SELECT, INSERT, UPDATE, DELETE ON `ipv64_hc`.* TO '<portal-benutzer>'@'localhost';
-FLUSH PRIVILEGES;
+```bash
+# Passwort von ipv64_hc, eine Zeile, ohne Anfuehrungszeichen
+# -> /var/www/clients/client1/web58/private/hc2_db.pass (chmod 640, Besitzer wie die anderen private-Dateien)
 ```
 
 ## Prüfen
