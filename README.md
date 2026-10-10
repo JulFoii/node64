@@ -4,7 +4,15 @@ Ein leichtgewichtiger Docker-Container für das Heimnetz: Health-Checks (als Upt
 
 Ein einziges Go-Binary, SQLite, eingebettete Weboberfläche, keine externen Abhängigkeiten zur Laufzeit. Läuft auf amd64 und arm64, auch auf einem Raspberry Pi.
 
-**Stand: Phase 3 (Oberfläche Health-Checks).** Fertig sind der Kern (Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log, Logs), alle Check-Typen mit Scheduler, Verdichtung und JSON-API sowie die Oberfläche: Liste mit Pillen, Filter, Sortierung und Massenaktionen, Formular je Typ, Detailseite mit Latenz-Chart, Verfügbarkeit, Ereignissen und Push-URL, Dashboard-Kacheln. Benachrichtigungen folgen in Phase 4, Wartungsfenster-Seite, Backup und 2FA in Phase 5.
+**Stand: Phase 4 (Benachrichtigungen).** Fertig sind der Kern (Setup, Login, Modulsystem, Datenbank, Einstellungen, Audit-Log, Logs), alle Check-Typen mit Scheduler, Verdichtung und JSON-API, die Oberfläche für Health-Checks (Liste mit Pillen, Formular, Detailseite mit Chart, Dashboard) und die Benachrichtigungen: E-Mail (SMTP), Telegram, Discord, ntfy, Gotify und Webhook mit verschlüsselten Geheimnissen, Standardkanälen, Kanalwahl je Check, Ruhezeiten, Wiederholung bei anhaltender Störung, Sammelmeldungen, Ratenbegrenzung und Zustellprotokoll. Wartungsfenster-Seite, Backup, Export und 2FA folgen in Phase 5.
+
+## Benachrichtigungen
+
+Kanäle werden unter *Benachrichtigungen* angelegt und getestet. Standardkanäle bekommen alle Checks, die keine eigene Auswahl haben. Texte gehen in der Sprache des Kanals raus (Deutsch oder Englisch). Geheimnisse wie Bot-Tokens oder SMTP-Passwörter liegen verschlüsselt in der Datenbank, der Schlüssel in `/data/secret.key`.
+
+Webhooks bekommen standardmäßig ein JSON mit `event_id`, `kind` (down, up, flapping_start, flapping_end, reminder, summary, test), `status`, `check` (token, name, type, target), `reason`, `message`, `duration_seconds`, `agent` und `url`. Ein eigener Body mit Platzhaltern wie `{{name}}` oder `{{status}}` ist möglich.
+
+Gegen Alarmrauschen wirken Wiederholungen vor Alarm, Stabilisierung, Flatter-Erkennung, Sammelmeldungen ab drei gleichzeitigen Störungen, Ruhezeiten (nur kritische Checks alarmieren) und höchstens 60 Nachrichten je Kanal und Stunde. Links in Nachrichten brauchen die externe Adresse des Agents in den Einstellungen der Benachrichtigungen.
 
 ## Schnellstart
 

@@ -24,20 +24,23 @@ import (
 	"github.com/ipv64net/agent/internal/i18n"
 	"github.com/ipv64net/agent/internal/logging"
 	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/notify"
 	"github.com/ipv64net/agent/internal/store"
 	agentsync "github.com/ipv64net/agent/internal/sync"
 )
 
 // Deps sind die Abhaengigkeiten der Oberflaeche.
 type Deps struct {
-	Cfg       *config.Config
-	Store     *store.Store
-	Log       *logging.Logger
-	I18n      *i18n.Bundle
-	Modules   *module.Registry
-	Sync      agentsync.Client
-	Version   string
-	StartedAt time.Time
+	Cfg        *config.Config
+	Store      *store.Store
+	Log        *logging.Logger
+	I18n       *i18n.Bundle
+	Modules    *module.Registry
+	Notify     *notify.Store
+	Dispatcher *notify.Dispatcher
+	Sync       agentsync.Client
+	Version    string
+	StartedAt  time.Time
 }
 
 type Server struct {
@@ -70,12 +73,13 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) parseTemplates() error {
 	funcs := template.FuncMap{
-		"add":   func(a, b int) int { return a + b },
-		"sub":   func(a, b int) int { return a - b },
-		"pct":   func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) },
-		"ms":    func(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) },
-		"join":  strings.Join,
-		"split": strings.Fields,
+		"add":      func(a, b int) int { return a + b },
+		"sub":      func(a, b int) int { return a - b },
+		"pct":      func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) },
+		"ms":       func(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) },
+		"join":     strings.Join,
+		"split":    strings.Fields,
+		"contains": strings.Contains,
 		"seq": func(n int) []int {
 			out := make([]int, n)
 			for i := range out {
@@ -141,6 +145,9 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /settings/password", s.auth(s.settingsPassword))
 	s.mux.Handle("POST /settings/modules", s.auth(s.settingsModules))
 	s.mux.Handle("POST /settings/logging", s.auth(s.settingsLogging))
+	if s.Notify != nil {
+		s.notifyRoutes()
+	}
 	s.mux.Handle("GET /audit", s.auth(s.auditLog))
 	s.mux.Handle("GET /logs", s.auth(s.logs))
 	s.mux.Handle("GET /logs/download", s.auth(s.logsDownload))

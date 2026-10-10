@@ -34,7 +34,7 @@ func newTestModule(t *testing.T) (*Module, *httptest.Server) {
 	if err := core.Migrate(context.Background(), "core", cm); err != nil {
 		t.Fatal(err)
 	}
-	m := New(core, log, nil, "test")
+	m := New(core, log, nil, nil, "test")
 	if err := core.Migrate(context.Background(), Name, m.Migrations()); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestAggregation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { core.Close() })
-	if err := core.Migrate(context.Background(), Name, New(core, log, nil, "test").Migrations()); err != nil {
+	if err := core.Migrate(context.Background(), Name, New(core, log, nil, nil, "test").Migrations()); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -274,7 +274,8 @@ func TestAggregation(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	old := now.Add(-40 * 24 * time.Hour)
+	// Feste Minute, damit die zehn Punkte nie eine Stunden- oder Tagesgrenze kreuzen
+	old := now.Add(-40 * 24 * time.Hour).Truncate(time.Hour).Add(10 * time.Minute)
 	for i := 0; i < 10; i++ {
 		status := checks.Up
 		if i%5 == 0 {

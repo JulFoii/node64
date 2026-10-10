@@ -1,0 +1,66 @@
+{{define "content"}}
+{{$d := .Data}}
+{{$f := $d.Form}}
+<div class="small"><a href="/notifications">{{.T "nf.title"}}</a></div>
+<h1 class="h4 mb-3">{{if $d.Edit}}{{.T "nf.edit"}}{{else}}{{.T "nf.new"}}{{end}} <span class="badge text-bg-light fs-6">{{.T (print "nf.type." $d.Type)}}</span></h1>
+{{if $d.Error}}<div class="alert alert-danger">{{$d.Error}}</div>{{end}}
+{{if not $d.Edit}}
+<div class="mb-3">{{range $d.Types}}<a class="btn btn-sm {{if eq . $d.Type}}btn-primary{{else}}btn-outline-secondary{{end}} me-1 mb-1" href="/notifications/new?type={{.}}">{{$.T (print "nf.type." .)}}</a>{{end}}</div>
+{{end}}
+<form method="post" action="{{if $d.Edit}}/notifications/{{$d.ID}}/edit{{else}}/notifications/new{{end}}" autocomplete="off">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<input type="hidden" name="type" value="{{$d.Type}}">
+<div class="row g-3">
+	<div class="col-lg-7">
+		<div class="card">
+			<div class="card-body">
+				<div class="mb-3">
+					<label class="form-label" for="name">{{.T "common.name"}}</label>
+					<input class="form-control" id="name" name="name" value="{{index $f "name"}}" maxlength="100" required autofocus>
+				</div>
+				{{range $d.Fields}}
+				{{$key := print "cfg_" .Key}}
+				<div class="mb-3">
+					{{if eq .Kind "bool"}}
+					<div class="form-check"><input class="form-check-input" type="checkbox" name="{{$key}}" id="{{$key}}"{{if eq (index $f $key) "true"}} checked{{end}}><label class="form-check-label" for="{{$key}}">{{$.T (print "nf.field." .Key)}}</label></div>
+					{{else}}
+					<label class="form-label" for="{{$key}}">{{$.T (print "nf.field." .Key)}}{{if .Required}} *{{end}}</label>
+					{{if eq .Kind "select"}}
+					<select class="form-select" id="{{$key}}" name="{{$key}}">{{range .Options}}<option value="{{.}}"{{if eq . (index $f $key)}} selected{{end}}>{{.}}</option>{{end}}</select>
+					{{else if eq .Kind "textarea"}}
+					<textarea class="form-control font-monospace" id="{{$key}}" name="{{$key}}" rows="4"{{if .Secret}} placeholder="{{if $d.Edit}}{{$.T "nf.secret_keep"}}{{end}}"{{end}}>{{index $f $key}}</textarea>
+					{{else if eq .Kind "password"}}
+					<input class="form-control" type="password" id="{{$key}}" name="{{$key}}" value="" autocomplete="new-password" placeholder="{{if $d.Edit}}{{$.T "nf.secret_keep"}}{{end}}"{{if and .Required (not $d.Edit)}} required{{end}}>
+					{{else if eq .Kind "number"}}
+					<input class="form-control" type="number" id="{{$key}}" name="{{$key}}" value="{{index $f $key}}">
+					{{else}}
+					<input class="form-control" id="{{$key}}" name="{{$key}}" value="{{index $f $key}}"{{if .Required}} required{{end}}>
+					{{end}}
+					{{if eq .Key "body"}}<div class="form-text">{{$.T "nf.field.body_hint"}}</div>{{end}}
+					{{end}}
+				</div>
+				{{end}}
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-5">
+		<div class="card mb-3">
+			<div class="card-body">
+				<div class="mb-3">
+					<label class="form-label" for="lang">{{.T "nf.lang"}}</label>
+					<select class="form-select" id="lang" name="lang">{{range $d.Langs}}<option value="{{.}}"{{if eq . (index $f "lang")}} selected{{end}}>{{$.T (print "lang." .)}}</option>{{end}}</select>
+				</div>
+				<div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="enabled" id="enabled"{{if index $f "enabled"}} checked{{end}}><label class="form-check-label" for="enabled">{{.T "nf.enabled"}}</label></div>
+				<div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="default" id="default"{{if index $f "default"}} checked{{end}}><label class="form-check-label" for="default">{{.T "nf.default"}}</label><div class="form-text">{{.T "nf.default_hint"}}</div></div>
+				<div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="notify_down" id="notify_down"{{if index $f "notify_down"}} checked{{end}}><label class="form-check-label" for="notify_down">{{.T "nf.notify_down"}}</label></div>
+				<div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="notify_up" id="notify_up"{{if index $f "notify_up"}} checked{{end}}><label class="form-check-label" for="notify_up">{{.T "nf.notify_up"}}</label></div>
+			</div>
+		</div>
+		<div class="d-flex gap-2">
+			<button class="btn btn-primary" type="submit">{{.T "common.save"}}</button>
+			<a class="btn btn-outline-secondary" href="/notifications">{{.T "common.cancel"}}</a>
+		</div>
+	</div>
+</div>
+</form>
+{{end}}

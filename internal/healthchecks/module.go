@@ -12,6 +12,7 @@ import (
 
 	"github.com/ipv64net/agent/internal/checks"
 	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/notify"
 	"github.com/ipv64net/agent/internal/scheduler"
 	"github.com/ipv64net/agent/internal/store"
 )
@@ -23,11 +24,14 @@ const Name = "healthchecks"
 
 // Module implementiert module.Module.
 type Module struct {
-	core     *store.Store
-	st       *Store
-	log      *slog.Logger
-	notifier scheduler.Notifier
-	version  string
+	core        *store.Store
+	st          *Store
+	log         *slog.Logger
+	notifier    scheduler.Notifier
+	dispatcher  *notify.Dispatcher
+	notifyStore *notify.Store
+	version     string
+	reminders   map[string]time.Time // Token -> letzte Erinnerung
 
 	g module.Guards
 
@@ -38,13 +42,84 @@ type Module struct {
 	push   *pushLimiter
 }
 
-// New erzeugt das Modul. notifier darf nil sein (dann nur Log).
-func New(core *store.Store, log *slog.Logger, notifier scheduler.Notifier, version string) *Module {
-	m := &Module{core: core, st: NewStore(core), log: log.With("module", Name), notifier: notifier, version: version, push: newPushLimiter()}
-	if notifier == nil {
-		m.notifier = logNotifier{log: m.log}
-	}
+// New erzeugt das Modul. dispatcher und notifyStore duerfen nil sein (dann nur Log).
+func New(core *store.Store, log *slog.Logger, dispatcher *notify.Dispatcher, notifyStore *notify.Store, version string) *Module {
+	m := &Module{core: core, st: NewStore(core), log: log.With("module", Name), dispatcher: dispatcher, notifyStore: notifyStore, version: version, push: newPushLimiter(), reminders: map[string]time.Time{}}
+	m.notifier = m
 	return m
+}
+
+// Notify (scheduler.Notifier): Ereignis in einen Alert fuer den Dispatcher umsetzen.
+func (m *Module) Notify(ctx context.Context, e scheduler.Event, c scheduler.Check) {
+	if e.Silent {
+		return
+	}
+	full, err := m.st.Check(ctx, c.Token)
+	if err != nil || full == nil {
+		return
+	}
+	var kind notify.Kind
+	switch e.Kind {
+	case scheduler.EventDown:
+		kind = notify.KindDown
+	case scheduler.EventUp:
+		kind = notify.KindUp
+		m.mu.Lock()
+		delete(m.reminders, c.Token)
+		m.mu.Unlock()
+	case scheduler.EventFlappingStart:
+		kind = notify.KindFlappingStart
+	case scheduler.EventFlappingEnd:
+		kind = notify.KindFlappingEnd
+	default:
+		return
+	}
+	if m.dispatcher == nil {
+		m.log.Info("notification", "check", c.Name, "kind", kind, "reason", e.Reason, "message", e.Message)
+		return
+	}
+	m.dispatcher.Dispatch(notify.Alert{EventID: e.ID, Kind: kind, Time: e.Time, Check: alertInfo(full), Reason: string(e.Reason), Message: e.Message, Duration: e.Duration, Flaps: e.Flaps})
+}
+
+func alertInfo(c *Check) notify.CheckInfo {
+	return notify.CheckInfo{Token: c.Token, Name: c.Name, Type: string(c.Type), Target: c.Target, Critical: c.Critical, Channels: c.Channels, NotifyDown: c.NotifyDown, NotifyUp: c.NotifyUp}
+}
+
+// remind schickt Erinnerungen fuer Checks, die laenger gestoert sind
+// (repeat_minutes je Check, 0 = aus).
+func (m *Module) remind(ctx context.Context) {
+	if m.dispatcher == nil {
+		return
+	}
+	list, err := m.st.Checks(ctx)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, c := range list {
+		if c.RepeatMinutes <= 0 {
+			continue
+		}
+		rt := m.liveRuntime(c)
+		if rt.State != scheduler.StateDown && rt.State != scheduler.StateFlapping {
+			continue
+		}
+		every := time.Duration(c.RepeatMinutes) * time.Minute
+		m.mu.Lock()
+		last, ok := m.reminders[c.Token]
+		if !ok {
+			last = rt.DownSince
+		}
+		due := !last.IsZero() && now.Sub(last) >= every
+		if due {
+			m.reminders[c.Token] = now
+		}
+		m.mu.Unlock()
+		if !due {
+			continue
+		}
+		m.dispatcher.Dispatch(notify.Alert{EventID: scheduler.NewID(), Kind: notify.KindReminder, Time: now, Check: alertInfo(c), Reason: string(rt.LastReason), Message: rt.LastMessage, Duration: now.Sub(rt.DownSince)})
+	}
 }
 
 // Store gibt die Datenhaltung frei (Dashboard, Tests).
@@ -113,19 +188,24 @@ func (m *Module) scheduler() *scheduler.Scheduler {
 	return m.sched
 }
 
-// housekeeping verdichtet stuendlich und laedt Wartungsfenster neu.
+// housekeeping verdichtet stuendlich, laedt Wartungsfenster neu und
+// verschickt minuetlich faellige Erinnerungen.
 func (m *Module) housekeeping(ctx context.Context) {
 	defer m.wg.Done()
-	t := time.NewTicker(time.Hour)
-	defer t.Stop()
+	hourly := time.NewTicker(time.Hour)
+	defer hourly.Stop()
+	minutely := time.NewTicker(time.Minute)
+	defer minutely.Stop()
 	m.aggregate(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-hourly.C:
 			m.aggregate(ctx)
 			m.st.reloadMaintenance(ctx)
+		case <-minutely.C:
+			m.remind(ctx)
 		}
 	}
 }
@@ -166,14 +246,4 @@ func (m *Module) Routes(mux *http.ServeMux, g module.Guards) {
 	mux.Handle("GET /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
 	mux.Handle("POST /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
 	m.uiRoutes(mux, g)
-}
-
-// logNotifier schreibt Ereignisse nur ins Log (bis Phase 4).
-type logNotifier struct{ log *slog.Logger }
-
-func (n logNotifier) Notify(_ context.Context, e scheduler.Event, c scheduler.Check) {
-	if e.Silent {
-		return
-	}
-	n.log.Info("notification", "check", c.Name, "token", c.Token, "kind", e.Kind, "reason", e.Reason, "message", e.Message, "event_id", e.ID)
 }

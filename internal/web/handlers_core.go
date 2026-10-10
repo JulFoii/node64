@@ -23,6 +23,7 @@ const (
 	SettingAgentID       = "agent.id"
 	SettingAgentName     = "agent.name"
 	SettingAgentLocation = "agent.location"
+	SettingAgentTimezone = "agent.timezone"
 )
 
 // ---------------------------------------------------------------- API
@@ -95,6 +96,9 @@ func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if f["timezone"] != "" {
+		_ = s.Store.SetSetting(ctx, SettingAgentTimezone, f["timezone"])
 	}
 	if err := s.ensureAgentIdentity(r, f["agent_name"], f["location"]); err != nil {
 		s.fail(w, r, err)
@@ -316,6 +320,9 @@ func (s *Server) settingsUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.Store.UpdateUserPrefs(r.Context(), v.User.ID, f["lang"], f["timezone"]); err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if f["timezone"] != "" {
+		_ = s.Store.SetSetting(r.Context(), SettingAgentTimezone, f["timezone"])
 	}
 	s.setCookie(w, r, langCookie, f["lang"], 365*24*3600)
 	s.audit(r, "settings.user", v.User.Username, "lang="+f["lang"]+" timezone="+f["timezone"])

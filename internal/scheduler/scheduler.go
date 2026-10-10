@@ -761,6 +761,9 @@ func (s *Scheduler) Tokens() []string {
 	return out
 }
 
+// NewID erzeugt eine eindeutige Ereignis-ID.
+func NewID() string { return newID() }
+
 func newID() string {
 	b := make([]byte, 16)
 	_, _ = crand.Read(b)

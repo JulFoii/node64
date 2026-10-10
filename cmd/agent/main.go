@@ -9,14 +9,12 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 	_ "time/tzdata" // Zeitzonen im Binary, das Laufzeit-Image hat keine
@@ -26,6 +24,8 @@ import (
 	"github.com/ipv64net/agent/internal/i18n"
 	"github.com/ipv64net/agent/internal/logging"
 	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/notify"
+	"github.com/ipv64net/agent/internal/secrets"
 	"github.com/ipv64net/agent/internal/store"
 	agentsync "github.com/ipv64net/agent/internal/sync"
 	"github.com/ipv64net/agent/internal/web"
@@ -64,8 +64,9 @@ func run() error {
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return fmt.Errorf("data dir %s: %w", cfg.DataDir, err)
 	}
-	if err := ensureSecretKey(cfg.SecretKeyPath()); err != nil {
-		return err
+	box, err := secrets.Load(cfg.SecretKeyPath())
+	if err != nil {
+		return fmt.Errorf("secret key: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -92,14 +93,27 @@ func run() error {
 		return err
 	}
 
+	// Benachrichtigungen gehoeren zum Kern und laufen immer
+	nfMigrations, err := notify.Migrations()
+	if err != nil {
+		return err
+	}
+	if err := st.Migrate(ctx, "notify", nfMigrations); err != nil {
+		return err
+	}
+	nfStore := notify.NewStore(st, box)
+	dispatcher := notify.NewDispatcher(nfStore, notify.Senders(Version), bundle, func(key, def string) string { return st.SettingOr(ctx, key, def) }, logger.Slog())
+	dispatcher.Start(ctx)
+	defer dispatcher.Stop()
+
 	modules := module.NewRegistry(st, logger.Slog())
-	modules.Register(healthchecks.New(st, logger.Slog(), nil, Version))
+	modules.Register(healthchecks.New(st, logger.Slog(), dispatcher, nfStore, Version))
 	registerModules(modules)
 	modules.StartEnabled(ctx)
 	defer modules.StopAll()
 
 	srv, err := web.New(web.Deps{
-		Cfg: cfg, Store: st, Log: logger, I18n: bundle, Modules: modules,
+		Cfg: cfg, Store: st, Log: logger, I18n: bundle, Modules: modules, Notify: nfStore, Dispatcher: dispatcher,
 		Sync: agentsync.NoOp{}, Version: Version, StartedAt: time.Now(),
 	})
 	if err != nil {
@@ -115,23 +129,6 @@ func registerModules(r *module.Registry) {
 	r.Register(module.Placeholder{I: module.Info{Name: "dyndns", TitleKey: "nav.dyndns", Icon: "bi-globe", Path: "/dyndns", Order: 20}})
 	r.Register(module.Placeholder{I: module.Info{Name: "proxy", TitleKey: "nav.proxy", Icon: "bi-diagram-3", Path: "/proxy", Order: 30}})
 	r.Register(module.Placeholder{I: module.Info{Name: "link", TitleKey: "nav.link", Icon: "bi-cloud", Path: "/link", Order: 90}})
-}
-
-// ensureSecretKey erzeugt beim ersten Start den Schluessel, mit dem spaeter
-// Geheimnisse (Kanal-Tokens, SMTP-Passwoerter) in der Datenbank verschluesselt
-// werden. Er bleibt nur unter /data.
-func ensureSecretKey(path string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	return os.WriteFile(path, key, 0o600)
 }
 
 // firstAdminFromEnv legt den Administrator aus AGENT_ADMIN_USER/PASSWORD an,

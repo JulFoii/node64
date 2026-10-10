@@ -100,6 +100,7 @@
 					<dt class="col-6">{{.T "hc.form.stabilize"}}</dt><dd class="col-6">{{$c.Stabilize}}</dd>
 					{{if $c.Invert}}<dt class="col-6">{{.T "hc.form.invert"}}</dt><dd class="col-6">{{.T "common.yes"}}</dd>{{end}}
 					{{if $c.Critical}}<dt class="col-6">{{.T "hc.form.critical"}}</dt><dd class="col-6">{{.T "common.yes"}}</dd>{{end}}
+					<dt class="col-6">{{.T "hc.form.channels"}}</dt><dd class="col-6">{{if $d.Channels}}{{range $d.Channels}}<a href="/notifications/{{.ID}}/edit">{{.Name}}</a>{{if not .Selected}} <span class="text-body-secondary">({{$.T "nf.default"}})</span>{{end}}<br>{{end}}{{else}}–{{end}}</dd>
 					{{if $d.ParentName}}<dt class="col-6">{{.T "hc.form.parent"}}</dt><dd class="col-6"><a href="/healthchecks/{{$c.Parent}}">{{$d.ParentName}}</a></dd>{{end}}
 					{{if $d.Children}}<dt class="col-6">{{.T "hc.children"}}</dt><dd class="col-6">{{range $d.Children}}<a href="/healthchecks/{{.Token}}">{{.Name}}</a><br>{{end}}</dd>{{end}}
 					{{range $k, $v := $d.Params}}{{if ne $k "basic_password"}}<dt class="col-6 text-truncate">{{$k}}</dt><dd class="col-6 text-break">{{$v}}</dd>{{end}}{{end}}

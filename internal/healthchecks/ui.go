@@ -14,6 +14,7 @@ import (
 
 	"github.com/ipv64net/agent/internal/checks"
 	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/notify"
 	"github.com/ipv64net/agent/internal/scheduler"
 )
 
@@ -226,6 +227,7 @@ type rangeStat struct {
 }
 
 type detailData struct {
+	Channels   []channelOpt
 	Row        row
 	JSON       checkJSON
 	Pills      []Pill
@@ -299,20 +301,42 @@ func (m *Module) pageDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.PushURL = d.JSON.PushURL
+	if chans, err := m.channels(ctx); err == nil {
+		for _, ch := range chans {
+			sel := false
+			for _, id := range c.Channels {
+				if id == ch.ID {
+					sel = true
+				}
+			}
+			if sel || (len(c.Channels) == 0 && ch.Default) {
+				d.Channels = append(d.Channels, channelOpt{ID: ch.ID, Name: ch.Name, Type: string(ch.Type), Default: ch.Default, Selected: sel})
+			}
+		}
+	}
 	m.g.Render(w, r, http.StatusOK, Name+"/detail", "nav.healthchecks", d)
 }
 
 // ---------------------------------------------------------------- Formular
 
 type formData struct {
-	Edit    bool
-	Token   string
-	Form    map[string]string
-	Errors  map[string]string
-	Types   []checks.Type
-	Parents []*Check
-	IPModes []string
-	Error   string
+	Edit     bool
+	Token    string
+	Form     map[string]string
+	Errors   map[string]string
+	Types    []checks.Type
+	Parents  []*Check
+	IPModes  []string
+	Error    string
+	Channels []channelOpt
+}
+
+type channelOpt struct {
+	ID       int64
+	Name     string
+	Type     string
+	Default  bool
+	Selected bool
 }
 
 // formDefaults sind die Vorgaben eines neuen Checks.
@@ -339,6 +363,11 @@ func formFromCheck(c *Check) map[string]string {
 	f["invert"], f["critical"], f["paused"] = onOff(c.Invert), onOff(c.Critical), onOff(c.Paused)
 	f["notify_down"], f["notify_up"] = onOff(c.NotifyDown), onOff(c.NotifyUp)
 	f["repeat_minutes"] = strconv.Itoa(c.RepeatMinutes)
+	ids := make([]string, 0, len(c.Channels))
+	for _, id := range c.Channels {
+		ids = append(ids, strconv.FormatInt(id, 10))
+	}
+	f["channels"] = strings.Join(ids, ",")
 	var p map[string]any
 	_ = json.Unmarshal(c.Params, &p)
 	str := func(k string) string {
@@ -473,6 +502,12 @@ func checkFromForm(r *http.Request) (checkJSON, error) {
 		}
 	}
 	in.Channels = []int64{}
+	_ = r.ParseForm()
+	for _, id := range r.PostForm["channels"] {
+		if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+			in.Channels = append(in.Channels, n)
+		}
+	}
 	p := map[string]any{}
 	num := func(key, form string) error {
 		if s := v(form); s != "" {
@@ -582,6 +617,17 @@ func (m *Module) formPage(w http.ResponseWriter, r *http.Request, status int, d 
 	}
 	d.Types = checks.Types
 	d.IPModes = []string{"auto", "ipv4", "ipv6", "both"}
+	if m.dispatcher != nil {
+		selected := map[string]bool{}
+		for _, id := range strings.Split(d.Form["channels"], ",") {
+			selected[strings.TrimSpace(id)] = true
+		}
+		if chans, err := m.channels(r.Context()); err == nil {
+			for _, ch := range chans {
+				d.Channels = append(d.Channels, channelOpt{ID: ch.ID, Name: ch.Name, Type: string(ch.Type), Default: ch.Default, Selected: selected[strconv.FormatInt(ch.ID, 10)]})
+			}
+		}
+	}
 	if d.Errors == nil {
 		d.Errors = map[string]string{}
 	}
@@ -663,6 +709,7 @@ func (m *Module) pageFormSubmit(w http.ResponseWriter, r *http.Request) {
 			d.Form[k] = ""
 		}
 	}
+	d.Form["channels"] = strings.Join(r.PostForm["channels"], ",")
 	d.Error = err.Error()
 	m.formPage(w, r, http.StatusUnprocessableEntity, d)
 }
@@ -797,4 +844,12 @@ func (m *Module) Dashboard(ctx context.Context) (*module.DashboardInfo, error) {
 		info.Incidents = append(info.Incidents, module.IncidentInfo{Name: names[i.Token], Path: "/healthchecks/" + i.Token, StartedAt: i.StartedAt, EndedAt: i.EndedAt, Open: i.Open, Message: i.Message})
 	}
 	return info, nil
+}
+
+// channels liefert die Kanaele des Kerns (fuer Formular und Detailseite).
+func (m *Module) channels(ctx context.Context) ([]*notify.Channel, error) {
+	if m.notifyStore == nil {
+		return nil, nil
+	}
+	return m.notifyStore.Channels(ctx)
 }

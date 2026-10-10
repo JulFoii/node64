@@ -150,6 +150,7 @@ func (s *Server) nav(r *http.Request) []NavItem {
 		items = append(items, NavItem{Key: m.Info.TitleKey, Path: m.Info.Path, Icon: m.Info.Icon, Available: m.Info.Available, Enabled: m.Running})
 	}
 	items = append(items,
+		NavItem{Key: "nav.notifications", Path: "/notifications", Icon: "bi-bell", Available: true, Enabled: s.Notify != nil},
 		NavItem{Key: "nav.settings", Path: "/settings", Icon: "bi-gear", Available: true, Enabled: true},
 		NavItem{Key: "nav.audit", Path: "/audit", Icon: "bi-journal-text", Available: true, Enabled: true},
 		NavItem{Key: "nav.logs", Path: "/logs", Icon: "bi-terminal", Available: true, Enabled: true},
@@ -231,4 +232,10 @@ func (s *Server) actor(r *http.Request) string {
 		return u.Username
 	}
 	return "-"
+}
+
+// validTimezone prueft einen Zeitzonennamen.
+func validTimezone(tz string) bool {
+	_, err := time.LoadLocation(tz)
+	return err == nil
 }
