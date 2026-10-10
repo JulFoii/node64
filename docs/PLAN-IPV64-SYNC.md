@@ -17,7 +17,7 @@ Ergänzt das Konzept („ipv64 Agent – Konzept & Funktionsumfang“) und erset
 | L5 | **Rohe Messpunkte der Online-Checks nur 7 Tage in MySQL** (partitioniert), Stunden- und Tageswerte in MySQL. Influx wird nicht mehr für Healthchecks gebraucht. | Ein Datenmodell für Agent und Server, gleiche Charts. Influx bleibt für CDN/Statistiken. |
 | L6 | **Integrationen werden zu Kanälen** (`hc2_channels`), gleiche Typen wie im Agent plus `ipv64_mail`, `ipv64_sms`, `pushover`, `app`. Alte `integrations` werden einmalig migriert, die Verifizierung per Mail/SMS bleibt. | Gleicher Versandcode (Go) auf Server und Agent; die bekannten Lücken im alten PHP (activate_integration ohne Login) verschwinden. |
 | L7 | **Push-URLs bleiben stabil**: `https://ipv64.net/health.php?token=...` und der neue Pfad `/api/v2/push/{token}` funktionieren beide, auch nach der Migration. | Tausende Geräte rufen die alte URL. |
-| L8 | Lokale Checks eines Agents zählen **nicht** gegen `healthcheck_limit`; Online-Checks und „beides“ zählen. Anzahl Agents je Account nach Tarif (Free 1, VIP 3, Business 10, Vorschlag). | Konzept. |
+| L8 | Lokale Checks im Container haben **kein Limit**. Gezählt werden nur Checks, die online bei ipv64 laufen (`execution online` oder `both`), und zwar wie bisher gegen das Limit aus der User-Class des Accounts. Kein Limit für die Anzahl Agents je Account. | Entscheidung Dennis, 2026-10-10. |
 
 ---
 
@@ -391,7 +391,11 @@ Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10. Pakete 3/
 
 ---
 
-## 10. Offene Entscheidungen (bitte festlegen)
+## 10. Entscheidungen (Stand 2026-10-10)
+
+Festgelegt: (1) Rohdaten 7 Tage in MySQL. (2) Limits nur für Online-Checks aus der User-Class, lokal unbegrenzt, keine Agent-Obergrenze. (3) Neue Seiten unter `/healthchecks2`; wie und wann umgestellt wird, bleibt offen (Migrationsweg denkbar). (5) DNS-Failover bleibt beim Online-System, Agent-Checks sind dafür keine Quelle. (6) Kein zweiter Standort jetzt, Spalte `location` bleibt vorbereitet. Offen: (4) Pushover/App im Agent, (7) Long-Poll – Erklärung angefragt.
+
+Ursprüngliche Fragen:
 
 1. **Rohdaten der Online-Checks:** 7 Tage in MySQL wie geplant, oder weiter Influx? (Plan: MySQL.)
 2. **Agents je Tarif:** Free 1, VIP 3, Business 10, Company 25? Und zählen Checks mit `execution both` doppelt? (Plan: einfach.)
