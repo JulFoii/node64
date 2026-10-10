@@ -1,0 +1,214 @@
+package web
+
+import (
+	"bytes"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/store"
+	agentsync "github.com/ipv64net/agent/internal/sync"
+)
+
+// View ist der Datensatz, den jedes Template bekommt. Die Methoden stehen in
+// den Templates als {{.T "key"}} oder {{$.Time .X}} zur Verfuegung.
+type View struct {
+	s        *Server
+	Lang     string
+	Theme    string
+	Path     string
+	Title    string
+	User     *store.User
+	CSRF     string
+	Version  string
+	Nav      []NavItem
+	Flash    *Flash
+	Sync     agentsync.State
+	SetupRun bool
+	Data     any
+	Errors   map[string]string
+	Form     map[string]string
+	loc      *time.Location
+}
+
+type NavItem struct {
+	Key       string
+	Path      string
+	Icon      string
+	Available bool
+	Enabled   bool
+	Active    bool
+}
+
+type Flash struct {
+	Kind string // success, warning, danger
+	Text string
+}
+
+// T uebersetzt in der Sprache der Ansicht.
+func (v *View) T(key string, args ...any) string { return v.s.I18n.T(v.Lang, key, args...) }
+
+// Time formatiert Datum und Uhrzeit in der Zeitzone des Nutzers.
+func (v *View) Time(t time.Time) string { return v.s.I18n.FormatDateTime(v.Lang, t, v.loc) }
+
+// Date formatiert nur das Datum.
+func (v *View) Date(t time.Time) string { return v.s.I18n.FormatDate(v.Lang, t, v.loc) }
+
+// Ago liefert "vor 5 min" fuer eine Zeit.
+func (v *View) Ago(t time.Time) string {
+	if t.IsZero() {
+		return v.T("common.never")
+	}
+	return v.T("time.ago", "duration", v.s.I18n.FormatDuration(v.Lang, time.Since(t)))
+}
+
+// Duration formatiert eine Dauer lesbar.
+func (v *View) Duration(d time.Duration) string { return v.s.I18n.FormatDuration(v.Lang, d) }
+
+// Int formatiert eine Zahl nach Locale.
+func (v *View) Int(n int64) string { return v.s.I18n.FormatInt(v.Lang, n) }
+
+// Bytes formatiert eine Groesse lesbar.
+func (v *View) Bytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return v.s.I18n.FormatInt(v.Lang, n) + " B"
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return v.s.I18n.FormatFloat(v.Lang, float64(n)/float64(div), 1) + " " + string("KMGTPE"[exp]) + "B"
+}
+
+// Err liefert die Fehlermeldung eines Formularfelds oder "".
+func (v *View) Err(field string) string { return v.Errors[field] }
+
+// Val liefert den letzten Eingabewert eines Formularfelds.
+func (v *View) Val(field string) string { return v.Form[field] }
+
+// Languages liefert die verfuegbaren Sprachen.
+func (v *View) Languages() []string { return v.s.I18n.Languages() }
+
+// Timezones liefert eine Auswahl gaengiger Zeitzonen fuer die Datalist.
+func (v *View) Timezones() []string { return commonTimezones }
+
+var commonTimezones = []string{
+	"UTC", "Europe/Berlin", "Europe/Vienna", "Europe/Zurich", "Europe/Amsterdam", "Europe/Brussels", "Europe/Paris",
+	"Europe/London", "Europe/Dublin", "Europe/Madrid", "Europe/Rome", "Europe/Warsaw", "Europe/Prague", "Europe/Stockholm",
+	"Europe/Oslo", "Europe/Copenhagen", "Europe/Helsinki", "Europe/Athens", "Europe/Istanbul", "Europe/Moscow",
+	"America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo",
+	"Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Asia/Dubai", "Asia/Kolkata", "Australia/Sydney", "Pacific/Auckland",
+}
+
+// lang bestimmt die Sprache: Nutzerprofil, sonst Cookie (Setup/Login), sonst Browser.
+func (s *Server) lang(r *http.Request) string {
+	if u := currentUser(r); u != nil && s.I18n.Has(u.Lang) {
+		return u.Lang
+	}
+	if c, err := r.Cookie(langCookie); err == nil && s.I18n.Has(c.Value) {
+		return c.Value
+	}
+	return s.I18n.Match(r.Header.Get("Accept-Language"))
+}
+
+func (s *Server) location(r *http.Request) *time.Location {
+	if u := currentUser(r); u != nil && u.Timezone != "" {
+		if loc, err := time.LoadLocation(u.Timezone); err == nil {
+			return loc
+		}
+	}
+	return time.UTC
+}
+
+func (s *Server) view(r *http.Request, titleKey string) *View {
+	v := &View{s: s, Lang: s.lang(r), Path: r.URL.Path, User: currentUser(r), CSRF: csrfToken(r), Version: s.Version,
+		Errors: map[string]string{}, Form: map[string]string{}, loc: s.location(r), Sync: s.Sync.State()}
+	v.Title = v.T(titleKey)
+	if c, err := r.Cookie(themeCookie); err == nil && (c.Value == "light" || c.Value == "dark") {
+		v.Theme = c.Value
+	}
+	if v.User != nil {
+		v.Nav = s.nav(r)
+	}
+	if c, err := r.Cookie(flashCookie); err == nil && c.Value != "" {
+		if kind, text, ok := strings.Cut(c.Value, ":"); ok {
+			if t, err := url.QueryUnescape(text); err == nil {
+				v.Flash = &Flash{Kind: kind, Text: t}
+			}
+		}
+	}
+	return v
+}
+
+func (s *Server) nav(r *http.Request) []NavItem {
+	items := []NavItem{{Key: "nav.dashboard", Path: "/", Icon: "bi-speedometer2", Available: true, Enabled: true}}
+	for _, m := range s.Modules.List(r.Context()) {
+		items = append(items, NavItem{Key: m.Info.TitleKey, Path: m.Info.Path, Icon: m.Info.Icon, Available: m.Info.Available, Enabled: m.Running})
+	}
+	items = append(items,
+		NavItem{Key: "nav.settings", Path: "/settings", Icon: "bi-gear", Available: true, Enabled: true},
+		NavItem{Key: "nav.audit", Path: "/audit", Icon: "bi-journal-text", Available: true, Enabled: true},
+		NavItem{Key: "nav.logs", Path: "/logs", Icon: "bi-terminal", Available: true, Enabled: true},
+	)
+	for i := range items {
+		p := items[i].Path
+		items[i].Active = p == r.URL.Path || (p != "/" && strings.HasPrefix(r.URL.Path, p+"/"))
+	}
+	return items
+}
+
+// render fuehrt ein Seiten-Template aus. Bei Fehlern wird nichts Halbes gesendet.
+func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page string, v *View) {
+	if v.Flash != nil {
+		s.clearCookie(w, r, flashCookie)
+	}
+	t, ok := s.pages[page]
+	if !ok {
+		s.log.Error("template missing", "page", page)
+		http.Error(w, "template missing", http.StatusInternalServerError)
+		return
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, "layout.html", v); err != nil {
+		s.log.Error("template failed", "page", page, "err", err)
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
+}
+
+// flash merkt eine Meldung fuer die naechste Seite (nach Redirect).
+func (s *Server) flash(w http.ResponseWriter, r *http.Request, kind, text string) {
+	s.setCookie(w, r, flashCookie, kind+":"+url.QueryEscape(text), 60)
+}
+
+func (s *Server) errorPage(w http.ResponseWriter, r *http.Request, status int, msgKey string) {
+	v := s.view(r, "errors.title")
+	v.Data = map[string]any{"Status": status, "Message": v.T(msgKey)}
+	s.render(w, r, status, "error", v)
+}
+
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	s.errorPage(w, r, http.StatusNotFound, "errors.not_found")
+}
+
+// audit schreibt einen Eintrag ins Audit-Log mit dem angemeldeten Benutzer.
+func (s *Server) audit(r *http.Request, action, target, details string) {
+	actor := "-"
+	if u := currentUser(r); u != nil {
+		actor = u.Username
+	}
+	if err := s.Store.Audit(r.Context(), store.AuditEntry{Actor: actor, Action: action, Target: target, Details: details, IP: s.clientIP(r)}); err != nil {
+		s.log.Error("audit write failed", "err", err)
+	}
+}
+
+// moduleStatuses ist eine Hilfe fuer Templates.
+func (s *Server) moduleStatuses(r *http.Request) []module.Status { return s.Modules.List(r.Context()) }

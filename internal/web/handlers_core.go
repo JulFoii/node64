@@ -1,0 +1,458 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ipv64net/agent/internal/logging"
+	"github.com/ipv64net/agent/internal/module"
+	"github.com/ipv64net/agent/internal/store"
+)
+
+var usernameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{3,64}$`)
+
+// Einstellungs-Schluessel in der Tabelle settings
+const (
+	SettingAgentID       = "agent.id"
+	SettingAgentName     = "agent.name"
+	SettingAgentLocation = "agent.location"
+)
+
+// ---------------------------------------------------------------- API
+
+func (s *Server) apiHealth(w http.ResponseWriter, r *http.Request) {
+	status := http.StatusOK
+	body := map[string]any{"status": "ok", "version": s.Version, "time": time.Now().UTC().Format(time.RFC3339)}
+	if err := s.Store.Reader().PingContext(r.Context()); err != nil {
+		status = http.StatusServiceUnavailable
+		body["status"] = "degraded"
+		body["database"] = "unreachable"
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// ---------------------------------------------------------------- Setup
+
+func (s *Server) setupForm(w http.ResponseWriter, r *http.Request) {
+	if n, _ := s.Store.UserCount(r.Context()); n > 0 {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if l := r.URL.Query().Get("lang"); s.I18n.Has(l) {
+		s.setCookie(w, r, langCookie, l, 365*24*3600)
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	v := s.view(r, "setup.title")
+	v.SetupRun = true
+	host, _ := os.Hostname()
+	tz := "UTC"
+	if v.Lang == "de" {
+		tz = "Europe/Berlin"
+	}
+	v.Form = map[string]string{"username": "admin", "timezone": tz, "agent_name": host, "location": ""}
+	s.render(w, r, http.StatusOK, "setup", v)
+}
+
+func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if n, _ := s.Store.UserCount(ctx); n > 0 {
+		s.errorPage(w, r, http.StatusForbidden, "errors.setup_done")
+		return
+	}
+	v := s.view(r, "setup.title")
+	v.SetupRun = true
+	lang := r.PostFormValue("lang")
+	if s.I18n.Has(lang) {
+		v.Lang = lang
+	}
+	f := s.formValues(r, "username", "password", "password2", "timezone", "agent_name", "location")
+	v.Form = f
+	s.validateUser(v, f["username"], f["password"], f["password2"])
+	s.validateTimezone(v, f["timezone"])
+	s.validateAgent(v, f["agent_name"])
+	if len(v.Errors) > 0 {
+		v.Flash = &Flash{Kind: "danger", Text: v.T("errors.validation")}
+		s.render(w, r, http.StatusUnprocessableEntity, "setup", v)
+		return
+	}
+	hash, err := HashPassword(f["password"])
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	u, err := s.Store.CreateUser(ctx, f["username"], hash, v.Lang, f["timezone"])
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.ensureAgentIdentity(r, f["agent_name"], f["location"]); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	_ = s.Store.Audit(ctx, store.AuditEntry{Actor: u.Username, Action: "setup", Details: "initial setup completed", IP: s.clientIP(r)})
+	s.setCookie(w, r, langCookie, v.Lang, 365*24*3600)
+	if err := s.startSession(w, r, u.ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	_ = s.Store.TouchUserLogin(ctx, u.ID)
+	s.flash(w, r, "success", v.T("setup.done"))
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) ensureAgentIdentity(r *http.Request, name, location string) error {
+	ctx := r.Context()
+	if _, ok, _ := s.Store.Setting(ctx, SettingAgentID); !ok {
+		if err := s.Store.SetSetting(ctx, SettingAgentID, randomToken(24)); err != nil {
+			return err
+		}
+	}
+	if err := s.Store.SetSetting(ctx, SettingAgentName, name); err != nil {
+		return err
+	}
+	return s.Store.SetSetting(ctx, SettingAgentLocation, location)
+}
+
+// ---------------------------------------------------------------- Login
+
+func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) {
+	if n, _ := s.Store.UserCount(r.Context()); n == 0 {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	if currentUser(r) != nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	v := s.view(r, "login.title")
+	v.Form["next"] = safeNext(r.URL.Query().Get("next"))
+	s.render(w, r, http.StatusOK, "login", v)
+}
+
+func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	v := s.view(r, "login.title")
+	f := s.formValues(r, "username", "password", "next")
+	v.Form = map[string]string{"username": f["username"], "next": safeNext(f["next"])}
+	ip := s.clientIP(r)
+	keys := []string{"ip:" + ip, "user:" + strings.ToLower(f["username"])}
+	if wait := s.limiter.retryAfter(keys...); wait > 0 {
+		secs := int(wait.Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		v.Flash = &Flash{Kind: "warning", Text: v.T("login.ratelimited", "seconds", secs)}
+		s.render(w, r, http.StatusTooManyRequests, "login", v)
+		return
+	}
+	u, err := s.Store.UserByName(ctx, f["username"])
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if u == nil || !VerifyPassword(u.PasswordHash, f["password"]) {
+		if u == nil {
+			// Zeit angleichen, damit Benutzernamen nicht ueber die Antwortzeit erratbar sind
+			VerifyPassword("$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", f["password"])
+		}
+		s.limiter.fail(keys...)
+		_ = s.Store.Audit(ctx, store.AuditEntry{Actor: truncate(f["username"], 64), Action: "login.failed", IP: ip})
+		s.log.Warn("login failed", "user", f["username"], "ip", ip)
+		v.Flash = &Flash{Kind: "danger", Text: v.T("login.failed")}
+		s.render(w, r, http.StatusUnauthorized, "login", v)
+		return
+	}
+	if err := s.startSession(w, r, u.ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	_ = s.Store.TouchUserLogin(ctx, u.ID)
+	if s.I18n.Has(u.Lang) {
+		s.setCookie(w, r, langCookie, u.Lang, 365*24*3600)
+	}
+	_ = s.Store.Audit(ctx, store.AuditEntry{Actor: u.Username, Action: "login", IP: ip})
+	s.log.Info("login", "user", u.Username, "ip", ip)
+	http.Redirect(w, r, v.Form["next"], http.StatusSeeOther)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if sess := currentSession(r); sess != nil {
+		_ = s.Store.DeleteSession(r.Context(), sess.ID)
+		s.audit(r, "logout", "", "")
+	}
+	s.clearCookie(w, r, sessionCookie)
+	s.clearCookie(w, r, csrfCookie)
+	v := s.view(r, "login.title")
+	s.flash(w, r, "success", v.T("login.logged_out"))
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func safeNext(next string) string {
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n") {
+		return "/"
+	}
+	return next
+}
+
+// ---------------------------------------------------------------- Dashboard
+
+type dashboardData struct {
+	AgentID   string
+	AgentName string
+	Location  string
+	StartedAt time.Time
+	DBSize    int64
+	Modules   []module.Status
+}
+
+func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	v := s.view(r, "dashboard.title")
+	v.Data = dashboardData{
+		AgentID:   s.Store.SettingOr(ctx, SettingAgentID, ""),
+		AgentName: s.Store.SettingOr(ctx, SettingAgentName, ""),
+		Location:  s.Store.SettingOr(ctx, SettingAgentLocation, ""),
+		StartedAt: s.StartedAt,
+		DBSize:    s.Store.Size(),
+		Modules:   s.Modules.List(ctx),
+	}
+	s.render(w, r, http.StatusOK, "dashboard", v)
+}
+
+// ---------------------------------------------------------------- Settings
+
+type settingsData struct {
+	AgentName  string
+	Location   string
+	Modules    []module.Status
+	LogLevel   string
+	LogResetAt time.Time
+	LogDefault string
+	DBPath     string
+	DBSize     int64
+	BackupDir  string
+	GoVersion  string
+}
+
+func (s *Server) settingsView(r *http.Request) *View {
+	ctx := r.Context()
+	v := s.view(r, "settings.title")
+	d := settingsData{
+		AgentName:  s.Store.SettingOr(ctx, SettingAgentName, ""),
+		Location:   s.Store.SettingOr(ctx, SettingAgentLocation, ""),
+		Modules:    s.Modules.List(ctx),
+		LogLevel:   logging.LevelName(s.Log.Level()),
+		LogResetAt: s.Log.ResetAt(),
+		LogDefault: s.Cfg.LogLevel,
+		DBPath:     s.Store.Path(),
+		DBSize:     s.Store.Size(),
+		BackupDir:  s.Cfg.BackupDir(),
+	}
+	v.Data = d
+	v.Form = map[string]string{"agent_name": d.AgentName, "location": d.Location, "lang": v.User.Lang, "timezone": v.User.Timezone, "level": d.LogLevel}
+	return v
+}
+
+func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, http.StatusOK, "settings", s.settingsView(r))
+}
+
+func (s *Server) settingsAgent(w http.ResponseWriter, r *http.Request) {
+	f := s.formValues(r, "agent_name", "location")
+	v := s.settingsView(r)
+	v.Form["agent_name"], v.Form["location"] = f["agent_name"], f["location"]
+	s.validateAgent(v, f["agent_name"])
+	if len(v.Errors) > 0 {
+		s.render(w, r, http.StatusUnprocessableEntity, "settings", v)
+		return
+	}
+	if err := s.ensureAgentIdentity(r, f["agent_name"], f["location"]); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.audit(r, "settings.agent", "", fmt.Sprintf("name=%q location=%q", f["agent_name"], f["location"]))
+	s.flash(w, r, "success", v.T("common.saved"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) settingsUser(w http.ResponseWriter, r *http.Request) {
+	f := s.formValues(r, "lang", "timezone")
+	v := s.settingsView(r)
+	v.Form["lang"], v.Form["timezone"] = f["lang"], f["timezone"]
+	if !s.I18n.Has(f["lang"]) {
+		v.Errors["lang"] = v.T("errors.validation")
+	}
+	s.validateTimezone(v, f["timezone"])
+	if len(v.Errors) > 0 {
+		s.render(w, r, http.StatusUnprocessableEntity, "settings", v)
+		return
+	}
+	if err := s.Store.UpdateUserPrefs(r.Context(), v.User.ID, f["lang"], f["timezone"]); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.setCookie(w, r, langCookie, f["lang"], 365*24*3600)
+	s.audit(r, "settings.user", v.User.Username, "lang="+f["lang"]+" timezone="+f["timezone"])
+	s.flash(w, r, "success", s.I18n.T(f["lang"], "common.saved"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) settingsPassword(w http.ResponseWriter, r *http.Request) {
+	f := s.formValues(r, "current", "password", "password2")
+	v := s.settingsView(r)
+	if !VerifyPassword(v.User.PasswordHash, f["current"]) {
+		v.Errors["current"] = v.T("settings.password_wrong")
+	}
+	if err := checkPassword(f["password"]); err != nil {
+		v.Errors["password"] = v.T("errors.password_short")
+	} else if f["password"] != f["password2"] {
+		v.Errors["password2"] = v.T("errors.password_mismatch")
+	}
+	if len(v.Errors) > 0 {
+		s.render(w, r, http.StatusUnprocessableEntity, "settings", v)
+		return
+	}
+	hash, err := HashPassword(f["password"])
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Store.UpdateUserPassword(r.Context(), v.User.ID, hash); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	_ = s.Store.DeleteUserSessions(r.Context(), v.User.ID, currentSession(r).ID)
+	s.audit(r, "settings.password", v.User.Username, "")
+	s.flash(w, r, "success", v.T("settings.password_changed"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) settingsModules(w http.ResponseWriter, r *http.Request) {
+	f := s.formValues(r, "module", "action")
+	v := s.settingsView(r)
+	name := f["module"]
+	title := v.T("module." + name)
+	var err error
+	switch f["action"] {
+	case "enable":
+		err = s.Modules.Enable(r.Context(), name)
+	case "disable":
+		err = s.Modules.Disable(r.Context(), name)
+	default:
+		err = module.ErrUnknown
+	}
+	if err != nil {
+		s.log.Error("module change failed", "name", name, "action", f["action"], "err", err)
+		s.flash(w, r, "danger", v.T("settings.module_error", "name", title, "error", err.Error()))
+	} else {
+		s.audit(r, "module."+f["action"], name, "")
+		key := "settings.module_enabled"
+		if f["action"] == "disable" {
+			key = "settings.module_disabled"
+		}
+		s.flash(w, r, "success", v.T(key, "name", title))
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) settingsLogging(w http.ResponseWriter, r *http.Request) {
+	f := s.formValues(r, "level", "reset_minutes")
+	v := s.settingsView(r)
+	lvl := logging.ParseLevel(f["level"])
+	mins, _ := strconv.Atoi(f["reset_minutes"])
+	if mins < 0 || mins > 1440 {
+		mins = 0
+	}
+	var reset time.Duration
+	if lvl == slog.LevelDebug && mins > 0 {
+		reset = time.Duration(mins) * time.Minute
+	}
+	s.Log.SetLevel(lvl, reset)
+	s.audit(r, "logging.level", logging.LevelName(lvl), fmt.Sprintf("reset_minutes=%d", mins))
+	s.flash(w, r, "success", v.T("settings.log_changed"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// ---------------------------------------------------------------- Audit und Logs
+
+func (s *Server) auditLog(w http.ResponseWriter, r *http.Request) {
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	entries, err := s.Store.AuditList(r.Context(), 100, before)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var next int64
+	if len(entries) == 100 {
+		next = entries[len(entries)-1].ID
+	}
+	v := s.view(r, "audit.title")
+	v.Data = map[string]any{"Entries": entries, "Next": next}
+	s.render(w, r, http.StatusOK, "audit", v)
+}
+
+func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
+	lines := s.Log.Lines(500)
+	v := s.view(r, "logs.title")
+	v.Data = map[string]any{"Lines": lines, "Count": len(lines), "Level": logging.LevelName(s.Log.Level())}
+	s.render(w, r, http.StatusOK, "logs", v)
+}
+
+func (s *Server) logsDownload(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="agent-`+time.Now().UTC().Format("20060102-150405")+`.log"`)
+	for _, l := range s.Log.Lines(0) {
+		_, _ = w.Write([]byte(l + "\n"))
+	}
+}
+
+// ---------------------------------------------------------------- Helfer
+
+func (s *Server) formValues(r *http.Request, keys ...string) map[string]string {
+	m := make(map[string]string, len(keys))
+	for _, k := range keys {
+		m[k] = strings.TrimSpace(r.PostFormValue(k))
+	}
+	return m
+}
+
+func (s *Server) validateUser(v *View, username, pw, pw2 string) {
+	if !usernameRe.MatchString(username) {
+		v.Errors["username"] = v.T("errors.username_invalid")
+	}
+	if err := checkPassword(pw); err != nil {
+		v.Errors["password"] = v.T("errors.password_short")
+	} else if pw != pw2 {
+		v.Errors["password2"] = v.T("errors.password_mismatch")
+	}
+}
+
+func (s *Server) validateTimezone(v *View, tz string) {
+	if tz == "" {
+		return
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		v.Errors["timezone"] = v.T("errors.timezone_invalid")
+	}
+}
+
+func (s *Server) validateAgent(v *View, name string) {
+	if name == "" || len(name) > 64 {
+		v.Errors["agent_name"] = v.T("common.required")
+	}
+}
+
+// fail loggt einen internen Fehler und zeigt die Fehlerseite.
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	s.log.Error("request failed", "path", r.URL.Path, "err", err)
+	s.errorPage(w, r, http.StatusInternalServerError, "errors.internal")
+}

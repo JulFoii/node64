@@ -1,0 +1,8 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="text-center py-4">
+	<div class="display-5 text-body-secondary">{{$d.Status}}</div>
+	<p class="lead">{{$d.Message}}</p>
+	<a class="btn btn-outline-primary" href="/">{{.T "common.back"}}</a>
+</div>
+{{end}}

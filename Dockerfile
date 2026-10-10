@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1
+
+# ---- Build (reines Go, kein CGO, Cross-Compile ueber TARGETOS/TARGETARCH)
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o /out/agent ./cmd/agent
+# Datenverzeichnis mit passenden Rechten fuer den Nicht-Root-Benutzer vorbereiten
+RUN mkdir -p /out/data && chown 65532:65532 /out/data
+
+# ---- CA-Zertifikate (Zeitzonen sind im Binary eingebettet)
+FROM alpine:3.22 AS certs
+RUN apk add --no-cache ca-certificates
+
+# ---- Laufzeit: leeres Image, nur das Binary
+FROM scratch
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/agent /agent
+COPY --from=build --chown=65532:65532 /out/data /data
+USER 65532:65532
+ENV AGENT_DATA_DIR=/data \
+    AGENT_HTTP_PORT=8080 \
+    AGENT_HTTPS_PORT=0
+VOLUME ["/data"]
+EXPOSE 8080 8443
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/agent", "healthcheck"]
+ENTRYPOINT ["/agent"]

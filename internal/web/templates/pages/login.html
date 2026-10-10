@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1 class="h5 mb-3">{{.T "login.title"}}</h1>
+<form method="post" action="/login">
+	<input type="hidden" name="_csrf" value="{{.CSRF}}">
+	<input type="hidden" name="next" value="{{.Val "next"}}">
+	<div class="mb-3">
+		<label class="form-label" for="username">{{.T "login.username"}}</label>
+		<input class="form-control" id="username" name="username" value="{{.Val "username"}}" required autofocus autocomplete="username">
+	</div>
+	<div class="mb-3">
+		<label class="form-label" for="password">{{.T "login.password"}}</label>
+		<input class="form-control" type="password" id="password" name="password" required autocomplete="current-password">
+	</div>
+	<button class="btn btn-primary w-100" type="submit">{{.T "login.submit"}}</button>
+</form>
+{{end}}

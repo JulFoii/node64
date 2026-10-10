@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1 class="h4 mb-2">{{.T "setup.title"}}</h1>
+<p class="text-body-secondary">{{.T "setup.intro"}}</p>
+<div class="mb-3">
+	{{range .Languages}}<a class="btn btn-sm {{if eq . $.Lang}}btn-primary{{else}}btn-outline-secondary{{end}} me-1" href="/setup?lang={{.}}">{{$.T (print "lang." .)}}</a>{{end}}
+</div>
+<form method="post" action="/setup" autocomplete="off">
+	<input type="hidden" name="_csrf" value="{{.CSRF}}">
+	<input type="hidden" name="lang" value="{{.Lang}}">
+	<div class="mb-3">
+		<label class="form-label" for="username">{{.T "setup.username"}}</label>
+		<input class="form-control{{if .Err "username"}} is-invalid{{end}}" id="username" name="username" value="{{.Val "username"}}" required autofocus>
+		<div class="invalid-feedback">{{.Err "username"}}</div>
+	</div>
+	<div class="mb-3">
+		<label class="form-label" for="password">{{.T "setup.password"}}</label>
+		<input class="form-control{{if .Err "password"}} is-invalid{{end}}" type="password" id="password" name="password" minlength="10" required autocomplete="new-password">
+		<div class="form-text">{{.T "setup.password_hint"}}</div>
+		<div class="invalid-feedback">{{.Err "password"}}</div>
+	</div>
+	<div class="mb-3">
+		<label class="form-label" for="password2">{{.T "setup.password_repeat"}}</label>
+		<input class="form-control{{if .Err "password2"}} is-invalid{{end}}" type="password" id="password2" name="password2" required autocomplete="new-password">
+		<div class="invalid-feedback">{{.Err "password2"}}</div>
+	</div>
+	<div class="mb-3">
+		<label class="form-label" for="timezone">{{.T "setup.timezone"}}</label>
+		<input class="form-control{{if .Err "timezone"}} is-invalid{{end}}" id="timezone" name="timezone" list="tzlist" value="{{.Val "timezone"}}">
+		<datalist id="tzlist">{{range .Timezones}}<option value="{{.}}">{{end}}</datalist>
+		<div class="invalid-feedback">{{.Err "timezone"}}</div>
+	</div>
+	<div class="row">
+		<div class="col-md-6 mb-3">
+			<label class="form-label" for="agent_name">{{.T "setup.agent_name"}}</label>
+			<input class="form-control{{if .Err "agent_name"}} is-invalid{{end}}" id="agent_name" name="agent_name" value="{{.Val "agent_name"}}" maxlength="64" required>
+			<div class="form-text">{{.T "setup.agent_name_hint"}}</div>
+			<div class="invalid-feedback">{{.Err "agent_name"}}</div>
+		</div>
+		<div class="col-md-6 mb-3">
+			<label class="form-label" for="location">{{.T "setup.location"}} <span class="text-body-secondary">({{.T "common.optional"}})</span></label>
+			<input class="form-control" id="location" name="location" value="{{.Val "location"}}" maxlength="64">
+			<div class="form-text">{{.T "setup.location_hint"}}</div>
+		</div>
+	</div>
+	<button class="btn btn-primary w-100" type="submit">{{.T "setup.submit"}}</button>
+</form>
+{{end}}
