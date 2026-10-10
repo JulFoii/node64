@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS `hc2_locations` (
   `enabled`  TINYINT NOT NULL DEFAULT 1,
   PRIMARY KEY (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-INSERT IGNORE INTO `hc2_locations` (`code`,`name`,`endpoint`) VALUES ('nbg','Nürnberg','hub-nbg.ipv64.net'), ('fsn','Falkenstein','hub-fsn.ipv64.net');
+INSERT IGNORE INTO `hc2_locations` (`code`,`name`,`endpoint`) VALUES ('nbg','Nürnberg','hc-srv02.ipv64.net'), ('fsn','Falkenstein','hc-srv01.ipv64.net');
 
 CREATE TABLE IF NOT EXISTS `hc2_nodes` (                 -- lebende hub-Instanzen
   `name`        VARCHAR(64) NOT NULL,
