@@ -212,11 +212,43 @@ CREATE TABLE hc2_dirty_hours (token CHAR(32), agent_id VARCHAR(32) NOT NULL DEFA
 
 ## 3. Synchronisationsprotokoll
 
+Wer redet mit wem: **nur Agent ↔ hub**. Agents reden nie miteinander; zwei Agents desselben Accounts sehen sich nur über den Server (read-only Sicht auf die Checks des anderen). Das Portal redet nur mit MySQL (und schickt dem hub ein Signal); der hub redet mit MySQL, Redis und den Agents.
+
+```
+  Agent "Pi im Keller"                      ipv64-hub (agents.ipv64.net)                 Portal (PHP) / Nutzer
+  ───────────────────                       ────────────────────────────                 ─────────────────────
+  SQLite: Checks, Kanäle,                   MySQL hc2_*: Checks, Kanäle, Wartung,        liest/schreibt MySQL
+  Wartung, Messpunkte (Outbox),             Messpunkte, Zustände, Config-Log             direkt, schreibt bei
+  last_revision, hc_outbox, hc_conflicts                                                 Änderung Config-Log
+                                                                                         + Redis-Signal
+        │                                               │                                       │
+        │ ══ WSS (eine Verbindung, Agent baut auf) ═══► │                                       │
+        │ hello{since=last_revision}                    │ ◄── Redis hc2:cfg:<user> ◄────────────┤ Nutzer ändert Check
+        │ ◄── config{changes seit since} ───────────────┤                                       │   im Portal
+        │     (Server → Agent: vollständige Entität)    │                                       │
+        │                                               │                                       │
+        │ ── measurements{batch} ─────────────────────► │ INSERT IGNORE ──► MySQL               │ Charts/Pillen
+        │ ◄── ack{ack_seq} ─────────────────────────────┤                                       │   lesen MySQL
+        │ ── events{down/up} ─────────────────────────► │ state_local, Störung, Versand         │
+        │                                               │                                       │
+  Nutzer ändert Check │ ── propose{base_revision, data} ► │ Revision gleich? ja → speichern,     │
+  in der Agent-UI     │ ◄── ack{revision, data} ──────────┤   Log, neue Revision                 │ sieht Änderung
+                      │  oder                            │ nein → conflict{server}              │   sofort
+                      │ ◄── conflict ─────────────────────┤                                       │
+        │                                               │                                       │
+        │ ◄── ping / ── pong (30 s) ────────────────────┤ Redis hc2:online:<id> EX 90           │ „online seit“
+        │ ◄── send_order / command ─────────────────────┤ ◄── Redis hc2:agent:<id> ◄────────────┤ Test, Befehl
+        │                                               │                                       │
+   Agent 2 "Büro"     │ (eigene Verbindung, gleiche Regeln; sieht Checks von Agent 1 read-only) │
+```
+
+Faustregeln: **Konfiguration** fließt immer über den Server (er vergibt die Revisionen), lokale Änderungen sind Vorschläge, die der Server bestätigt oder als Konflikt zurückgibt. **Messdaten** fließen nur vom Agent zum Server und werden nie überschrieben. **Zustände** (`state_local`) leitet der Server aus den Ereignissen des Agents ab, `state_online` misst er selbst.
+
 ### 3.1 Identitäten und Nummern
 
 - `agent_id`: 32 Zeichen, vom Agent beim ersten Start erzeugt, unveränderlich.
 - Check-`token`: 32 Zeichen, erzeugt dort, wo der Check angelegt wird. Bei der Erstverknüpfung prüft der Server Eindeutigkeit; bei Kollision vergibt er einen neuen Token und schickt `{old_token, new_token}` zurück, der Agent benennt um (Messdaten, Ereignisse, Push-URL).
-- `revision`: pro Entität (Check, Kanal, Wartungsfenster) eine ganze Zahl. **Der Server vergibt sie** aus einem Zähler je Account (`MAX(revision)+1` in einer Transaktion); damit sind Revisionen innerhalb eines Accounts streng steigend und ein Agent kann mit „alles seit Revision R“ fragen.
+- `revision`: pro Entität (Check, Kanal, Wartungsfenster) eine ganze Zahl. **Der Server vergibt sie** aus einem Zähler je Account (`hc2_revisions.next` in einer Transaktion); damit sind Revisionen innerhalb eines Accounts streng steigend und ein Agent kann mit „alles seit Revision R“ fragen. Zwei Zwecke: `last_revision` des Agents (Account-weit, „bis hierhin habe ich alles gesehen“) und `base_revision` eines Vorschlags (die Revision **dieser Entität**, auf der die lokale Änderung aufsetzt). Konflikte werden je Entität erkannt, nie Account-weit: Änderungen an verschiedenen Checks auf beiden Seiten stören sich nicht.
 - `agent_seq`: laufende Nummer je Agent für Messpunkte, nie wiederverwendet (SQLite `AUTOINCREMENT`).
 - `event_id`: 32 Hex, vom Erzeuger (Agent oder hub) vergeben.
 
@@ -295,7 +327,60 @@ Erstverknüpfung = Repair mit vorherigem `POST /v1/agents/me/bootstrap`: der Age
 
 ### 3.8 Kommandos Server → Agent (`command` über den Socket)
 
-`run_check {token}`, `pause {token}`, `resume {token}`, `set_log_level {level, minutes}`, `enable_module {name}`, `disable_module {name}`, `set_remote_mgmt`, `update_available {version, url}`, `repair`. Der Agent führt nur aus, was sein lokaler Schalter „Remote-Verwaltung“ erlaubt (`off`: nichts, `read`: nur `update_available`/`repair`, `full`: alles) und antwortet mit `command_result {id, ok, output}`. Kommandos für nicht verbundene Agents warten in `hc2_commands` (1 h, dann verfallen).
+`run_check {token}`, `test_check {token, definition}` (Testlauf ohne Speichern, für 3.11), `pause {token}`, `resume {token}`, `set_log_level {level, minutes}`, `enable_module {name}`, `disable_module {name}`, `set_remote_mgmt`, `update_available {version, url}`, `repair`. Der Agent führt nur aus, was sein lokaler Schalter „Remote-Verwaltung“ erlaubt (`off`: nichts, `read`: nur `update_available`/`repair`, `full`: alles) und antwortet mit `command_result {id, ok, output}`. Kommandos für nicht verbundene Agents warten in `hc2_commands` (1 h, dann verfallen).
+
+---
+
+### 3.9 Wiederverbinden nach Unterbrechung (feste Reihenfolge)
+
+Gilt nach jeder Unterbrechung, egal ob 10 Sekunden, 10 Minuten oder 10 Tage. Der Agent arbeitet währenddessen normal weiter (Checks laufen, lokale Kanäle senden, Oberfläche bedienbar, Änderungen landen in der Outbox mit Markierung „ausstehend“).
+
+1. **Verbinden** mit `since = last_revision`. Server antwortet `hello` und `config` mit allen Log-Einträgen seit `since` (oder `revision_gap` → Schritt 1a).
+   1a. `revision_gap` (Log gekürzt, Agent länger als 30 Tage weg oder DB zurückgespielt): Vollabgleich (3.6) **mit** Konflikt-Erkennung: jede Entität, für die ein Outbox-Eintrag existiert und deren Server-Revision ≠ `base_revision`, wird Konflikt; der Rest wird vom Server übernommen.
+2. **Server-Änderungen anwenden, aber Outbox beachten**: Für jede Änderung aus `config`:
+   - keine ausstehende lokale Änderung an dieser Entität → anwenden (upsert/delete), `last_revision` hochsetzen.
+   - ausstehende lokale Änderung an dieser Entität vorhanden → **nicht** anwenden, sondern Konflikt anlegen (`hc_conflicts`: lokale Version, Server-Version, beide Revisionen) und den Outbox-Eintrag auf „Konflikt“ setzen. Sonderfall: beide Seiten haben gelöscht → kein Konflikt, lokal löschen.
+3. **Outbox abspielen** in Reihenfolge (nur Einträge ohne Konflikt): `propose` mit `base_revision`. Server: Revision gleich → `ack`, Agent übernimmt Server-Antwort; Revision ungleich (zwischen Schritt 2 und 3 geändert, selten) → `conflict` wie oben.
+4. **Messpunkte und Ereignisse nachliefern**: alles mit `agent_seq > ack_seq` in Batches, Ereignisse mit `event_id` (idempotent). Server sortiert nach `time` ein, Aggregate werden nachgerechnet. Server-Benachrichtigungen für nachgelieferte Ereignisse nur, wenn das Ereignis jünger als 15 min ist; ältere nur Protokoll (der Agent hat lokal längst gesendet).
+5. **Sendeaufträge und Kommandos** holen, die während der Trennung liegen blieben (max. 1 h alt, sonst verfallen).
+6. **Zustellprotokoll** der lokalen Kanäle nachliefern (`deliveries`), damit das Portal zeigt, dass der Agent lokal alarmiert hat.
+7. Oberfläche: „ausstehend“ verschwindet, Konflikte erscheinen als Hinweis mit beiden Versionen und den zwei Knöpfen „Server behalten“ / „Meine Version senden“ (letzteres = erneutes `propose` mit der aktuellen Server-Revision als Basis). **Nie stilles Überschreiben**, nie Datenverlust: die unterlegene Version bleibt bis zur Entscheidung sichtbar. Ungelöste Konflikte älter als 30 Tage werden auf „Server behalten“ aufgelöst und protokolliert.
+
+### 3.10 Offline-Szenarien (Prüfung gegen den Plan)
+
+| Nr. | Während der Trennung passiert … | Nach dem Wiederverbinden |
+| --- | --- | --- |
+| 1 | Nur Messungen, keine Änderungen | Schritt 4: Nachlieferung, Charts im Portal füllen sich rückwirkend, keine Alarme vom Server (Agent hat lokal gesendet) |
+| 2 | Lokal Check A geändert, Portal nichts | Schritt 3: `propose` → `ack`, Portal zeigt die Änderung |
+| 3 | Portal Check A geändert, lokal nichts | Schritt 2: anwenden, Agent übernimmt (Zustand bleibt, wenn Typ gleich) |
+| 4 | Lokal Check A geändert **und** im Portal Check B geändert | Schritt 2 wendet B an, Schritt 3 sendet A → beides durch, kein Konflikt |
+| 5 | Lokal Check A geändert **und** im Portal Check A geändert | Schritt 2: Konflikt A mit beiden Versionen; Nutzer entscheidet im Agent (oder im Portal, das Konflikte des Agents ebenfalls anzeigt) |
+| 6 | Lokal Check A gelöscht, Portal Check A geändert | Konflikt (Löschen vs. Ändern), Standardvorschlag „Server behalten“ |
+| 7 | Portal Check A gelöscht, lokal Check A geändert | Konflikt (Ändern vs. Löschen); „Meine Version senden“ legt ihn mit neuem Token wieder an |
+| 8 | Beide löschen A | Kein Konflikt, lokal weg; Messdaten erst nach Nachlieferung (Schritt 4) gelöscht |
+| 9 | Lokal neuer Check C angelegt, Portal neuer Check D | Beide gehen durch; Token-Kollision (praktisch unmöglich, 32 Zeichen) wird mit `renamed` aufgelöst |
+| 10 | Portal: Check A von lokal auf online umgehängt (3.11) | Server misst seit dem Umhängen online; Schritt 2: Agent stoppt A lokal, zeigt „läuft online bei ipv64“; seine letzten lokalen Messpunkte kommen noch nach und bleiben als `agent_id`-Serie sichtbar |
+| 11 | Agent-UI: Check A auf online umgehängt (offline) | Outbox-Vorschlag; bis zum `ack` läuft A lokal weiter (nichts geht verloren); Server macht beim `propose` den Testlauf, Erfolg → `execution = online`, Agent stoppt A |
+| 12 | Portal: Kanal getestet / Befehl „jetzt prüfen“ | Sendeauftrag/Kommando wartet bis 1 h, danach verfallen mit Fehlermeldung im Portal |
+| 13 | Portal: Agent-Token widerrufen | Verbindung scheitert mit `token_revoked`; Agent zeigt „Verknüpfung getrennt“, bleibt standalone, Outbox bleibt erhalten (für ein erneutes Verknüpfen desselben Accounts) |
+| 14 | Agent war > 30 Tage weg | `revision_gap` → Vollabgleich mit Konflikt-Erkennung (1a); Messdaten älter als 7 Tage werden nur als Aggregat übernommen (Server rechnet `hc2_daily` aus den nachgelieferten Punkten, Rohdaten > 7 Tage verwirft er) |
+| 15 | Agent-Datenbank aus Backup wiederhergestellt (älterer `last_revision`, kleinere `agent_seq`) | Server erkennt `agent_seq` ≤ `last_ack_seq` → `INSERT IGNORE` verwirft Doppelte; Konfiguration: Vollabgleich, Server gewinnt für alles ohne Outbox-Eintrag |
+| 16 | Uhr des Agents falsch | Messpunkte > 5 min in der Zukunft werden abgelehnt (`rejected`), Warnung im Portal und Agent; Vergangenheit wird akzeptiert |
+| 17 | hub neu gestartet / Instanz gewechselt | `bye` → sofortiger Reconnect ohne Backoff; Schritte 1–6 laufen mit leerer Differenz in < 1 s |
+| 18 | Zwei Agents desselben Accounts ändern denselben Check | Nur der Besitzer-Agent (`agent_id`) darf `execution local`-Checks ändern; fremde Checks sind read-only → kein Konflikt möglich. Online-Checks (ohne Besitzer) dürfen beide ändern → normaler Revisionskonflikt wie Fall 5 |
+
+Was dafür im Agent gebaut wird (Phase 6 des Agents): `hc_outbox` (Vorschläge mit `base_revision`, Status pending/sent/conflict), `hc_conflicts`, `last_revision`/`ack_seq` in `settings`, Markierungen „ausstehend“/„Konflikt“ in Liste und Detail, Konfliktseite mit Diff, Reconnect-Ablauf als Zustandsautomat mit Tests für jede Zeile der Tabelle.
+
+### 3.11 Umhängen: lokal ↔ online ↔ beides
+
+Ein Check hat einen **Ausführungsort** (`execution`): `local` (nur dieser Agent misst), `online` (nur der hub misst), `both` (beide messen, zwei Zustände, ein Gesamtzustand). Der Ausführungsort ist ein normales Feld der Check-Konfiguration und wird wie jede andere Änderung synchronisiert, kann also im Portal **oder** in der Agent-Oberfläche geändert werden. Der Token bleibt gleich, die Messhistorie bleibt: Messpunkte tragen `agent_id` (leer = online), die Zeitleiste zeigt „ab hier online“/„ab hier lokal“, Charts zeigen beide Serien.
+
+- **lokal → online** (z. B. „google.de erreichbar“ soll künftig von ipv64 aus geprüft werden): Server prüft das Limit (`user_class.healthcheck_limit` zählt nur online/both), weist private Ziele ab (RFC 1918, ULA, Loopback, Link-Local, `.local`, `localhost` – Hinweis auf CDN), macht einen Testlauf aus dem hub (`hc2_testruns`, Ergebnis ≤ 30 s, im Portal und im Agent sichtbar). Erfolg → `execution = online`, `agent_id` bleibt als Herkunft (für „zurück“), der Agent stoppt die lokale Messung mit der nächsten `config`-Nachricht. Misserfolg → Check bleibt lokal, Fehlermeldung mit Grund.
+- **online → lokal**: Nutzer wählt den Agent (bei mehreren); der Check geht per `config` an den Agent, der ihn pausiert anlegt, einen Testlauf macht und das Ergebnis meldet (`command_result`); erst dann setzt der Server `execution = local` und stoppt die Online-Messung. Ist der Agent offline, bleibt es bei online, mit Hinweis „wartet auf Agent“.
+- **beides**: wie lokal → online, nur dass der Agent weitermisst. Gesamtzustand: down, wenn einer down ist; Diagnose „innen OK, außen gestört“ → Router/Freigabe/CDN; „innen gestört, außen OK“ → lokales Netz.
+- **Der Agent kann auch anstoßen**: In der Agent-UI gibt es im Check-Formular denselben Schalter (nur bei Verknüpfung). Die Änderung ist ein `propose`; der Server führt dieselben Prüfungen (Limit, privates Ziel, Testlauf) aus, bevor er `ack` gibt. Bis dahin misst der Agent weiter.
+- **Umhängen beim Entkoppeln** (`unlink`): `keep_checks = true` → alle lokalen Checks des Agents werden auf `online` gesetzt, sofern das Limit und die Zielregeln es erlauben (sonst bleiben sie mit `agent_id` als verwaist stehen und werden im Portal markiert); `false` → gelöscht (Tombstone).
+- Massenaktion im Portal und im Agent: mehrere Checks auf einmal umhängen; Testläufe parallel, Ergebnisliste.
 
 ---
 
@@ -369,7 +454,7 @@ Pfade während der Umstellung unter `/healthchecks2/...`, nach Abschluss überne
 | Seite | Inhalt |
 | --- | --- |
 | Übersicht `/healthchecks2` | Kacheln OK/gestört/pausiert/sonstige (je Ausführungsort getrennt zählbar), Tabelle mit Status, Name, Tags, **Badge Ausführungsort** (Online / Agent „Pi im Keller“ / Beides), Typ, Latenz, Pillen (letzte 30 Messungen), letzte Änderung; Filter Status/Typ/Tag/Agent/Ausführungsort, Sortierung, Suche, Massenaktionen; Account-Status-Karte mit Zähler Online-Checks vs. Limit |
-| Neu/Bearbeiten `/healthchecks2/new`, `/{token}/edit` | Formular wie im Agent (Typen http, keyword, icmp, tcp, port, cert, push), **Ausführungsort** (Online, Agent X, Beides) mit Testlauf vor dem Umschalten (3.9), Kanäle, Abhängigkeit, Tags, kritisch, Wiederholung |
+| Neu/Bearbeiten `/healthchecks2/new`, `/{token}/edit` | Formular wie im Agent (Typen http, keyword, icmp, tcp, port, cert, push), **Ausführungsort** (Online, Agent X, Beides) mit Testlauf vor dem Umschalten (3.11), Kanäle, Abhängigkeit, Tags, kritisch, Wiederholung |
 | Detail `/healthchecks2/{token}` | Pillenleiste groß, Verfügbarkeit 24 h/30 d/1 Jahr, Latenz-Chart (bei „beides“ innen und außen im selben Chart), Ereignisse, Störungen, letzte Messung roh, Push-URL (online **und** lokal, wenn ein Agent zuständig ist), Diagnose-Hinweis bei Abweichung innen/außen |
 | Wartungsfenster `/healthchecks2/maintenance` | wie Agent |
 | Störungen `/healthchecks2/incidents` | Liste aller Störungen des Accounts (ersetzt `incidents.php`) |
@@ -377,14 +462,6 @@ Pfade während der Umstellung unter `/healthchecks2/...`, nach Abschluss überne
 | Agents `/agents` | Liste: Name, Standort, online/offline seit, Version, letzte Synchronisation, Module, Outbox; Detail mit Reitern Healthchecks (Checks dieses Agents, Umwandeln, Remote-Checks anlegen), DynDNS, Reverse-Proxy (später); Aktionen umbenennen, Standort, Token widerrufen, entfernen; Seite `/link` für den Device-Code |
 | Statusseiten | bestehende `statuspage.php`/`status.php` liest Zustände aus `hc2_*` (Tokens statt IDs), Design unverändert |
 | Öffentliche Seite | `healthcheck_updater_api.php` erweitern um die neue Push-URL und die Agent-Doku |
-
-### 3.9 Umwandeln lokal ↔ online (Portal und Agent)
-
-- lokal → online: Server prüft Limit, führt über hub einen Testlauf aus (`hc2_testruns`, Ergebnis innerhalb 30 s), private Ziele (RFC 1918, `.local`, `localhost`) werden abgewiesen mit Hinweis auf CDN. Erfolg → `execution = online`, `agent_id` bleibt als Herkunft, Messhistorie bleibt (Zeitleiste markiert „ab hier online“).
-- online → lokal: Nutzer wählt Agent; Agent bekommt den Check über den Socket, führt Testlauf aus, meldet Ergebnis; erst dann `execution = local`.
-- beides: beide Seiten messen, zwei Zustände, ein Gesamtzustand.
-
----
 
 ## 7. Migration und Rollout (Strangler-Fig)
 
@@ -427,7 +504,7 @@ Push-URL `health.php?token=` bleibt dauerhaft; sie prüft `hc2` des Besitzers un
 | 5 | Portal: `/notifications` (Kanäle), Verifizierung | ipv64 | Alte Integrationen migriert, Test-Button |
 | 6 | Portal: `/healthchecks2` Übersicht, Detail, Formular, Wartung, Störungen, Statusseite auf `hc2` | ipv64 | Feature-Parität zur alten Seite plus neue Typen |
 | 7 | `cmd/hub` Rolle **gateway**: WebSocket, Device-Code, HTTPS-Abgleich, Redis-Fanout, Batch-Writer; Portal `/link`, `/agents`; nginx-Konfiguration; Lasttest `cmd/hubload` mit 10.000 simulierten Agents | Agent-Repo + ipv64 | Lasttest ohne Fehler, Instanz-Neustart ohne Datenverlust (Messpunkte kommen per Outbox nach) |
-| 8 | Agent: `internal/sync` echter Client (Link, WebSocket, Outbox, Konflikte, Repair, Reconnect-Backoff), UI „ipv64-Verknüpfung“, Ausführungsort-Badge, Kanaltypen `ipv64_mail`/`ipv64_sms` | Agent-Repo | Verknüpfen, offline arbeiten, nachmelden, Konflikt auflösen, hub-Wechsel unbemerkt |
+| 8 | Agent: `internal/sync` echter Client (Link, WebSocket, Outbox, Konflikte, Repair, Reconnect-Ablauf 3.9), UI „ipv64-Verknüpfung“, Konfliktseite, Umhängen (3.11), Kanaltypen `ipv64_mail`/`ipv64_sms` | Agent-Repo | Jede Zeile der Tabelle 3.10 als Test; hub-Wechsel unbemerkt |
 | 9 | Schattenbetrieb und Vergleichsbot | ipv64 | Zwei Wochen ohne Abweichung |
 | 10 | Rollout in Wellen, Abschaltung alt | ipv64 | Alte Bots aus |
 

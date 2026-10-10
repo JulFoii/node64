@@ -11,27 +11,25 @@ Rahmen (entschieden):
 
 ---
 
-## Überblick
+## Überblick: fünf Phasen
 
-| Phase | Inhalt | Ort | Abhängig von |
+Jede Phase endet mit **einer** Abnahme durch Dennis; dazwischen arbeite ich durch. Die Unterabschnitte (S0–S10) sind die Arbeitspakete innerhalb der Phasen.
+
+| Phase | Inhalt | Arbeitspakete | Abnahme (kurz) |
 | --- | --- | --- | --- |
-| S0 | hub-Server aufsetzen (OS, Go-Deploy, nginx, TLS, Redis, Firewall, DNS, MySQL-Zugang) | hub-Server, Web-Server, DNS | Server von Dennis |
-| S1 | `latest.json` + Versionsprüfung | Web | – |
-| S2 | Datenbank `hc2_*`, MySQL-Benutzer, Migrationsskript, Portal-Hooks (Config-Log + Redis) | Web/MySQL | S0 |
-| S3 | hub Rolle **checker** (Online-Checks, Zustände, Aggregation, Push-Watchdog, Agent-Ausfall) | hub | S2 |
-| S4 | Benachrichtigungen serverseitig (Kanäle, `ipv64_mail`, `ipv64_sms`, `app`, Pushover, Verifizierung) | hub + Web | S3 |
-| S5 | hub Rolle **gateway** (WebSocket, Device-Code, HTTPS-Abgleich, Batch-Writer, Lasttest) | hub | S2, S3 |
-| S6 | Agent: Sync-Client (Agent-Repo, eigener Phasenplan dort) | Agent | S5 |
-| S7 | Portal: `/link`, `/agents`, `/notifications`, `/healthchecks2/*`, Statusseite, `health.php`, API v2 | Web | S2–S5 |
-| S8 | Schattenbetrieb, Vergleichsbot, Beta-Accounts | Web + hub | S3–S7 |
-| S9 | Rollout in Wellen, Abschaltung alt, Aufräumen | Web + hub | S8 |
-| S10 | Betrieb: Monitoring, Alarmierung, Backups, Updates, Runbook, Weg zur zweiten Instanz | hub | S5 |
+| **1 Grundlagen** | hub-Server aufsetzen, `latest.json`, Tabellen `hc2_*`, MySQL-Benutzer, Migrationsskript, Portal-Hooks, alte Bots überspringen `hc2`-Accounts | S0, S1, S2 | Server erreichbar v4/v6, Testaccount migriert, alt/neu identisch |
+| **2 hub: Checks und Alarme** | Rolle checker (Online-Checks, Zustände, Push-Watchdog, Aggregation, Agent-Ausfall) und serverseitige Benachrichtigungen (alle Kanaltypen, Verifizierung) | S3, S4 | Online-Checks des Testaccounts laufen im hub, Alarme kommen über jeden Kanaltyp (Schattenmodus) |
+| **3 hub: Agents anbinden** | Rolle gateway (WebSocket, Device-Code, Abgleich, Testläufe, Lasttest), Agent-Sync-Client, Betriebsgrundlagen (Metriken, Deploy, Runbook) | S5, S6, S10 (Teil) | Testkisten-Agent verknüpft, alle Offline-Szenarien 3.10 bestanden, Lasttest 10.000 Agents |
+| **4 Portal** | Neue Seiten `/healthchecks2`, `/notifications`, `/agents`, `/link`, Umhängen lokal↔online, Konflikte, Statusseite, `health.php`, API v2 | S7 | Testaccount bedient alles ohne alte Seiten, Umhängen in beide Richtungen |
+| **5 Schatten, Rollout, Betrieb** | Schattenbetrieb mit Vergleichsbot und Beta-Nutzern, Rollout in Wellen, Abschaltung alt, Monitoring/Alarmierung des hub, Weg zur zweiten Instanz | S8, S9, S10 (Rest) | 14 Tage ohne Abweichung, alte Bots aus |
 
-Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; S10 läuft ab S5 mit. S3/S4/S5 (Go) und S7 (PHP) können parallel laufen, S7 braucht aber S2 (Tabellen) und für Live-Daten S3.
+Reihenfolge 1 → 2 → 3 → 4 → 5. Innerhalb von Phase 2–4 kann Go (hub) parallel zu PHP (Portal) laufen; Phase 4 braucht die Tabellen aus 1 und für Live-Daten den hub aus 2.
 
 ---
 
-## S0 – hub-Server aufsetzen
+## Phase 1 – Grundlagen
+
+### S0 – hub-Server aufsetzen
 
 **Ziel**: Ein Server, auf dem `ipv64-hub` sicher läuft, von Agents über `agents.ipv64.net` per v4 und v6 erreichbar, mit Zugriff auf MySQL des Web-Servers und lokalem Redis.
 
@@ -59,7 +57,7 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 
 ---
 
-## S1 – `latest.json` und Versionsprüfung
+### S1 – `latest.json` und Versionsprüfung
 
 **Ziel**: Der Agent kann prüfen, ob es eine neue Version gibt (Opt-in im Agent ist schon fertig).
 
@@ -72,7 +70,7 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 
 ---
 
-## S2 – Datenbank, MySQL-Benutzer, Migration, Portal-Hooks
+### S2 – Datenbank, MySQL-Benutzer, Migration, Portal-Hooks
 
 **Ziel**: Alle `hc2_*`-Tabellen vorhanden, ein Testaccount migriert, das Portal schreibt bei jeder Änderung Config-Log und Redis-Signal, ohne dass die alten Seiten etwas merken.
 
@@ -95,7 +93,9 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 
 ---
 
-## S3 – hub Rolle checker
+## Phase 2 – hub: Checks und Alarme
+
+### S3 – hub Rolle checker
 
 **Ziel**: Online-Checks der `hc2`-Accounts laufen im hub mit derselben Logik wie im Agent; Zustände, Ereignisse, Störungen und Aggregate stehen in `hc2_*`; Push-Checks werden überwacht; Agent-Ausfälle erkannt.
 
@@ -120,7 +120,7 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 
 ---
 
-## S4 – Benachrichtigungen serverseitig
+### S4 – Benachrichtigungen serverseitig
 
 **Ziel**: Der hub verschickt Benachrichtigungen für Online-Checks, Agent-Ereignisse und (verknüpfte) Agent-Checks über Server-Kanäle; `ipv64_mail`, `ipv64_sms`, `app` existieren als Kanaltypen; Pushover ist überall gleich.
 
@@ -140,7 +140,9 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 
 ---
 
-## S5 – hub Rolle gateway
+## Phase 3 – hub: Agents anbinden
+
+### S5 – hub Rolle gateway
 
 **Ziel**: Agents verbinden sich per WebSocket, erhalten Konfiguration in Echtzeit, liefern Messpunkte/Ereignisse, Device-Code-Verknüpfung funktioniert, Lasttest mit 10.000 simulierten Agents besteht.
 
@@ -152,31 +154,37 @@ Reihenfolge: S0 → S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9; 
 5. Eingang: `measurements` → Batch-Writer (`INSERT IGNORE`), `ack {ack_seq, rejected}`; `events` → `hc2_events` idempotent, `state_local` ableiten, Dispatcher (S4) anstoßen; `propose` → Revision prüfen, speichern, Log, `ack`/`conflict`; `deliveries`; `notify` (ipv64_mail/sms für Agent-Checks); `status`; `order_done`; `command_result`.
 6. Device-Code: `link/start` (Code aus Alphabet ohne 0/O/1/I, 10 min, `poll_secret`), `link/poll` (20/min je Code), Einlösen durch das Portal (S7) setzt `userid`; `poll` liefert dann Token (einmal) und `ws_url`. Token-Erzeugung auch im Portal (`/agents` → „Token erzeugen“) für Setups ohne Browser am Agent.
 7. Bootstrap/Config/Results über HTTPS (große Payloads, Streaming-JSON), Token-Kollisionen bei Bootstrap (`renamed`).
+7a. Testläufe (Umhängen, Sync-Plan 3.11): `hc2_testruns` (id, userid, token, definition, target_execution, agent_id, status, result, created_at); online-Testlauf führt der checker sofort aus (eigener Worker, nicht der Scheduler); lokaler Testlauf geht als `command test_check` an den Agent, Ergebnis per `command_result`. Portal und Agent fragen den Status ab (Polling 2 s, max. 30 s). Erst bei Erfolg schreibt der Server `execution` um (eine Transaktion mit Log-Eintrag).
+7b. Konflikte des Agents (`hc_conflicts`) meldet der Agent als `status.conflicts` (Anzahl + Tokens); das Portal zeigt sie beim Agent an und kann sie ebenfalls auflösen (Kommando `resolve_conflict {token, keep: server|local}`).
 8. Push-Eingang `GET/POST /v1/push/{token}`: wie `health.php` (Messpunkt + Watchdog-Signal), Limit wie im Agent, Antwort für unbekannte Tokens identisch.
 9. Ratenlimits aus Abschnitt 8 des Sync-Plans; Verbindungslimit je Instanz (Flag, Standard 20.000) → `503 Retry-After`.
 10. `cmd/hubload`: simuliert N Agents (Verbindung, Pong, Messpunkte alle 30 s, Reconnect-Verhalten) gegen einen hub; Messung CPU/RAM/DB-Last; Ziel 10.000 Agents auf der Testkiste gegen den echten hub-Server (oder lokal gegen eine Test-MariaDB).
 11. Deploy, Rolle `gateway` an, nginx-Pfad freischalten.
 
-**Abnahme**: Lokaler Agent (Testkiste) verknüpft sich per Device-Code, Portal-Änderung erscheint im Agent < 1 s, Messpunkte des Agents stehen in `hc2_measurements`, Konflikt-Fall funktioniert (Agent und Portal ändern gleichzeitig), hub-Neustart: Agent verbindet neu, nichts geht verloren; Lasttest 10.000 Agents: CPU < 50 % auf 2 Kernen, RAM < 1 GB, keine Fehler, MySQL-Schreiblast per Batch ≤ 10 Statements/s.
+**Abnahme**: Lokaler Agent (Testkiste) verknüpft sich per Device-Code, Portal-Änderung erscheint im Agent < 1 s, Messpunkte des Agents stehen in `hc2_measurements`; **alle 18 Offline-Szenarien aus Sync-Plan 3.10** werden mit abgeschnittener Verbindung (nftables auf der Testkiste, 10 min und 2 h) durchgespielt und bestanden; Umhängen lokal→online→lokal mit Testlauf; hub-Neustart: Agent verbindet neu, nichts geht verloren; Lasttest 10.000 Agents: CPU < 50 % auf 2 Kernen, RAM < 1 GB, keine Fehler, MySQL-Schreiblast per Batch ≤ 10 Statements/s.
 
 **Rückweg**: Rolle `gateway` aus (nginx-Pfad 503) → Agents arbeiten standalone weiter und melden sich später nach.
 
 ---
 
-## S6 – Agent: Sync-Client
+### S6 – Agent: Sync-Client
 
 Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client (Link, WebSocket, Outbox, Konflikte, Repair, Reconnect-Backoff), UI „ipv64-Verknüpfung“, Ausführungsort-Badge, Kanaltypen `ipv64_mail`/`ipv64_sms`, Pushover als Kanal. Wird gegen S5 entwickelt und getestet. Release mit `latest.json` (S1).
 
 ---
 
-## S7 – Portal-Seiten (PHP)
+## Phase 4 – Portal
+
+### S7 – Portal-Seiten (PHP)
 
 **Ziel**: Nutzer mit `hc2 = 1` sehen die neuen Seiten; alle anderen weiter die alten. Feature-Parität plus neue Typen, Agents, Kanäle.
 
 **Schritte** (Dateien neu, alte unverändert; Menü in `header.php` prüft `hc2`)
 1. `hc2_functions.php` (neu, von `header.php` eingebunden wie `bots/cdn_functions.php`): PDO-Helfer für `hc2_*`, `hc2_log_change`/`hc2_signal` (aus S2 hierher), Verschlüsselung `enc:v1:` kompatibel zum Agent, Limitprüfung Online-Checks gegen `user_class.healthcheck_limit` (nur `execution IN ('online','both')`), Validierung der Check-Definition (dieselben Regeln wie `checks.Validate` im Agent: Intervalle ≥ 20 s, Zieltypen, private Ziele online verboten).
 2. `/healthchecks2/index.php` (Übersicht): Kacheln, Tabelle mit Pillen (`hc2_measurements` letzte 30), Badge Ausführungsort, Filter/Sortierung/Suche, Massenaktionen (pausieren, fortsetzen, löschen, Tags), Account-Karte „Online-Checks x von y“. Pillen-Daten über API v2 (`/hc2/checks`), Seite rendert serverseitig, JS nur für Charts/Tooltips (jQuery nach `footer.php`!).
-3. `/healthchecks2/edit.php` (neu/bearbeiten): Formular wie im Agent (Typen, Parameter je Typ, Intervall/Retry, Stabilisierung, IP-Modus, Tags, Beschreibung, Abhängigkeit, kritisch, Kanäle, Wiederholung, **Ausführungsort** Online/Agent/Beides mit Agent-Auswahl). Umwandeln lokal↔online mit Testlauf (`hc2_testruns`, Ergebnis per Polling 30 s).
+3. `/healthchecks2/edit.php` (neu/bearbeiten): Formular wie im Agent (Typen, Parameter je Typ, Intervall/Retry, Stabilisierung, IP-Modus, Tags, Beschreibung, Abhängigkeit, kritisch, Kanäle, Wiederholung, **Ausführungsort** Online/Agent/Beides mit Agent-Auswahl).
+3a. **Umhängen** (Sync-Plan 3.11): Schalter im Formular und Massenaktion in der Übersicht; Ablauf: Limit prüfen → privates Ziel abweisen → `hc2_testruns` anlegen → Ergebnis per Polling (2 s, max. 30 s) anzeigen → bei Erfolg `execution` setzen. Detailseite zeigt die Herkunft („gemessen von: Pi im Keller bis 10.10. 14:00, seitdem ipv64“) und beide Mess-Serien.
+3b. **Konflikte**: Karte auf `/agents.php` (Detail) mit den Konflikten des Agents (beide Versionen nebeneinander, „Server behalten“ / „Agent-Version übernehmen“ → Kommando an den Agent). Ausstehende Vorschläge eines offline-Agents werden nicht angezeigt (kennt nur der Agent), der Agent-Status zeigt „offline seit …, Outbox: n“.
 4. `/healthchecks2/check.php?token=`: Detail (Pillen groß, Verfügbarkeit 24 h/30 d/1 J aus `hc2_hourly/daily`, Latenz-Chart innen/außen, Ereignisse, Störungen, letzte Messung roh, beide Push-URLs, Diagnosehinweis bei Abweichung innen/außen).
 5. `/healthchecks2/maintenance.php`, `/healthchecks2/incidents.php` (ersetzt `incidents.php` für `hc2`-Nutzer).
 6. `/notifications.php` (ersetzt `integrations.php`): Kanäle anlegen je Typ (Felder wie im Agent), Test (Sendeauftrag an hub, Ergebnis per Polling), Standard, Verifizierung Mail/SMS **nach Login** per Code, Ruhezeiten/Sammelmeldung (`hc2_settings`), Zustellprotokoll.
@@ -192,7 +200,9 @@ Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client 
 
 ---
 
-## S8 – Schattenbetrieb und Vergleich
+## Phase 5 – Schatten, Rollout, Betrieb
+
+### S8 – Schattenbetrieb und Vergleich
 
 **Ziel**: Zwei Wochen Betrieb mit echten Accounts, bei denen alt und neu parallel laufen, ohne doppelte Alarme; Abweichungen werden gefunden und behoben.
 
@@ -209,7 +219,7 @@ Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client 
 
 ---
 
-## S9 – Rollout und Abschaltung
+### S9 – Rollout und Abschaltung
 
 **Schritte**
 1. Wellen: Supporter/VIP/Premium → Business/Company (mit Ankündigung) → Standard (Free) in Blöcken à 1.000 Accounts pro Tag (`hc2_migrate.php all --limit 1000 --class 1`), jeweils 48 h beobachten. Ankündigung im Blog/Wiki, Hinweis auf neue Push-URL (alte bleibt).
@@ -221,7 +231,7 @@ Im Agent-Repo (eigener Phasenplan dort, Phase 6): `internal/sync` echter Client 
 
 ---
 
-## S10 – Betrieb des hub
+### S10 – Betrieb des hub
 
 **Ziel**: Der hub ist überwacht, alarmiert selbst, lässt sich sicher aktualisieren, und der Weg zur zweiten Instanz ist beschrieben.
 
