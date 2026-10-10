@@ -40,6 +40,7 @@ type Module struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	push   *pushLimiter
+	linked func() bool // ipv64-Verknuepfung aktiv (Sync-Phase), nil = standalone
 }
 
 // New erzeugt das Modul. dispatcher und notifyStore duerfen nil sein (dann nur Log).

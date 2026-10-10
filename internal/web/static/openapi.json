@@ -20,13 +20,16 @@
         "retries": {"type": "integer"}, "connect_timeout_seconds": {"type": "number"}, "timeout_seconds": {"type": "number"},
         "invert": {"type": "boolean"}, "stabilize": {"type": "integer"}, "ip_mode": {"type": "string", "enum": ["auto", "ipv4", "ipv6", "both"]},
         "tags": {"type": "array", "items": {"type": "string"}}, "description": {"type": "string"}, "paused": {"type": "boolean"},
-        "parent": {"type": "string"}, "critical": {"type": "boolean"}, "execution": {"type": "string", "enum": ["local"]},
+        "parent": {"type": "string"}, "critical": {"type": "boolean"}, "execution": {"type": "string", "enum": ["local", "online", "both"], "description": "online/both erst mit ipv64-Verknüpfung"},
+        "policy": {"type": "string", "enum": ["all", "any", "majority"], "description": "Gesamtzustand bei mehreren Messstellen: down nur wenn alle / eine / Mehrheit down"},
+        "locations": {"type": "array", "items": {"type": "string"}, "description": "Online-Standorte (nbg, fsn), nur mit Verknüpfung"},
+        "notify_degraded": {"type": "boolean", "description": "auch bei teilweise gestört benachrichtigen"},
         "notify_down": {"type": "boolean"}, "notify_up": {"type": "boolean"}, "channels": {"type": "array", "items": {"type": "integer"}, "description": "Kanal-IDs, leer = Standardkanäle"},
         "repeat_minutes": {"type": "integer"}, "revision": {"type": "integer"}, "created_at": {"type": "string"}, "updated_at": {"type": "string"},
         "push_url": {"type": "string"}, "state": {"$ref": "#/components/schemas/State"}
       }},
       "State": {"type": "object", "properties": {
-        "state": {"type": "string", "enum": ["pending", "up", "down", "stabilizing", "flapping", "dependent", "paused"]},
+        "state": {"type": "string", "enum": ["pending", "up", "degraded", "down", "stabilizing", "flapping", "dependent", "paused"]},
         "since": {"type": "string"}, "last_check_at": {"type": "string"}, "next_check_at": {"type": "string"}, "last_status": {"type": "string"},
         "last_latency_ms": {"type": "number"}, "last_reason": {"type": "string"}, "last_message": {"type": "string"},
         "consecutive_fail": {"type": "integer"}, "consecutive_ok": {"type": "integer"}, "last_push_at": {"type": "string"}, "down_since": {"type": "string"},

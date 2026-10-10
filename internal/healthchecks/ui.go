@@ -340,6 +340,11 @@ type formData struct {
 	IPModes  []string
 	Error    string
 	Channels []channelOpt
+	// Hybrid-Vorbereitung: Messstellen und Bewertung (aktiv erst mit ipv64-Verknuepfung)
+	Policies   []string
+	Locations  []string
+	Executions []string
+	Linked     bool
 }
 
 type channelOpt struct {
@@ -355,6 +360,7 @@ func formDefaults() map[string]string {
 	return map[string]string{
 		"type": "http", "interval_seconds": "60", "retry_interval_seconds": "20", "retries": "1", "stabilize": "3",
 		"connect_timeout_seconds": "5", "timeout_seconds": "10", "ip_mode": "auto", "notify_down": "on", "notify_up": "on",
+		"execution": "local", "policy": PolicyAll, "locations": "nbg,fsn",
 		"method": "GET", "accept_status": "200-299", "follow_redirects": "on", "max_redirects": "5",
 		"count": "3", "max_loss_percent": "50", "cert_port": "443", "min_days": "14", "port_expect": "open",
 		"period_seconds": "3600", "grace_seconds": "600",
@@ -374,6 +380,10 @@ func formFromCheck(c *Check) map[string]string {
 	f["invert"], f["critical"], f["paused"] = onOff(c.Invert), onOff(c.Critical), onOff(c.Paused)
 	f["notify_down"], f["notify_up"] = onOff(c.NotifyDown), onOff(c.NotifyUp)
 	f["repeat_minutes"] = strconv.Itoa(c.RepeatMinutes)
+	f["execution"], f["policy"], f["notify_degraded"] = c.Execution, c.Policy, onOff(c.NotifyDegraded)
+	if len(c.Locations) > 0 {
+		f["locations"] = strings.Join(c.Locations, ",")
+	}
 	ids := make([]string, 0, len(c.Channels))
 	for _, id := range c.Channels {
 		ids = append(ids, strconv.FormatInt(id, 10))
@@ -479,7 +489,11 @@ func checkFromForm(r *http.Request) (checkJSON, error) {
 		return &f, nil
 	}
 	var err error
-	in := checkJSON{Name: v("name"), Type: v("type"), Target: v("target"), IPMode: v("ip_mode"), Description: v("description")}
+	in := checkJSON{Name: v("name"), Type: v("type"), Target: v("target"), IPMode: v("ip_mode"), Description: v("description"),
+		Execution: v("execution"), Policy: v("policy"), Locations: r.Form["locations"]}
+	if in.Locations == nil {
+		in.Locations = []string{}
+	}
 	if in.IntervalSeconds, err = intp("interval_seconds"); err != nil {
 		return in, err
 	}
@@ -503,7 +517,7 @@ func checkFromForm(r *http.Request) (checkJSON, error) {
 	}
 	b := func(x bool) *bool { return &x }
 	in.Invert, in.Critical, in.Paused = b(on("invert")), b(on("critical")), b(on("paused"))
-	in.NotifyDown, in.NotifyUp = b(on("notify_down")), b(on("notify_up"))
+	in.NotifyDown, in.NotifyUp, in.NotifyDegraded = b(on("notify_down")), b(on("notify_up")), b(on("notify_degraded"))
 	parent := v("parent")
 	in.Parent = &parent
 	in.Tags = []string{}
@@ -628,6 +642,8 @@ func (m *Module) formPage(w http.ResponseWriter, r *http.Request, status int, d 
 	}
 	d.Types = checks.Types
 	d.IPModes = []string{"auto", "ipv4", "ipv6", "both"}
+	d.Policies, d.Locations, d.Executions = Policies, KnownLocations, []string{"local", "online", "both"}
+	d.Linked = m.linked != nil && m.linked()
 	if m.dispatcher != nil {
 		selected := map[string]bool{}
 		for _, id := range strings.Split(d.Form["channels"], ",") {

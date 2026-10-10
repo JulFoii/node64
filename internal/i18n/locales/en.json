@@ -223,7 +223,9 @@
     "last_raw": "Last measurement in detail",
     "delete_confirm": "Delete check “{name}” with all its data?",
     "execution": {
-      "local": "local"
+      "local": "This agent only (local)",
+      "online": "Online at ipv64 only",
+      "both": "Local and online (hybrid)"
     },
     "execution_hint": "Checked by this agent",
     "range": {
@@ -239,7 +241,8 @@
       "dependent": "Dependent",
       "pending": "Pending",
       "paused": "Paused",
-      "unstable": "Unstable"
+      "unstable": "Unstable",
+      "degraded": "Partially down"
     },
     "type": {
       "http": "HTTP(S)",
@@ -332,7 +335,15 @@
       "repeat": "Repeat alert every",
       "repeat_hint": "0 = only once",
       "channels": "Channels",
-      "channels_hint": "No selection = default channels."
+      "channels_hint": "No selection = default channels.",
+      "sources": "Measuring points and verdict",
+      "execution": "Where to run",
+      "sources_hint": "Online measurements from the ipv64 locations become available after linking with ipv64.net. The settings are stored already and carried over.",
+      "locations": "Online locations",
+      "locations_hint": "Multiple locations from account class Supporter. Every online measuring point counts against the class's healthcheck limit, local measurements never do.",
+      "policy": "Down when …",
+      "policy_hint": "With several measuring points (agent, Nuremberg, Falkenstein) this rule decides when the check counts as down. If only some report a failure, the check is \\u201cpartially down\\u201d.",
+      "notify_degraded": "Also notify on \\u201cpartially down\\u201d"
     },
     "push": {
       "title": "Push URL",
@@ -357,7 +368,16 @@
       "all_hint": "no selection = all",
       "deleted": "Maintenance window deleted."
     },
-    "empty_hint": "Push, HTTP(S), keyword, ping, TCP, port and certificate. Everything stays in your network."
+    "empty_hint": "Push, HTTP(S), keyword, ping, TCP, port and certificate. Everything stays in your network.",
+    "location": {
+      "nbg": "Nuremberg",
+      "fsn": "Falkenstein"
+    },
+    "policy": {
+      "all": "… all measuring points report down (default)",
+      "any": "… one measuring point reports down",
+      "majority": "… the majority of measuring points report down"
+    }
   },
   "notify": {
     "subject": {

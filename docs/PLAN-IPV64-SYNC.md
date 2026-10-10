@@ -20,7 +20,7 @@ Ergänzt das Konzept („ipv64 Agent – Konzept & Funktionsumfang“) und erset
 | L5 | **Rohe Messpunkte der Online-Checks nur 7 Tage in MySQL** (partitioniert), Stunden- und Tageswerte in MySQL. Influx wird nicht mehr für Healthchecks gebraucht. | Ein Datenmodell für Agent und Server, gleiche Charts. Influx bleibt für CDN/Statistiken. |
 | L6 | **Integrationen werden zu Kanälen** (`hc2_channels`), gleiche Typen wie im Agent (`smtp`, `telegram`, `discord`, `ntfy`, `gotify`, `webhook`, `pushover`) plus serverseitig `app`, `ipv64_mail`, `ipv64_sms`. Pushover auch im Agent, weil der Container ohne ipv64-Account vollwertig bleiben soll; `ipv64_mail`/`ipv64_sms` kann ein verknüpfter Agent über den hub nutzen. Alte `integrations` werden einmalig migriert, die Verifizierung per Mail/SMS bleibt. | Gleicher Versandcode (Go) auf Server und Agent; die bekannten Lücken im alten PHP (activate_integration ohne Login) verschwinden. |
 | L7 | **Push-URLs bleiben stabil**: `https://ipv64.net/health.php?token=...` und der neue Pfad `/api/v2/push/{token}` funktionieren beide, auch nach der Migration. | Tausende Geräte rufen die alte URL. |
-| L8 | Lokale Checks im Container haben **kein Limit**. Gezählt werden nur Checks, die online bei ipv64 laufen (`execution online` oder `both`), und zwar wie bisher gegen das Limit aus der User-Class des Accounts. Kein Limit für die Anzahl Agents je Account. | Entscheidung Dennis, 2026-10-10. |
+| L8 | Lokale Messungen im Container haben **kein Limit**. Gegen `user_class.healthcheck_limit` zählt die Zahl der **Online-Messstellen**: jeder Check mit `execution online/both` zählt einmal **je gewähltem Standort** (ein Check an nbg + fsn = 2). Kein Limit für die Anzahl Agents je Account. **Mehrere Standorte je Check** (nbg + fsn) gibt es erst ab Account-Klasse **Supporter** (neue Spalte `user_class.hc_locations`: Standard 1, alle anderen 2); darunter wählt der Server einen Standort (abwechselnd nach `crc32(token)`, damit die Last verteilt ist, im Portal änderbar). | Entscheidung Dennis, 2026-10-10. |
 
 ---
 
@@ -73,6 +73,9 @@ Alle Zeiten `DATETIME(3)` in UTC (abweichend vom Rest des Portals, das Europe/Be
 ```sql
 -- Accounts-Flag fuer die Umstellung
 ALTER TABLE users ADD hc2 TINYINT NOT NULL DEFAULT 0;
+-- Online-Standorte je Klasse: Standard 1, ab Supporter (und VIP/Premium/Business/Company) 2
+ALTER TABLE user_class ADD hc_locations TINYINT NOT NULL DEFAULT 1;
+UPDATE user_class SET hc_locations = 2 WHERE id IN (2,3,4,5,6);
 
 CREATE TABLE hc2_agents (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -122,7 +125,7 @@ CREATE TABLE hc2_checks (
   revision BIGINT NOT NULL DEFAULT 1, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL, updated_by VARCHAR(100) NOT NULL DEFAULT '',
   deleted_at DATETIME(3) NULL,               -- Tombstone: bleibt 90 Tage, damit Agents das Loeschen sehen
   -- Messstellen und Bewertung (3.12)
-  locations SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',   -- Standorte fuer execution online/both
+  locations SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',   -- Standorte fuer execution online/both; Server kuerzt auf user_class.hc_locations
   policy ENUM('all','any','majority') NOT NULL DEFAULT 'all', -- down, wenn: alle / eine / Mehrheit der Messstellen down
   notify_degraded TINYINT NOT NULL DEFAULT 0,               -- Alarm auch bei "teilweise gestoert"
   -- Gesamtzustand (aus hc2_check_states berechnet, 3.12); je Messstelle siehe hc2_check_states
@@ -409,6 +412,8 @@ Ein Check hat einen **Ausführungsort** (`execution`): `local` (nur dieser Agent
 | `any` | **eine** Messstelle down | – | up |
 | `majority` | mehr als die Hälfte down | mindestens eine down | up |
 
+- **Alarm-Option je Check**: `policy` (all/any/majority) und `notify_degraded` sind vom Nutzer einstellbar – im Portal und in der Agent-Oberfläche (dort schon eingebaut, Karte „Messstellen und Bewertung“). Standard `all` + kein Alarm bei „teilweise gestört“.
+- **Standorte je Klasse**: Checks von Accounts mit `hc_locations = 1` laufen an genau einem Standort; die Regel `all` ist dann „Agent + ein Standort“. Beim Wechsel der Klasse nach unten reduziert der Server die `locations` jedes Checks auf einen Standort und schreibt das ins Config-Log (Agent sieht es).
 - Messstellen im Zustand `pending`, `paused`, `dependent` oder ohne aktuelle Daten (Agent offline > 3 min, Standort ausgefallen) zählen **nicht mit** (weder up noch down). Sind alle ohne Daten → `pending`. Dadurch kippt ein Check nicht auf down, nur weil der Heim-Agent gerade offline ist, und nicht auf up, nur weil ein Standort schweigt.
 - `stabilizing`/`flapping` einer Messstelle gelten für die Regel als up bzw. down nach ihrem `last_status`; der Gesamtzustand zeigt `flapping`, wenn die bestimmende Messstelle flattert.
 - Push-Checks haben genau eine Messstelle (die, die den Heartbeat bewertet) – Regel greift nicht.
@@ -561,7 +566,8 @@ Reihenfolge: 1 → 2 → 3 → 4 → 7 → 8 → 5 → 6 → 9 → 10. Pakete 3/
 7. **Transport:** kein Long-Poll über PHP, sondern ein eigener Go-Dienst `ipv64-hub` mit WebSocket, von Anfang an für viele tausend Agents und mehrere gleichwertige Instanzen ausgelegt (L4, L9, Abschnitt 1).
 8. **Server:** zwei hub-Server von Anfang an, **Nürnberg** und **Falkenstein** (Hetzner Cloud), getrennt vom Web-Server; Redis auf nbg über privates Netz. Zugänge (IP usw.) kommen von Dennis.
 10. **Zwei Standorte für Online-Checks**: jeder Online-Check wird standardmäßig von beiden Standorten gemessen (abwählbar je Check).
-11. **Hybrid**: lokal + online gleichzeitig möglich; Gesamtzustand nach Regel je Check, Standard „down nur, wenn alle Messstellen down“, sonst „teilweise gestört“ ohne Alarm (3.12).
+11. **Hybrid**: lokal + online gleichzeitig möglich; Gesamtzustand nach Regel je Check (**einstellbar**: alle / eine / Mehrheit), Standard „down nur, wenn alle Messstellen down“, sonst „teilweise gestört“; Alarm bei „teilweise gestört“ ist eine Option je Check (3.12).
+12. **Standorte und Limit**: mehrere Online-Standorte je Check erst ab Klasse Supporter (Standard-Klasse: ein Standort). Das Healthcheck-Limit der Klasse zählt Online-Messstellen (Check × Standorte); lokale Messungen zählen nie (L8).
 9. **IPv6** überall, Agent und Server (L10).
 
 Der vollständige Phasenplan für die Serverseite steht in `PLAN-IPV64-SERVER-PHASEN.md`.

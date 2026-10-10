@@ -223,7 +223,9 @@
     "last_raw": "Letzte Messung im Detail",
     "delete_confirm": "Check „{name}“ mit allen Messdaten löschen?",
     "execution": {
-      "local": "lokal"
+      "local": "Nur dieser Agent (lokal)",
+      "online": "Nur online bei ipv64",
+      "both": "Lokal und online (Hybrid)"
     },
     "execution_hint": "Wird von diesem Agent geprüft",
     "range": {
@@ -239,7 +241,8 @@
       "dependent": "Abhängig gestört",
       "pending": "Wartet",
       "paused": "Pausiert",
-      "unstable": "Instabil"
+      "unstable": "Instabil",
+      "degraded": "Teilweise gestört"
     },
     "type": {
       "http": "HTTP(S)",
@@ -332,7 +335,15 @@
       "repeat": "Erneut alarmieren alle",
       "repeat_hint": "0 = nur einmal",
       "channels": "Kanäle",
-      "channels_hint": "Keine Auswahl = Standardkanäle."
+      "channels_hint": "Keine Auswahl = Standardkanäle.",
+      "sources": "Messstellen und Bewertung",
+      "execution": "Ausführungsort",
+      "sources_hint": "Online-Messungen von den ipv64-Standorten gibt es nach der Verknüpfung mit ipv64.net. Die Einstellungen werden schon gespeichert und mit übernommen.",
+      "locations": "Online-Standorte",
+      "locations_hint": "Mehrere Standorte ab Account-Klasse Supporter. Jede Online-Messstelle zählt gegen das Healthcheck-Limit der Klasse, lokale Messungen nie.",
+      "policy": "Gestört, wenn …",
+      "policy_hint": "Mit mehreren Messstellen (Agent, Nürnberg, Falkenstein) legt diese Regel fest, wann der Check als gestört gilt. Meldet nur ein Teil eine Störung, ist der Check „teilweise gestört“.",
+      "notify_degraded": "Auch bei „teilweise gestört“ benachrichtigen"
     },
     "push": {
       "title": "Push-URL",
@@ -357,7 +368,16 @@
       "all_hint": "keine Auswahl = alle",
       "deleted": "Wartungsfenster gelöscht."
     },
-    "empty_hint": "Push, HTTP(S), Keyword, Ping, TCP, Port und Zertifikat. Alles bleibt in deinem Netz."
+    "empty_hint": "Push, HTTP(S), Keyword, Ping, TCP, Port und Zertifikat. Alles bleibt in deinem Netz.",
+    "location": {
+      "nbg": "Nürnberg",
+      "fsn": "Falkenstein"
+    },
+    "policy": {
+      "all": "… alle Messstellen gestört melden (Standard)",
+      "any": "… eine Messstelle gestört meldet",
+      "majority": "… die Mehrheit der Messstellen gestört meldet"
+    }
   },
   "notify": {
     "subject": {

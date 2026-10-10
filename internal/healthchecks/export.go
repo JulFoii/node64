@@ -26,10 +26,11 @@ func (m *Module) Export(ctx context.Context) (any, error) {
 	out := exportFile{Checks: []checkJSON{}, Maintenance: []Maintenance{}}
 	for _, c := range list {
 		j := checkJSON{Token: c.Token, Name: c.Name, Type: string(c.Type), Target: c.Target, Params: c.Params, Tags: c.Tags, Description: c.Description,
-			IPMode: string(c.IPMode), Execution: c.Execution, Channels: c.Channels}
+			IPMode: string(c.IPMode), Execution: c.Execution, Policy: c.Policy, Locations: c.Locations, Channels: c.Channels}
 		iv, riv, re, st, rp := int(c.Interval.Seconds()), int(c.RetryInterval.Seconds()), c.Retries, c.Stabilize, c.RepeatMinutes
 		ct, tt := c.ConnectTimeout.Seconds(), c.TotalTimeout.Seconds()
-		inv, pa, cr, nd, nu, parent := c.Invert, c.Paused, c.Critical, c.NotifyDown, c.NotifyUp, c.Parent
+		inv, pa, cr, nd, nu, parent, ndeg := c.Invert, c.Paused, c.Critical, c.NotifyDown, c.NotifyUp, c.Parent, c.NotifyDegraded
+		j.NotifyDegraded = &ndeg
 		j.IntervalSeconds, j.RetryIntervalSeconds, j.Retries, j.Stabilize, j.RepeatMinutes = &iv, &riv, &re, &st, &rp
 		j.ConnectTimeoutSeconds, j.TimeoutSeconds = &ct, &tt
 		j.Invert, j.Paused, j.Critical, j.NotifyDown, j.NotifyUp, j.Parent = &inv, &pa, &cr, &nd, &nu, &parent
@@ -38,6 +39,9 @@ func (m *Module) Export(ctx context.Context) (any, error) {
 		}
 		if j.Channels == nil {
 			j.Channels = []int64{}
+		}
+		if j.Locations == nil {
+			j.Locations = []string{}
 		}
 		out.Checks = append(out.Checks, j)
 	}

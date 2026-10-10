@@ -16,6 +16,8 @@ import (
 	"github.com/ipv64net/agent/internal/scheduler"
 )
 
+var locationRe = regexp.MustCompile(`^[a-z0-9]{2,16}$`)
+
 var tokenRe = regexp.MustCompile(`^[A-Za-z0-9]{32}$`)
 
 // ---------------------------------------------------------------- JSON-Darstellung
@@ -41,6 +43,9 @@ type checkJSON struct {
 	Parent                *string         `json:"parent,omitempty"`
 	Critical              *bool           `json:"critical,omitempty"`
 	Execution             string          `json:"execution,omitempty"`
+	Policy                string          `json:"policy,omitempty"`
+	Locations             []string        `json:"locations"`
+	NotifyDegraded        *bool           `json:"notify_degraded,omitempty"`
 	NotifyDown            *bool           `json:"notify_down,omitempty"`
 	NotifyUp              *bool           `json:"notify_up,omitempty"`
 	Channels              []int64         `json:"channels"`
@@ -72,7 +77,7 @@ type stateJSON struct {
 func (m *Module) toJSON(c *Check, r *http.Request) checkJSON {
 	iv, riv, re, st, rp := int(c.Interval.Seconds()), int(c.RetryInterval.Seconds()), c.Retries, c.Stabilize, c.RepeatMinutes
 	ct, tt := c.ConnectTimeout.Seconds(), c.TotalTimeout.Seconds()
-	inv, pa, cr, nd, nu := c.Invert, c.Paused, c.Critical, c.NotifyDown, c.NotifyUp
+	inv, pa, cr, nd, nu, ndeg := c.Invert, c.Paused, c.Critical, c.NotifyDown, c.NotifyUp, c.NotifyDegraded
 	parent := c.Parent
 	created, updated := c.CreatedAt, c.UpdatedAt
 	rt := c.Runtime
@@ -84,7 +89,8 @@ func (m *Module) toJSON(c *Check, r *http.Request) checkJSON {
 	out := checkJSON{Token: c.Token, Name: c.Name, Type: string(c.Type), Target: c.Target, Params: c.Params,
 		IntervalSeconds: &iv, RetryIntervalSeconds: &riv, Retries: &re, ConnectTimeoutSeconds: &ct, TimeoutSeconds: &tt,
 		Invert: &inv, Stabilize: &st, IPMode: string(c.IPMode), Tags: c.Tags, Description: c.Description, Paused: &pa, Parent: &parent,
-		Critical: &cr, Execution: c.Execution, NotifyDown: &nd, NotifyUp: &nu, Channels: c.Channels, RepeatMinutes: &rp,
+		Critical: &cr, Execution: c.Execution, Policy: c.Policy, Locations: c.Locations, NotifyDegraded: &ndeg,
+		NotifyDown: &nd, NotifyUp: &nu, Channels: c.Channels, RepeatMinutes: &rp,
 		Revision: c.Revision, CreatedAt: &created, UpdatedAt: &updated,
 		State: &stateJSON{State: string(rt.State), Since: rt.Since, LastCheckAt: rt.LastCheck, NextCheckAt: rt.NextCheck, LastStatus: string(rt.LastStatus),
 			LastLatencyMS: msf(rt.LastLatency), LastReason: string(rt.LastReason), LastMessage: rt.LastMessage, ConsecutiveFail: rt.ConsecutiveFail,
@@ -95,6 +101,9 @@ func (m *Module) toJSON(c *Check, r *http.Request) checkJSON {
 	}
 	if out.Channels == nil {
 		out.Channels = []int64{}
+	}
+	if out.Locations == nil {
+		out.Locations = []string{}
 	}
 	if c.Type == checks.TypePush {
 		scheme := "http"
@@ -112,6 +121,7 @@ func (m *Module) apply(c *Check, in checkJSON, create bool) error {
 		c.Interval, c.RetryInterval, c.Retries, c.Stabilize = checks.DefaultInterval, 20*time.Second, 1, 3
 		c.ConnectTimeout, c.TotalTimeout = checks.DefaultConnectTimeout, checks.DefaultTotalTimeout
 		c.IPMode, c.Execution, c.NotifyDown, c.NotifyUp = checks.IPAuto, "local", true, true
+		c.Policy = PolicyAll
 	}
 	c.Name = strings.TrimSpace(in.Name)
 	if c.Name == "" || len(c.Name) > 200 {
@@ -183,7 +193,27 @@ func (m *Module) apply(c *Check, in checkJSON, create bool) error {
 		c.RepeatMinutes = *in.RepeatMinutes
 	}
 	if in.Execution != "" && in.Execution != "local" {
-		return errors.New("execution: only local is available in this version")
+		return errors.New("execution: online and both need the ipv64 link (coming with the sync phase)")
+	}
+	if in.Policy != "" {
+		c.Policy = strings.ToLower(strings.TrimSpace(in.Policy))
+	}
+	if !ValidPolicy(c.Policy) {
+		return errors.New("policy must be all, any or majority")
+	}
+	if in.Locations != nil {
+		c.Locations = nil
+		for _, l := range in.Locations {
+			if l = strings.ToLower(strings.TrimSpace(l)); l != "" {
+				if !locationRe.MatchString(l) {
+					return errors.New("locations: use short codes like nbg")
+				}
+				c.Locations = append(c.Locations, l)
+			}
+		}
+	}
+	if in.NotifyDegraded != nil {
+		c.NotifyDegraded = *in.NotifyDegraded
 	}
 	// Grenzen
 	if c.Type != checks.TypePush {

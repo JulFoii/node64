@@ -164,6 +164,22 @@
 		</div>
 
 		<div class="card mb-3">
+			<div class="card-header">{{.T "hc.form.sources"}}</div>
+			<div class="card-body"><div class="row g-3">
+				<div class="col-12"><label class="form-label" for="execution">{{.T "hc.form.execution"}}</label>
+					<select class="form-select" id="execution" name="execution">{{range $d.Executions}}<option value="{{.}}"{{if eq . (index $f "execution")}} selected{{end}}{{if and (ne . "local") (not $d.Linked)}} disabled{{end}}>{{$.T (print "hc.execution." .)}}</option>{{end}}</select>
+					{{if not $d.Linked}}<div class="form-text">{{.T "hc.form.sources_hint"}}</div>{{end}}</div>
+				<div class="col-12"><label class="form-label">{{.T "hc.form.locations"}}</label>
+					{{range $d.Locations}}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="locations" value="{{.}}" id="loc_{{.}}"{{if contains (index $f "locations") .}} checked{{end}}{{if not $d.Linked}} disabled{{end}}><label class="form-check-label" for="loc_{{.}}">{{$.T (print "hc.location." .)}}</label></div>{{end}}
+					<div class="form-text">{{.T "hc.form.locations_hint"}}</div></div>
+				<div class="col-12"><label class="form-label" for="policy">{{.T "hc.form.policy"}}</label>
+					<select class="form-select" id="policy" name="policy">{{range $d.Policies}}<option value="{{.}}"{{if eq . (index $f "policy")}} selected{{end}}>{{$.T (print "hc.policy." .)}}</option>{{end}}</select>
+					<div class="form-text">{{.T "hc.form.policy_hint"}}</div></div>
+				<div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_degraded" id="notify_degraded"{{if index $f "notify_degraded"}} checked{{end}}><label class="form-check-label" for="notify_degraded">{{.T "hc.form.notify_degraded"}}</label></div></div>
+			</div></div>
+		</div>
+
+		<div class="card mb-3">
 			<div class="card-header">{{.T "hc.form.alerting"}}</div>
 			<div class="card-body"><div class="row g-3">
 				<div class="col-6"><label class="form-label" for="retries">{{.T "hc.form.retries"}}</label><input class="form-control" type="number" id="retries" name="retries" value="{{index $f "retries"}}" min="0" max="10"><div class="form-text">{{.T "hc.form.retries_hint"}}</div></div>

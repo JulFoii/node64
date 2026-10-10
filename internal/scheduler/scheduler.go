@@ -37,6 +37,8 @@ const (
 	StateFlapping    State = "flapping"
 	StateDependent   State = "dependent"
 	StatePaused      State = "paused"
+	// StateDegraded ist nur ein Gesamtzustand: ein Teil der Messstellen ist down.
+	StateDegraded State = "degraded"
 )
 
 // Check ist die Konfiguration, die der Scheduler braucht.
