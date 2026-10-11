@@ -77,6 +77,10 @@ server {
     location / { return 301 https://\$host\$request_uri; }
 }
 EOF
+# Viele dauerhafte WebSockets: Standard (768 je Worker) reicht nur fuer ~760 Nodes je hub
+sed -i 's/worker_connections [0-9]*;/worker_connections 25000;/' /etc/nginx/nginx.conf
+grep -q worker_rlimit_nofile /etc/nginx/nginx.conf || sed -i 's/^worker_processes .*;/&
+worker_rlimit_nofile 60000;/' /etc/nginx/nginx.conf
 ln -sf /etc/nginx/sites-available/hub.conf /etc/nginx/sites-enabled/hub.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t >/dev/null && systemctl reload nginx
