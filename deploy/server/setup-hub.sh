@@ -35,6 +35,12 @@ secret_key_file: /var/lib/ipv64-hub/secret.key
 limits:
   max_connections: 20000
   checker_workers: 200
+# Betriebsalarme an den Betreiber: andere hubs ueber das Internet, eigene Datenbank.
+# Kanaele wie in der Node (pushover, ntfy, telegram, webhook, smtp, discord, gotify; ipv64_sms/ipv64_mail nur ueber die Bruecke).
+# Test: /opt/ipv64-hub/hub -ops-test
+ops:
+  peers: []            # z. B. ["https://hc-srv02.ipv64.net"]
+  alerts: []           # z. B. - {type: pushover, name: Betreiber, config: {user_key: "...", app_token: "..."}}
 EOF
 chown root:ipv64-hub /etc/ipv64-hub/config.yaml; chmod 640 /etc/ipv64-hub/config.yaml
 fi
