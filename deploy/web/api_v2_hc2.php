@@ -107,7 +107,7 @@ function hc2_check_input(?array $old): array {
 	$f['target'] = (string)($b['target'] ?? ($old['target'] ?? ''));
 	$pin = isset($b['params']) && is_array($b['params']) ? $b['params'] : array();
 	if ($old && $f['type'] === $old['type']) { $pin = array_merge($p, $pin); }
-	foreach (array('method','accept_status','max_redirects','keyword','basic_user','basic_password','body','count','max_loss_percent','max_latency_ms','port','send','expect','min_days','server_name','period_seconds','grace_seconds') as $k) {
+	foreach (array('method','accept_status','max_redirects','keyword','basic_user','basic_password','body','count','max_loss_percent','max_latency_ms','port','send','expect','min_days','cert_min_days','server_name','period_seconds','grace_seconds') as $k) {
 		if (isset($pin[$k])) { $f[$k] = is_bool($pin[$k]) ? ($pin[$k] ? '1' : '0') : (string)$pin[$k]; }
 	}
 	foreach (array('keyword_absent','insecure_tls','tls','skip_chain','skip_hostname') as $k) { if (!empty($pin[$k])) { $f[$k] = '1'; } }

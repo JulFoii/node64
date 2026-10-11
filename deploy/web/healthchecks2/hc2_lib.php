@@ -227,6 +227,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if ($hd) { $p['headers'] = $hd; }
 			if (($b = (string)($in['body'] ?? '')) !== '') { $p['body'] = $b; }
 			if ($flag('insecure_tls')) { $p['insecure_tls'] = true; }
+			if (($cd = $num('cert_min_days', 0, 0, 3650)) > 0) { $p['cert_min_days'] = $cd; }
 			break;
 		case 'icmp':
 			if ($target === '') { $err[] = 'Ziel (Host oder IP) fehlt.'; }
@@ -574,4 +575,21 @@ function hc2_pills_many(array $tokens, int $n, array $nodes): array {
 		$out[$m['token']] = '<div class="beat2 gros-bar ' . $cls . '" data-toggle="tooltip" data-placement="top" title="' . hc2_h($tip) . '"></div>' . ($out[$m['token']] ?? '');
 	}
 	return $out;
+}
+
+// Ablaufdatum des HTTPS-Zertifikats aus Meldungen ("cert valid until JJJJ-MM-TT"), frühestes gewinnt
+function hc2_cert_until($messages) {
+	$best = null;
+	foreach ((array)$messages as $m) {
+		if (preg_match_all('/cert valid until (\d{4}-\d{2}-\d{2})/', (string)$m, $mm)) {
+			foreach ($mm[1] as $d) { if ($best === null || $d < $best) { $best = $d; } }
+		}
+	}
+	return $best;
+}
+function hc2_cert_badge($until) {
+	if ($until === null) { return ''; }
+	$days = (int)floor((strtotime($until . ' 00:00:00 UTC') - time()) / 86400);
+	$cls = $days <= 7 ? 'danger' : ($days <= 21 ? 'warning' : 'success');
+	return '<span class="badge badge-' . $cls . '" title="Zertifikat gültig bis ' . hc2_h(date('d.m.Y', strtotime($until))) . '"><i class="fa-solid fa-lock"></i> noch ' . $days . ' Tage</span>';
 }

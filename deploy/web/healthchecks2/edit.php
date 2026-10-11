@@ -15,7 +15,7 @@ $cloneOf = isset($_GET['clone']) ? hc2_check($uid, (string)$_GET['clone']) : nul
 $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60, 'retry_interval_sec' => 20, 'retries' => 1, 'connect_timeout' => 5, 'total_timeout' => 10, 'stabilize' => 3, 'ip_mode' => 'auto',
 	'tags' => '', 'group_name' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
 	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
-	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0,
+	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0, 'cert_min_days' => 14,
 	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '');
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
 $src = $old ?: $cloneOf;
@@ -24,6 +24,7 @@ if ($src) {
 	$f['connect_timeout'] = $src['connect_timeout_ms'] / 1000; $f['total_timeout'] = $src['total_timeout_ms'] / 1000;
 	$f['parent_token'] = (string)$src['parent_token']; $f['channels'] = hc2_check_channels($src); $f['node_id'] = (string)$src['node_id']; $f['locations'] = array_filter(explode(',', $src['locations']));
 	$p = hc2_check_params($src);
+	if (!isset($p['cert_min_days'])) { $f['cert_min_days'] = 0; }
 	foreach ($p as $k => $v) {
 		if ($k === 'headers' && is_array($v)) { $lines = array(); foreach ($v as $hk => $hv) { $lines[] = $hk . ': ' . $hv; } $f['headers'] = implode("\n", $lines); }
 		elseif ($k === 'follow_redirects') { $f['follow_redirects'] = $v ? 1 : 0; }
@@ -103,6 +104,7 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 								</div>
 								<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="insecure_tls" name="insecure_tls" value="1"<?php echo $chk('insecure_tls'); ?>><label class="custom-control-label" for="insecure_tls">Zertifikatsfehler ignorieren</label></div>
 							</div>
+							<div class="form-row mt-2"><div class="form-group col-md-6"><label><i class="fa-solid fa-lock text-success"></i> Zertifikat: warnen unter</label><div class="input-group"><input class="form-control" type="number" name="cert_min_days" min="0" max="3650" value="<?php echo $val('cert_min_days'); ?>"><div class="input-group-append"><span class="input-group-text">Tagen</span></div></div><small class="form-text text-muted">HTTPS: gestört melden, wenn das Zertifikat in weniger Tagen abläuft (0 = aus). Das Ablaufdatum wird immer mitgelesen.</small></div></div>
 						</div>
 						<!-- ICMP -->
 						<div class="form-row" data-type="icmp">

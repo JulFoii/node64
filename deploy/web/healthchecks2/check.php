@@ -51,6 +51,7 @@ if ($c['execution'] === 'both') {
 		<h4 class="mb-0"><?php echo hc2_h($c['name']); ?></h4>
 		<?php echo hc2_state_badge($state); echo hc2_exec_badge($c, $nodes); ?>
 		<span class="badge badge-light"><?php echo hc2_h(hc2_types()[$c['type']] ?? $c['type']); ?></span>
+		<?php if (in_array($c['type'], array('http', 'keyword'), true)) { echo hc2_cert_badge(hc2_cert_until(array_merge(array($c['last_message']), array_column($sources, 'last_message')))); } ?>
 		<?php if ((int)$c['critical']) { echo '<span class="badge badge-danger">kritisch</span>'; } foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { echo '<span class="badge badge-pill badge-secondary">' . hc2_h($t) . '</span>'; } } ?>
 		<form method="post" class="ml-auto d-inline"><?php echo hc2_csrf_field(); ?>
 			<a class="btn btn-sm btn-outline-secondary" href="<?php echo HC2_BASE; ?>/edit.php?token=<?php echo hc2_h($T); ?>"><i class="fa-solid fa-pen"></i> Bearbeiten</a>
