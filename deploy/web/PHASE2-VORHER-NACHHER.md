@@ -16,19 +16,23 @@ Das Geheimnis liegt auf beiden hubs in `/etc/ipv64-hub/bridge.secret`. Es muss *
 
 Ich kann es dir nicht in den Chat schreiben; hol es dir von hc-srv01: `cat /etc/ipv64-hub/bridge.secret` – oder sag Bescheid, dann lege ich es auf hc-srv01 unter `/root/hc2_bridge.secret` ab.
 
-## 3. Schlüssel für Kanal-Geheimnisse (aus Phase 1)
+## 3. Schlüssel für Kanal-Geheimnisse – jetzt als Text
 
-`hc2_secret.key` (32 Rohbytes) muss auf Web-Server **und** beiden hubs gleich sein, sonst kann der hub Telegram-Tokens usw. nicht lesen, die das Portal verschlüsselt hat:
+Der Schlüssel ist ab jetzt eine **Textdatei mit 64 Hex-Zeichen** (eine Zeile), damit er kopierbar ist. Ich habe ihn auf hc-srv01 erzeugt und auf beide hubs verteilt. Auf dem Web-Server:
 
-- Web-Server: `/var/www/clients/client1/web58/private/hc2_secret.key` (hast du in Phase 1 angelegt)
-- hubs: `/var/lib/ipv64-hub/secret.key`
+```bash
+# Inhalt von hc-srv01:/var/lib/ipv64-hub/secret.key (64 Hex-Zeichen) nach
+/var/www/clients/client1/web58/private/hc2_secret.key      (ersetzt die alte, unlesbare Datei; chmod 640)
+```
 
-Lege die Datei auf hc-srv01 unter `/root/hc2_secret.key` ab (z. B. per `scp`), ich verteile sie dann auf beide hubs mit den richtigen Rechten. Solange sie fehlt, loggt der hub beim Start eine Warnung und Kanäle mit Geheimnissen schlagen beim Senden fehl – Checks laufen trotzdem.
+Die PHP-Funktionen `hc2_encrypt()`/`hc2_decrypt()` lesen beides (Hex-Text oder 32 Rohbytes). Dafür den hc2-Block in `dbconnect.php` einmal durch den aktuellen `dbconnect_hc2.php` ersetzen – oder nur die zwei Funktionen am Ende des Blocks (neu dazu: `hc2_key_bytes()`).
+
+Noch ist nichts mit dem alten Schlüssel verschlüsselt (die neue Welt ist leer), ein Tausch ist also folgenlos.
 
 ## Prüfen
 
 Nach Schritt 1+2 kann ich vom hub aus eine Testmail an die Adresse des Testaccounts schicken (`ipv64_mail`-Kanal) und eine Test-SMS, wenn du eine Nummer für den Testaccount hinterlegst.
 
-## SMS-Limit (Rückfrage)
+## SMS-Limit
 
-Heute zählt `users.sms_count` gegen `user_class.sms_limit` (das Feld wird von `send_sms()` hochgezählt). Der hub zählt zusätzlich **pro Tag** in `hc2_sms_counter` gegen dasselbe Limit und verweigert darüber. Wenn das Limit bei dir pro Monat gemeint ist, sag Bescheid – dann stelle ich den Zähler um.
+`user_class.sms_limit` gilt **pro Tag** (bestätigt). Der hub zählt in `hc2_sms_counter` je Account und Tag und verweigert darüber; `send_sms()` erhöht zusätzlich wie bisher `users.sms_count`.

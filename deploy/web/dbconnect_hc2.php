@@ -107,17 +107,24 @@ function hc2_push(string $token, array $get): bool {
 }
 
 /** Verschluesselung kompatibel zum Agent/hub (AES-256-GCM, "enc:v1:" + Base64 ohne Padding). */
+/** Schluessel lesen: 64 Hex-Zeichen (Textdatei, kopierbar) oder 32 Rohbytes. */
+function hc2_key_bytes(): string {
+	$raw = is_file(HC2_KEY_FILE) ? (string)file_get_contents(HC2_KEY_FILE) : '';
+	$t = trim($raw);
+	if (strlen($t) === 64 && ctype_xdigit($t)) { return (string)hex2bin($t); }
+	return $raw;
+}
 function hc2_encrypt(string $plain): string {
 	if ($plain === '') { return ''; }
-	$key = is_file(HC2_KEY_FILE) ? file_get_contents(HC2_KEY_FILE) : '';
-	if (strlen($key) !== 32) { throw new RuntimeException('hc2: Schluesseldatei fehlt oder hat nicht 32 Bytes'); }
+	$key = hc2_key_bytes();
+	if (strlen($key) !== 32) { throw new RuntimeException('hc2: Schluesseldatei fehlt oder ist ungueltig (64 Hex-Zeichen erwartet)'); }
 	$nonce = random_bytes(12); $tag = '';
 	$ct = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $nonce, $tag, '', 16);
 	return 'enc:v1:' . rtrim(base64_encode($nonce . $ct . $tag), '=');
 }
 function hc2_decrypt(string $value): string {
 	if (strncmp($value, 'enc:v1:', 7) !== 0) { return $value; }
-	$key = is_file(HC2_KEY_FILE) ? file_get_contents(HC2_KEY_FILE) : '';
+	$key = hc2_key_bytes();
 	$raw = base64_decode(substr($value, 7) . str_repeat('=', (4 - strlen(substr($value, 7)) % 4) % 4));
 	if ($raw === false || strlen($raw) < 28 || strlen($key) !== 32) { return ''; }
 	$plain = openssl_decrypt(substr($raw, 12, -16), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, -16));
