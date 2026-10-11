@@ -19,3 +19,5 @@ ALTER TABLE `hc2_config_log` CHANGE `agent_id` `node_id` VARCHAR(32) NULL,
   MODIFY `entity` ENUM('check','channel','maintenance','node','settings') NOT NULL;
 UPDATE `hc2_config_log` SET `entity` = 'node' WHERE `entity` = 'agent';
 INSERT IGNORE INTO `hc2_schema_version` (`version`, `applied_at`) VALUES (2, UTC_TIMESTAMP(3));
+ALTER TABLE `hc2_config_log` MODIFY `origin` ENUM('portal','api','node','system') NOT NULL;
+UPDATE `hc2_config_log` SET `origin` = 'node' WHERE `origin` = 'agent';
