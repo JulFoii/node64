@@ -126,7 +126,7 @@ function hc2_locations(): array {
 // ---------------------------------------------------------------- Checks: Definitionen
 
 function hc2_types(): array {
-	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat');
+	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat', 'docker' => 'Docker-Container');
 }
 function hc2_states(): array {
 	return array('up' => array('OK', 'success'), 'down' => array('Gestört', 'danger'), 'degraded' => array('Teilweise gestört', 'warning'), 'flapping' => array('Instabil', 'warning'),
@@ -244,6 +244,10 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if ($type === 'port') { $e = (string)($in['expect'] ?? 'open'); if ($e === 'closed') { $p['expect'] = 'closed'; } }
 			if ($type === 'cert') { if (($d = $num('min_days', 14, 0, 3650)) !== 14) { $p['min_days'] = $d; } if (($sn = trim((string)($in['server_name'] ?? ''))) !== '') { $p['server_name'] = $sn; } if ($flag('skip_chain')) { $p['skip_chain'] = true; } if ($flag('skip_hostname')) { $p['skip_hostname'] = true; } }
 			break;
+		case 'docker':
+			if (!preg_match('/^\/?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/', $target)) { $err[] = 'Containername oder -ID fehlt (Buchstaben, Ziffern, _ . -).'; }
+			if (($h = trim((string)($in['docker_host'] ?? ''))) !== '') { if (!preg_match('#^(unix|tcp|https?)://#', $h)) { $err[] = 'Docker-Host muss mit unix://, tcp:// oder http(s):// beginnen.'; } else { $p['host'] = $h; } }
+			break;
 		case 'push':
 			$target = '';
 			if (($ps = $num('period_seconds', 3600, 20, 31536000)) !== 3600) { $p['period_seconds'] = $ps; }
@@ -280,7 +284,8 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	if (!$sel) { $sel = array_keys($locs); }
 	if (count($sel) > $acc['hc_locations']) { $sel = array_slice($sel, 0, $acc['hc_locations']); }
 	$policy = (string)($in['policy'] ?? 'all'); if (!in_array($policy, array('all','any','majority'), true)) { $policy = 'all'; }
-	if ($execution !== 'local') {
+	if ($type === 'docker' && $execution !== 'local') { $err[] = 'Docker-Checks laufen nur lokal auf einer Node und sind nicht umhängbar.'; }
+	if ($execution !== 'local' && $type !== 'docker') {
 		if (hc2_private_target($type, $target)) { $err[] = 'Online-Checks können keine privaten Ziele prüfen (Heimnetz, localhost, .local). Dafür eine Node nutzen.'; }
 		$used = hc2_online_used($userid, $old['token'] ?? '');
 		if ($acc['healthcheck_limit'] > 0 && $used + count($sel) > $acc['healthcheck_limit']) {
@@ -371,6 +376,7 @@ function hc2_wire_def(array $c): array {
 function hc2_testrun_create(int $userid, array $c, string $target, ?string $nodeId, array $locations): array {
 	$acc = hc2_account($userid); $nodes = hc2_nodes($userid);
 	if (!in_array($target, array('local','online','both'), true)) { return array('id' => 0, 'error' => 'Ungültiger Ausführungsort.'); }
+	if ($c['type'] === 'docker') { return array('id' => 0, 'error' => 'Docker-Checks laufen nur lokal auf ihrer Node und sind nicht umhängbar.'); }
 	if ($target !== 'online') {
 		if (!$nodeId || !isset($nodes[$nodeId])) { return array('id' => 0, 'error' => 'Node nicht gefunden oder getrennt.'); }
 		if ((int)$nodes[$nodeId]['online'] !== 1) { return array('id' => 0, 'error' => 'Die Node ist offline; der Testlauf braucht eine verbundene Node.'); }

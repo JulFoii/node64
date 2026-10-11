@@ -16,7 +16,7 @@ $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60,
 	'tags' => '', 'group_name' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
 	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
 	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0,
-	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600);
+	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '');
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
 $src = $old ?: $cloneOf;
 if ($src) {
@@ -28,6 +28,7 @@ if ($src) {
 		if ($k === 'headers' && is_array($v)) { $lines = array(); foreach ($v as $hk => $hv) { $lines[] = $hk . ': ' . $hv; } $f['headers'] = implode("\n", $lines); }
 		elseif ($k === 'follow_redirects') { $f['follow_redirects'] = $v ? 1 : 0; }
 		elseif ($k === 'expect' && $src['type'] === 'port') { $f['expect'] = $v; }
+		elseif ($k === 'host' && $src['type'] === 'docker') { $f['docker_host'] = $v; }
 		else { $f[$k] = is_bool($v) ? ($v ? 1 : 0) : $v; }
 	}
 	if ($cloneOf && !$old) { $f['name'] .= ' (Kopie)'; }
@@ -119,6 +120,11 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="form-group col-md-6" data-type="cert"><label>Servername (SNI, optional)</label><input class="form-control" name="server_name" value="<?php echo $val('server_name'); ?>"></div>
 							<div class="form-group col-12" data-type="tcp"><div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="tls" name="tls" value="1"<?php echo $chk('tls'); ?>><label class="custom-control-label" for="tls">TLS-Handshake nach dem Verbinden</label></div></div>
 							<div class="form-group col-12" data-type="cert"><div class="custom-control custom-checkbox custom-control-inline"><input class="custom-control-input" type="checkbox" id="skip_chain" name="skip_chain" value="1"<?php echo $chk('skip_chain'); ?>><label class="custom-control-label" for="skip_chain">Kette nicht prüfen (private CA)</label></div><div class="custom-control custom-checkbox custom-control-inline"><input class="custom-control-input" type="checkbox" id="skip_hostname" name="skip_hostname" value="1"<?php echo $chk('skip_hostname'); ?>><label class="custom-control-label" for="skip_hostname">Hostname nicht prüfen</label></div></div>
+						</div>
+						<!-- Docker -->
+						<div class="form-row" data-type="docker">
+							<div class="form-group col-12"><label>Docker-Host (leer = Standard der Node)</label><input class="form-control text-monospace" name="docker_host" value="<?php echo $val('docker_host'); ?>" placeholder="unix:///var/run/docker.sock"></div>
+							<div class="col-12"><div class="alert alert-info small">Ziel = Name oder ID des Containers auf der Node. Docker-Checks laufen nur lokal auf der gewählten Node und sind nicht umhängbar.</div></div>
 						</div>
 						<!-- Push -->
 						<div class="form-row" data-type="push">
