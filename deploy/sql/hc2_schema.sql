@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS `hc2_checks` (
   `stabilize`          TINYINT NOT NULL DEFAULT 3,
   `ip_mode`            ENUM('auto','ipv4','ipv6','both') NOT NULL DEFAULT 'auto',
   `tags`               VARCHAR(255) NOT NULL DEFAULT '',
+  `group_name`         VARCHAR(100) NOT NULL DEFAULT '',          -- Gruppe (frei benannt, fuer die Anzeige)
   `description`        TEXT NULL,
   `paused`             TINYINT NOT NULL DEFAULT 0,
   `parent_token`       VARCHAR(50) NULL,
@@ -158,7 +159,7 @@ CREATE TABLE IF NOT EXISTS `hc2_check_states` (
   `consecutive_ok`   SMALLINT NOT NULL DEFAULT 0,
   `down_since`       DATETIME(3) NULL,
   `updated_at`       DATETIME(3) NULL,
-  PRIMARY KEY (`token`,`source`)
+  PRIMARY KEY (`token`,`source`), KEY `updated` (`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Messpunkte, 7 Tage roh, tagesweise partitioniert. Der hub legt taeglich die naechste
