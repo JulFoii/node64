@@ -9920,6 +9920,15 @@
             }
           },
           {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "description": "Gruppe",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "q",
             "in": "query",
             "required": false,
@@ -15651,6 +15660,11 @@
             },
             "description": "Tags"
           },
+          "group": {
+            "type": "string",
+            "description": "Gruppe (frei benannt)",
+            "example": "Heimnetz"
+          },
           "description": {
             "type": "string",
             "description": "Beschreibung"
@@ -16091,6 +16105,11 @@
               "type": "string"
             },
             "description": "Tags"
+          },
+          "group": {
+            "type": "string",
+            "description": "Gruppe (frei benannt)",
+            "example": "Heimnetz"
           },
           "description": {
             "type": "string",

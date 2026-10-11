@@ -13,14 +13,14 @@ $cloneOf = isset($_GET['clone']) ? hc2_check($uid, (string)$_GET['clone']) : nul
 
 // Formularwerte (Standard / aus Check / aus POST)
 $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60, 'retry_interval_sec' => 20, 'retries' => 1, 'connect_timeout' => 5, 'total_timeout' => 10, 'stabilize' => 3, 'ip_mode' => 'auto',
-	'tags' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
+	'tags' => '', 'group_name' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
 	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
 	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0,
 	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600);
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
 $src = $old ?: $cloneOf;
 if ($src) {
-	foreach (array('type','name','target','interval_sec','retry_interval_sec','retries','stabilize','ip_mode','tags','description','repeat_minutes','notify_down','notify_up','notify_degraded','critical','invert','paused','execution','policy') as $k) { $f[$k] = $src[$k]; }
+	foreach (array('type','name','target','interval_sec','retry_interval_sec','retries','stabilize','ip_mode','tags','group_name','description','repeat_minutes','notify_down','notify_up','notify_degraded','critical','invert','paused','execution','policy') as $k) { $f[$k] = $src[$k]; }
 	$f['connect_timeout'] = $src['connect_timeout_ms'] / 1000; $f['total_timeout'] = $src['total_timeout_ms'] / 1000;
 	$f['parent_token'] = (string)$src['parent_token']; $f['channels'] = hc2_check_channels($src); $f['node_id'] = (string)$src['node_id']; $f['locations'] = array_filter(explode(',', $src['locations']));
 	$p = hc2_check_params($src);
@@ -126,6 +126,9 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="form-group col-md-6"><label>Kulanz (s)</label><input class="form-control" type="number" name="grace_seconds" value="<?php echo $val('grace_seconds'); ?>" min="0"></div>
 						</div>
 						<div class="form-row">
+							<div class="form-group col-md-6"><label>Gruppe</label><div class="input-group"><div class="input-group-prepend"><span class="input-group-text"><i class="fa-solid fa-layer-group text-primary"></i></span></div><input class="form-control" name="group_name" value="<?php echo $val('group_name'); ?>" maxlength="100" list="hc2-groups" placeholder="z. B. Heimnetz, Webseiten"></div>
+								<datalist id="hc2-groups"><?php $gs = array(); foreach ($others as $o) { if ($o['group_name'] !== '' && !isset($gs[$o['group_name']])) { $gs[$o['group_name']] = 1; echo '<option value="' . hc2_h($o['group_name']) . '">'; } } ?></datalist>
+								<small class="form-text text-muted">Checks mit gleicher Gruppe stehen in der Übersicht zusammen.</small></div>
 							<div class="form-group col-md-6"><label>Tags (Komma oder Leerzeichen)</label><input class="form-control" name="tags" value="<?php echo $val('tags'); ?>"></div>
 							<div class="form-group col-md-6"><label>Abhängig von</label><select class="custom-select" name="parent_token"><option value="">– keine –</option><?php foreach ($others as $o) { echo '<option value="' . hc2_h($o['token']) . '"' . $sel('parent_token', $o['token']) . '>' . hc2_h($o['name']) . '</option>'; } ?></select><small class="form-text text-muted">Ist der übergeordnete Check gestört, wird dieser nicht gemeldet.</small></div>
 						</div>

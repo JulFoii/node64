@@ -37,7 +37,7 @@ function hc2_check_out(array $c, bool $detail = false): array {
 		'token' => $c['token'], 'name' => $c['name'], 'type' => $c['type'], 'target' => $c['target'], 'params' => hc2_check_params($c) ?: new stdClass(),
 		'interval_seconds' => (int)$c['interval_sec'], 'retry_interval_seconds' => (int)$c['retry_interval_sec'], 'retries' => (int)$c['retries'],
 		'connect_timeout_seconds' => (int)$c['connect_timeout_ms'] / 1000, 'timeout_seconds' => (int)$c['total_timeout_ms'] / 1000,
-		'invert' => (int)$c['invert'] === 1, 'stabilize' => (int)$c['stabilize'], 'ip_mode' => $c['ip_mode'], 'tags' => array_values(array_filter(explode(',', (string)$c['tags']))),
+		'invert' => (int)$c['invert'] === 1, 'stabilize' => (int)$c['stabilize'], 'ip_mode' => $c['ip_mode'], 'tags' => array_values(array_filter(explode(',', (string)$c['tags']))), 'group' => (string)$c['group_name'],
 		'description' => (string)$c['description'], 'paused' => (int)$c['paused'] === 1, 'parent' => (string)$c['parent_token'], 'critical' => (int)$c['critical'] === 1,
 		'execution' => $c['execution'], 'node_id' => $c['node_id'], 'node_name' => $c['node_id'] ? hc2_node_label($nodes, $c['node_id']) : null,
 		'locations' => array_values(array_filter(explode(',', (string)$c['locations']))), 'policy' => $c['policy'], 'notify_degraded' => (int)$c['notify_degraded'] === 1,
@@ -118,6 +118,7 @@ function hc2_check_input(?array $old): array {
 	$f['connect_timeout'] = isset($b['connect_timeout_seconds']) ? (string)(float)$b['connect_timeout_seconds'] : (string)(($old['connect_timeout_ms'] ?? 5000) / 1000);
 	$f['total_timeout'] = isset($b['timeout_seconds']) ? (string)(float)$b['timeout_seconds'] : (string)(($old['total_timeout_ms'] ?? 10000) / 1000);
 	$f['ip_mode'] = (string)($b['ip_mode'] ?? ($old['ip_mode'] ?? 'auto'));
+	$f['group_name'] = isset($b['group']) ? (string)$b['group'] : (string)($old['group_name'] ?? '');
 	$f['tags'] = isset($b['tags']) ? (is_array($b['tags']) ? implode(',', $b['tags']) : (string)$b['tags']) : (string)($old['tags'] ?? '');
 	$f['description'] = (string)($b['description'] ?? ($old['description'] ?? ''));
 	$f['parent_token'] = (string)($b['parent'] ?? ($old['parent_token'] ?? ''));
@@ -185,6 +186,7 @@ route('GET', '/hc2/checks', function() {
 	if (($e = qp('execution')) !== null) { $list = array_filter($list, fn($c) => $c['execution'] === $e); }
 	if (($n = qp('node_id')) !== null) { $list = array_filter($list, fn($c) => (string)$c['node_id'] === $n); }
 	if (($g = qp('tag')) !== null) { $list = array_filter($list, fn($c) => in_array($g, explode(',', $c['tags']), true)); }
+	if (($gr = qp('group')) !== null) { $list = array_filter($list, fn($c) => $c['group_name'] === $gr); }
 	if (($q = qp('q')) !== null && $q !== '') { $list = array_filter($list, fn($c) => stripos($c['name'] . ' ' . $c['target'], $q) !== false); }
 	ok(array_values(array_map(fn($c) => hc2_check_out($c), $list)));
 });

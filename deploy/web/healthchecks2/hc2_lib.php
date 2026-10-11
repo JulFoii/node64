@@ -259,6 +259,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	$ipMode = (string)($in['ip_mode'] ?? 'auto'); if (!in_array($ipMode, array('auto','ipv4','ipv6','both'), true)) { $ipMode = 'auto'; }
 	$tags = array(); foreach (preg_split('/[,\s]+/', (string)($in['tags'] ?? '')) as $t) { $t = trim($t); if ($t !== '' && !in_array($t, $tags, true)) { $tags[] = mb_substr($t, 0, 40); } }
 	$tags = implode(',', array_slice($tags, 0, 20)); if (strlen($tags) > 255) { $tags = substr($tags, 0, 255); }
+	$group = mb_substr(trim((string)($in['group_name'] ?? '')), 0, 100);
 	$desc = mb_substr(trim((string)($in['description'] ?? '')), 0, 5000);
 	$parent = trim((string)($in['parent_token'] ?? ''));
 	if ($parent !== '') {
@@ -289,7 +290,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	$row = array(
 		'type' => $type, 'name' => $name, 'target' => $target, 'params' => json_encode($p ?: new stdClass(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
 		'interval_sec' => $interval, 'retry_interval_sec' => $retryInt, 'retries' => $retries, 'connect_timeout_ms' => (int)round($cto * 1000), 'total_timeout_ms' => (int)round($tto * 1000),
-		'invert' => $flag('invert') ? 1 : 0, 'stabilize' => $stab, 'ip_mode' => $ipMode, 'tags' => $tags, 'description' => $desc, 'paused' => $flag('paused') ? 1 : 0,
+		'invert' => $flag('invert') ? 1 : 0, 'stabilize' => $stab, 'ip_mode' => $ipMode, 'tags' => $tags, 'group_name' => $group, 'description' => $desc, 'paused' => $flag('paused') ? 1 : 0,
 		'parent_token' => $parent !== '' ? $parent : null, 'critical' => $flag('critical') ? 1 : 0, 'notify_down' => $flag('notify_down') ? 1 : 0, 'notify_up' => $flag('notify_up') ? 1 : 0,
 		'channels' => implode(',', $channels), 'repeat_minutes' => $repeat,
 		'execution' => $execution, 'node_id' => $execution === 'online' ? ($old['node_id'] ?? null) : $nodeId, 'locations' => implode(',', $sel), 'policy' => $policy, 'notify_degraded' => $flag('notify_degraded') ? 1 : 0,

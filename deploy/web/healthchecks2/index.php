@@ -39,23 +39,25 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 try { $all = hc2_checks($uid); } catch (Throwable $e) { error_log('hc2 index: ' . $e->getMessage()); $all = array(); echo '<div class="container"><div class="alert alert-danger mt-3">Healthchecks derzeit nicht abrufbar.</div></div>'; include("../footer.php"); exit; }
 $stateOf = function(array $c): string { if ((int)$c['paused']) { return 'paused'; } return $c['state'] ?: 'pending'; };
 $counts = array('up' => 0, 'down' => 0, 'degraded' => 0, 'paused' => 0, 'other' => 0, 'online' => 0, 'local' => 0, 'both' => 0);
-$allTags = array();
+$allTags = array(); $allGroups = array();
 foreach ($all as $c) {
 	$s = $stateOf($c); if (isset($counts[$s])) { $counts[$s]++; } else { $counts['other']++; }
 	$counts[$c['execution']]++;
 	foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { $allTags[$t] = true; } }
+	if ($c['group_name'] !== '') { $allGroups[$c['group_name']] = true; }
 }
-ksort($allTags);
+ksort($allTags); uksort($allGroups, 'strcasecmp');
 // Filter
-$q = trim((string)($_GET['q'] ?? '')); $fState = (string)($_GET['state'] ?? ''); $fType = (string)($_GET['type'] ?? ''); $fExec = (string)($_GET['exec'] ?? ''); $fNode = (string)($_GET['node'] ?? ''); $fTag = (string)($_GET['tag'] ?? '');
+$q = trim((string)($_GET['q'] ?? '')); $fState = (string)($_GET['state'] ?? ''); $fType = (string)($_GET['type'] ?? ''); $fExec = (string)($_GET['exec'] ?? ''); $fNode = (string)($_GET['node'] ?? ''); $fTag = (string)($_GET['tag'] ?? ''); $fGroup = (string)($_GET['group'] ?? '');
 $sort = (string)($_GET['sort'] ?? 'name');
-$list = array_values(array_filter($all, function($c) use ($q, $fState, $fType, $fExec, $fNode, $fTag, $stateOf) {
+$list = array_values(array_filter($all, function($c) use ($q, $fState, $fType, $fExec, $fNode, $fTag, $fGroup, $stateOf) {
 	if ($q !== '' && stripos($c['name'] . ' ' . $c['target'] . ' ' . $c['tags'], $q) === false) { return false; }
 	if ($fState !== '' && $stateOf($c) !== $fState) { return false; }
 	if ($fType !== '' && $c['type'] !== $fType) { return false; }
 	if ($fExec !== '' && $c['execution'] !== $fExec) { return false; }
 	if ($fNode !== '' && (string)$c['node_id'] !== $fNode) { return false; }
 	if ($fTag !== '' && !in_array($fTag, explode(',', $c['tags']), true)) { return false; }
+	if ($fGroup !== '' && $c['group_name'] !== $fGroup) { return false; }
 	return true;
 }));
 $rank = array('down' => 0, 'degraded' => 1, 'flapping' => 2, 'pending' => 3, 'up' => 4, 'paused' => 5);
@@ -68,6 +70,11 @@ usort($list, function($a, $b) use ($sort, $stateOf, $rank) {
 		default: return strcasecmp($a['name'], $b['name']);
 	}
 });
+if ($allGroups) {
+	$order = array(); $i = 0; foreach (array_keys($allGroups) as $g) { $order[$g] = $i++; }
+	$pos = array(); foreach ($list as $k => $c) { $pos[$c['token']] = $k; }
+	usort($list, function($a, $b) use ($order, $pos) { $ga = $order[$a['group_name']] ?? PHP_INT_MAX; $gb = $order[$b['group_name']] ?? PHP_INT_MAX; return $ga <=> $gb ?: $pos[$a['token']] <=> $pos[$b['token']]; });
+}
 $pills = hc2_pills_many(array_column($list, 'token'), 30, $nodes);
 $used = hc2_online_used($uid); $limit = $acc['healthcheck_limit'];
 $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_merge($_GET, $over)); };
@@ -95,11 +102,12 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 		<select class="custom-select custom-select-sm" name="type"><option value="">Alle Typen</option><?php foreach (hc2_types() as $k => $v) { echo '<option value="' . $k . '"' . ($fType === $k ? ' selected' : '') . '>' . hc2_h($v) . '</option>'; } ?></select>
 		<select class="custom-select custom-select-sm" name="exec"><option value="">Alle Ausführungsorte</option><option value="online"<?php echo $fExec === 'online' ? ' selected' : ''; ?>>Online (ipv64)</option><option value="local"<?php echo $fExec === 'local' ? ' selected' : ''; ?>>Lokal (Node)</option><option value="both"<?php echo $fExec === 'both' ? ' selected' : ''; ?>>Hybrid</option></select>
 		<?php if ($nodes) { ?><select class="custom-select custom-select-sm" name="node"><option value="">Alle Nodes</option><?php foreach ($nodes as $id => $n) { echo '<option value="' . hc2_h($id) . '"' . ($fNode === $id ? ' selected' : '') . '>' . hc2_h(hc2_node_label($nodes, $id)) . '</option>'; } ?></select><?php } ?>
+		<?php if ($allGroups) { ?><select class="custom-select custom-select-sm" name="group"><option value="">Alle Gruppen</option><?php foreach (array_keys($allGroups) as $g) { echo '<option value="' . hc2_h($g) . '"' . ($fGroup === $g ? ' selected' : '') . '>' . hc2_h($g) . '</option>'; } ?></select><?php } ?>
 		<?php if ($allTags) { ?><select class="custom-select custom-select-sm" name="tag"><option value="">Alle Tags</option><?php foreach (array_keys($allTags) as $t) { echo '<option value="' . hc2_h($t) . '"' . ($fTag === $t ? ' selected' : '') . '>' . hc2_h($t) . '</option>'; } ?></select><?php } ?>
 		<select class="custom-select custom-select-sm" name="sort"><?php foreach (array('name' => 'Name', 'state' => 'Zustand', 'changed' => 'Zuletzt geändert', 'latency' => 'Latenz', 'type' => 'Typ') as $k => $v) { echo '<option value="' . $k . '"' . ($sort === $k ? ' selected' : '') . '>Sortierung: ' . $v . '</option>'; } ?></select>
 		<?php if ($fState !== '') { echo '<input type="hidden" name="state" value="' . hc2_h($fState) . '">'; } ?>
 		<button class="btn btn-sm btn-outline-secondary" type="submit">Filtern</button>
-		<?php if ($q !== '' || $fState !== '' || $fType !== '' || $fExec !== '' || $fNode !== '' || $fTag !== '') { ?><a class="btn btn-sm btn-link" href="<?php echo HC2_BASE; ?>/">Zurücksetzen</a><?php } ?>
+		<?php if ($q !== '' || $fState !== '' || $fType !== '' || $fExec !== '' || $fNode !== '' || $fTag !== '' || $fGroup !== '') { ?><a class="btn btn-sm btn-link" href="<?php echo HC2_BASE; ?>/">Zurücksetzen</a><?php } ?>
 	</form>
 	<form method="post" id="bulk">
 		<?php echo hc2_csrf_field(); ?>
@@ -117,7 +125,9 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked});"></th><th>Zustand</th><th>Name</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
 				<tbody>
 				<?php if (!$list) { echo '<tr><td colspan="8" class="text-muted p-3">Keine Checks' . ($all ? ' für diesen Filter' : '') . '. <a href="' . HC2_BASE . '/edit.php">Ersten Check anlegen</a>' . ($nodes ? '' : ' oder eine <a href="/link.php">Node verknüpfen</a>') . '.</td></tr>'; } ?>
-				<?php foreach ($list as $c) { $s = $stateOf($c); ?>
+				<?php $lastGroup = null; foreach ($list as $c) { $s = $stateOf($c);
+					if ($allGroups && $c['group_name'] !== $lastGroup) { $lastGroup = $c['group_name']; $gUp = 0; $gDown = 0; $gOther = 0; foreach ($list as $x) { if ($x['group_name'] === $lastGroup) { $xs = $stateOf($x); if ($xs === 'up') { $gUp++; } elseif ($xs === 'down') { $gDown++; } else { $gOther++; } } }
+						echo '<tr class="table-light"><td colspan="8" class="py-1"><i class="fa-solid fa-layer-group text-primary"></i> <strong>' . hc2_h($lastGroup !== '' ? $lastGroup : 'Ohne Gruppe') . '</strong> <span class="ml-2 small">' . ($gUp ? '<span class="badge badge-success">' . $gUp . '</span> ' : '') . ($gDown ? '<span class="badge badge-danger">' . $gDown . '</span> ' : '') . ($gOther ? '<span class="badge badge-secondary">' . $gOther . '</span>' : '') . '</span></td></tr>'; } ?>
 				<tr>
 					<td><input type="checkbox" name="tokens[]" value="<?php echo hc2_h($c['token']); ?>"></td>
 					<td><?php echo hc2_state_badge($s); if ($c['last_reason'] && $s !== 'up' && $s !== 'paused') { echo '<br><small class="text-muted">' . hc2_h(hc2_reason_text($c['last_reason'])) . '</small>'; } ?></td>
