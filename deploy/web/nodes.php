@@ -11,7 +11,7 @@ $msg = '';
 try {
 	$hc = hc2_pdo();
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && hash_equals($_SESSION['hc2_csrf'], (string)($_POST['_csrf'] ?? ''))) {
-		$nid = preg_replace('/[^a-f0-9]/', '', (string)($_POST['node_id'] ?? ''));
+		$nid = preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_POST['node_id'] ?? ''));
 		$action = (string)($_POST['action'] ?? '');
 		if ($nid !== '') {
 			$own = $hc->prepare("SELECT node_id FROM hc2_nodes WHERE node_id = :n AND userid = :u");
