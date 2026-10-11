@@ -95,9 +95,9 @@ function hc2_online_used(int $userid, string $except = ''): int {
 }
 
 /** Aktive Nodes des Accounts, Schluessel node_id. */
-function hc2_nodes(int $userid): array {
+function hc2_nodes(int $userid, bool $fresh = false): array {
 	static $cache = array();
-	if (isset($cache[$userid])) { return $cache[$userid]; }
+	if (isset($cache[$userid]) && !$fresh) { return $cache[$userid]; }
 	$st = hc2_pdo()->prepare("SELECT node_id, name, location, version, remote_mgmt, online, last_seen, last_sync, outbox_size, conflicts, modules, timezone, created_at FROM hc2_nodes WHERE userid = :u AND revoked_at IS NULL ORDER BY name");
 	$st->execute(array('u' => $userid));
 	$out = array();
