@@ -41,7 +41,7 @@ function hc2_next_revision(int $userid): int {
  * Konfigurationsaenderung protokollieren: schreibt die Revision an die Entitaet, eine Zeile ins
  * Config-Log und schickt das Redis-Signal. Aufruf NACH dem eigentlichen UPDATE/INSERT/DELETE
  * (alles ueber hc2_pdo(), eigene Verbindung).
- *   $entity: check | channel | maintenance | agent | settings
+ *   $entity: check | channel | maintenance | node | settings
  *   $op:     upsert | delete
  * Liefert die vergebene Revision.
  */
@@ -56,7 +56,7 @@ function hc2_log_change(int $userid, string $entity, string $entityId, string $o
 			: "UPDATE `$db`.$t SET revision = :r, updated_at = UTC_TIMESTAMP(3) WHERE $col = :id AND userid = :u";
 		$pdo->prepare($sql)->execute(array('r' => $rev, 'id' => $entityId, 'u' => $userid));
 	}
-	$pdo->prepare("INSERT INTO `$db`.hc2_config_log (userid, agent_id, entity, entity_id, op, revision, origin, time) VALUES (:u, :a, :e, :i, :o, :r, :g, UTC_TIMESTAMP(3))")
+	$pdo->prepare("INSERT INTO `$db`.hc2_config_log (userid, node_id, entity, entity_id, op, revision, origin, time) VALUES (:u, :a, :e, :i, :o, :r, :g, UTC_TIMESTAMP(3))")
 		->execute(array('u' => $userid, 'a' => $agentId, 'e' => $entity, 'i' => $entityId, 'o' => $op, 'r' => $rev, 'g' => $origin));
 	hc2_signal('hc2:cfg:' . $userid, (string)$rev);
 	return $rev;
@@ -94,7 +94,7 @@ function hc2_push(string $token, array $get): bool {
 		$down = (isset($get['status']) && strtolower((string)$get['status']) === 'down') || isset($get['fail']);
 		$msg = mb_substr((string)($get['msg'] ?? $get['message'] ?? ''), 0, 500);
 		$details = json_encode(array('from' => $_SERVER['REMOTE_ADDR'] ?? '', 'via' => 'health.php'));
-		$pdo->prepare("INSERT IGNORE INTO `$db`.hc2_measurements (token, source, agent_seq, time, status, latency_ms, reason, message, details, received_at)
+		$pdo->prepare("INSERT IGNORE INTO `$db`.hc2_measurements (token, source, node_seq, time, status, latency_ms, reason, message, details, received_at)
 			VALUES (:t, 'push', 0, UTC_TIMESTAMP(3), :s, 0, :r, :m, :d, UTC_TIMESTAMP(3))")
 			->execute(array('t' => $row['token'], 's' => $down ? 0 : 1, 'r' => $down ? 'push_down' : '', 'm' => $msg, 'd' => $details));
 		$pdo->prepare("UPDATE `$db`.hc2_checks SET last_push_at = UTC_TIMESTAMP(3) WHERE token = :t")->execute(array('t' => $row['token']));
@@ -106,7 +106,7 @@ function hc2_push(string $token, array $get): bool {
 	}
 }
 
-/** Verschluesselung kompatibel zum Agent/hub (AES-256-GCM, "enc:v1:" + Base64 ohne Padding). */
+/** Verschluesselung kompatibel zum Node/hub (AES-256-GCM, "enc:v1:" + Base64 ohne Padding). */
 /** Schluessel lesen: 64 Hex-Zeichen (Textdatei, kopierbar) oder 32 Rohbytes. */
 function hc2_key_bytes(): string {
 	$raw = is_file(HC2_KEY_FILE) ? (string)file_get_contents(HC2_KEY_FILE) : '';

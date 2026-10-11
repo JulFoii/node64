@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS `hc2_locations` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 INSERT IGNORE INTO `hc2_locations` (`code`,`name`,`endpoint`) VALUES ('nbg','Nürnberg','hc-srv02.ipv64.net'), ('fsn','Falkenstein','hc-srv01.ipv64.net');
 
-CREATE TABLE IF NOT EXISTS `hc2_nodes` (                 -- lebende hub-Instanzen
+CREATE TABLE IF NOT EXISTS `hc2_hubs` (                 -- lebende hub-Instanzen
   `name`        VARCHAR(64) NOT NULL,
   `location`    VARCHAR(16) NOT NULL,
   `roles`       VARCHAR(32) NOT NULL DEFAULT '',
@@ -37,11 +37,11 @@ CREATE TABLE IF NOT EXISTS `hc2_slot_leases` (           -- Sicherung gegen Dopp
   PRIMARY KEY (`location`,`slot`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- ---------------------------------------------------------------- Agents
-CREATE TABLE IF NOT EXISTS `hc2_agents` (
+-- ---------------------------------------------------------------- Nodes
+CREATE TABLE IF NOT EXISTS `hc2_nodes` (
   `id`           INT NOT NULL AUTO_INCREMENT,
   `userid`       INT NOT NULL,
-  `agent_id`     VARCHAR(32) NOT NULL,                     -- vom Agent erzeugt, unveraenderlich
+  `node_id`     VARCHAR(32) NOT NULL,                     -- vom Node erzeugt, unveraenderlich
   `name`         VARCHAR(100) NOT NULL,
   `location`     VARCHAR(100) NOT NULL DEFAULT '',          -- Freitext des Nutzers ("Keller")
   `version`      VARCHAR(32) NOT NULL DEFAULT '',
@@ -57,24 +57,24 @@ CREATE TABLE IF NOT EXISTS `hc2_agents` (
   `node`         VARCHAR(64) NOT NULL DEFAULT '',           -- hub-Instanz, die die Verbindung haelt
   `created_at`   DATETIME(3) NOT NULL,
   `revoked_at`   DATETIME(3) NULL,
-  PRIMARY KEY (`id`), UNIQUE KEY `agent_id` (`agent_id`), KEY `userid` (`userid`)
+  PRIMARY KEY (`id`), UNIQUE KEY `node_id` (`node_id`), KEY `userid` (`userid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-CREATE TABLE IF NOT EXISTS `hc2_agent_tokens` (
+CREATE TABLE IF NOT EXISTS `hc2_node_tokens` (
   `id`         INT NOT NULL AUTO_INCREMENT,
-  `agent_id`   VARCHAR(32) NOT NULL,
+  `node_id`   VARCHAR(32) NOT NULL,
   `token_hash` CHAR(64) NOT NULL,                           -- sha256(token); Token selbst nur einmal sichtbar
   `created_at` DATETIME(3) NOT NULL,
   `last_used`  DATETIME(3) NULL,
   `revoked_at` DATETIME(3) NULL,
-  PRIMARY KEY (`id`), UNIQUE KEY `token_hash` (`token_hash`), KEY `agent_id` (`agent_id`)
+  PRIMARY KEY (`id`), UNIQUE KEY `token_hash` (`token_hash`), KEY `node_id` (`node_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `hc2_link_codes` (             -- Device-Code fuer die Erstverknuepfung
   `code`          CHAR(8) NOT NULL,                         -- ohne Bindestrich, Alphabet ohne 0/O/1/I
-  `agent_id`      VARCHAR(32) NOT NULL,
-  `agent_name`    VARCHAR(100) NOT NULL,
-  `agent_version` VARCHAR(32) NOT NULL DEFAULT '',
+  `node_id`      VARCHAR(32) NOT NULL,
+  `node_name`    VARCHAR(100) NOT NULL,
+  `node_version` VARCHAR(32) NOT NULL DEFAULT '',
   `poll_secret`   CHAR(32) NOT NULL,
   `created_at`    DATETIME(3) NOT NULL,
   `expires_at`    DATETIME(3) NOT NULL,
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS `hc2_link_codes` (             -- Device-Code fuer di
 CREATE TABLE IF NOT EXISTS `hc2_checks` (
   `token`              VARCHAR(50) NOT NULL,                -- wie healthchecks.healthtoken
   `userid`             INT NOT NULL,
-  `agent_id`           VARCHAR(32) NULL,                    -- Besitzer-Agent bei execution local/both, sonst Herkunft
+  `node_id`           VARCHAR(32) NULL,                    -- Besitzer-Node bei execution local/both, sonst Herkunft
   `execution`          ENUM('local','online','both') NOT NULL DEFAULT 'online',
   `locations`          SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',   -- Online-Standorte; Portal kuerzt auf user_class.hc_locations
   `policy`             ENUM('all','any','majority') NOT NULL DEFAULT 'all',
@@ -136,13 +136,13 @@ CREATE TABLE IF NOT EXISTS `hc2_checks` (
   `incident_id`        BIGINT NULL,
   PRIMARY KEY (`token`),
   KEY `user_list` (`userid`,`deleted_at`),
-  KEY `agent` (`agent_id`),
+  KEY `node` (`node_id`),
   KEY `idx_due` (`slot`,`execution`,`paused`,`next_check_at`),
   KEY `parent` (`parent_token`),
   KEY `legacy` (`legacy_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Zustand je Messstelle: source = 'agent:<agent_id>' | 'loc:nbg' | 'loc:fsn'
+-- Zustand je Messstelle: source = 'node:<node_id>' | 'loc:nbg' | 'loc:fsn'
 CREATE TABLE IF NOT EXISTS `hc2_check_states` (
   `token`            VARCHAR(50) NOT NULL,
   `source`           VARCHAR(40) NOT NULL,
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS `hc2_check_states` (
 CREATE TABLE IF NOT EXISTS `hc2_measurements` (
   `token`       VARCHAR(50) NOT NULL,
   `source`      VARCHAR(40) NOT NULL,
-  `agent_seq`   BIGINT NOT NULL DEFAULT 0,                  -- laufende Nummer des Agents, 0 bei Online
+  `node_seq`   BIGINT NOT NULL DEFAULT 0,                  -- laufende Nummer des Nodes, 0 bei Online
   `time`        DATETIME(3) NOT NULL,
   `status`      TINYINT NOT NULL,                           -- 1 up, 0 down
   `latency_ms`  FLOAT NOT NULL DEFAULT 0,
@@ -176,8 +176,8 @@ CREATE TABLE IF NOT EXISTS `hc2_measurements` (
   `details`     JSON NULL,
   `flags`       TINYINT NOT NULL DEFAULT 0,                 -- 1 Wartung, 2 abhaengig
   `received_at` DATETIME(3) NOT NULL,
-  PRIMARY KEY (`token`,`source`,`time`,`agent_seq`),
-  KEY `seq` (`source`,`agent_seq`),
+  PRIMARY KEY (`token`,`source`,`time`,`node_seq`),
+  KEY `seq` (`source`,`node_seq`),
   KEY `time` (`time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 PARTITION BY RANGE (TO_DAYS(`time`)) (
@@ -214,7 +214,7 @@ CREATE TABLE IF NOT EXISTS `hc2_dirty_hours` (            -- nachzurechnende Stu
 -- ---------------------------------------------------------------- Ereignisse / Stoerungen
 CREATE TABLE IF NOT EXISTS `hc2_events` (
   `id`           BIGINT NOT NULL AUTO_INCREMENT,
-  `event_id`     CHAR(32) NOT NULL,                         -- vom Erzeuger (Agent oder hub), idempotent
+  `event_id`     CHAR(32) NOT NULL,                         -- vom Erzeuger (Node oder hub), idempotent
   `token`        VARCHAR(50) NOT NULL,
   `userid`       INT NOT NULL,
   `source`       VARCHAR(40) NOT NULL DEFAULT '',           -- leer = Gesamtzustand
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS `hc2_incidents` (
 CREATE TABLE IF NOT EXISTS `hc2_channels` (
   `id`                    INT NOT NULL AUTO_INCREMENT,
   `userid`                INT NOT NULL,
-  `agent_id`              VARCHAR(32) NULL,                 -- NULL = Server-Kanal (hub sendet), sonst Agent-Kanal (Agent sendet)
+  `node_id`              VARCHAR(32) NULL,                 -- NULL = Server-Kanal (hub sendet), sonst Agent-Kanal (Node sendet)
   `type`                  VARCHAR(20) NOT NULL,             -- smtp, telegram, discord, ntfy, gotify, webhook, pushover, app, ipv64_mail, ipv64_sms
   `name`                  VARCHAR(100) NOT NULL,
   `config_enc`            TEXT NOT NULL,                    -- JSON; Geheimnisse "enc:v1:..." (AES-GCM, Schluessel auf hub + Web-Server)
@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS `hc2_channels` (
   `last_used`             DATETIME(3) NULL,
   `last_error`            VARCHAR(500) NOT NULL DEFAULT '',
   `legacy_integration_id` INT NULL,                         -- integrations.id bei Migration
-  PRIMARY KEY (`id`), KEY `user_list` (`userid`,`deleted_at`), KEY `agent` (`agent_id`), KEY `legacy` (`legacy_integration_id`)
+  PRIMARY KEY (`id`), KEY `user_list` (`userid`,`deleted_at`), KEY `node` (`node_id`), KEY `legacy` (`legacy_integration_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `hc2_deliveries` (             -- Zustellprotokoll, Dedup ueber (event_id, channel_id)
@@ -278,7 +278,7 @@ CREATE TABLE IF NOT EXISTS `hc2_deliveries` (             -- Zustellprotokoll, D
   `event_id`   CHAR(32) NOT NULL,
   `channel_id` INT NOT NULL,
   `userid`     INT NOT NULL,
-  `agent_id`   VARCHAR(32) NOT NULL DEFAULT '',             -- gesetzt, wenn der Agent gesendet hat
+  `node_id`   VARCHAR(32) NOT NULL DEFAULT '',             -- gesetzt, wenn der Node gesendet hat
   `time`       DATETIME(3) NOT NULL,
   `kind`       VARCHAR(20) NOT NULL,
   `ok`         TINYINT NULL,                                -- NULL = Schattenmodus (nicht gesendet)
@@ -288,7 +288,7 @@ CREATE TABLE IF NOT EXISTS `hc2_deliveries` (             -- Zustellprotokoll, D
 
 CREATE TABLE IF NOT EXISTS `hc2_send_orders` (            -- Sendeauftraege an Agent-Kanaele (Zustellung ueber den Socket)
   `id`         BIGINT NOT NULL AUTO_INCREMENT,
-  `agent_id`   VARCHAR(32) NOT NULL,
+  `node_id`   VARCHAR(32) NOT NULL,
   `channel_id` INT NOT NULL,
   `event_id`   CHAR(32) NOT NULL,
   `kind`       VARCHAR(20) NOT NULL DEFAULT 'event',        -- event, test, verify
@@ -298,19 +298,19 @@ CREATE TABLE IF NOT EXISTS `hc2_send_orders` (            -- Sendeauftraege an A
   `done_at`    DATETIME(3) NULL,
   `ok`         TINYINT NULL,
   `error`      VARCHAR(500) NOT NULL DEFAULT '',
-  PRIMARY KEY (`id`), KEY `agent_open` (`agent_id`,`done_at`)
+  PRIMARY KEY (`id`), KEY `agent_open` (`node_id`,`done_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-CREATE TABLE IF NOT EXISTS `hc2_commands` (               -- Kommandos Server -> Agent (3.8), 1 h gueltig
+CREATE TABLE IF NOT EXISTS `hc2_commands` (               -- Kommandos Server -> Node (3.8), 1 h gueltig
   `id`         BIGINT NOT NULL AUTO_INCREMENT,
-  `agent_id`   VARCHAR(32) NOT NULL,
+  `node_id`   VARCHAR(32) NOT NULL,
   `name`       VARCHAR(32) NOT NULL,                        -- run_check, test_check, pause, resume, set_log_level, ...
   `args`       JSON NULL,
   `created_at` DATETIME(3) NOT NULL,
   `done_at`    DATETIME(3) NULL,
   `ok`         TINYINT NULL,
   `output`     TEXT NULL,
-  PRIMARY KEY (`id`), KEY `agent_open` (`agent_id`,`done_at`)
+  PRIMARY KEY (`id`), KEY `agent_open` (`node_id`,`done_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `hc2_testruns` (               -- Testlaeufe beim Umhaengen (3.11)
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS `hc2_testruns` (               -- Testlaeufe beim Umh
   `token`            VARCHAR(50) NOT NULL,
   `definition`       JSON NOT NULL,
   `target_execution` ENUM('local','online','both') NOT NULL,
-  `agent_id`         VARCHAR(32) NULL,
+  `node_id`         VARCHAR(32) NULL,
   `locations`        SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',
   `status`           ENUM('pending','running','ok','failed','expired') NOT NULL DEFAULT 'pending',
   `result`           JSON NULL,
@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS `hc2_testruns` (               -- Testlaeufe beim Umh
 CREATE TABLE IF NOT EXISTS `hc2_maintenance` (
   `id`           INT NOT NULL AUTO_INCREMENT,
   `userid`       INT NOT NULL,
-  `agent_id`     VARCHAR(32) NULL,
+  `node_id`     VARCHAR(32) NULL,
   `name`         VARCHAR(200) NOT NULL,
   `start_at`     DATETIME(3) NOT NULL,
   `end_at`       DATETIME(3) NOT NULL,
@@ -365,17 +365,17 @@ CREATE TABLE IF NOT EXISTS `hc2_revisions` (              -- Zaehler je Account 
   PRIMARY KEY (`userid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-CREATE TABLE IF NOT EXISTS `hc2_config_log` (             -- Quelle der Deltas fuer Agents und hub, 30 Tage
+CREATE TABLE IF NOT EXISTS `hc2_config_log` (             -- Quelle der Deltas fuer Nodes und hub, 30 Tage
   `id`        BIGINT NOT NULL AUTO_INCREMENT,
   `userid`    INT NOT NULL,
-  `agent_id`  VARCHAR(32) NULL,                             -- NULL = alle Agents des Accounts
-  `entity`    ENUM('check','channel','maintenance','agent','settings') NOT NULL,
+  `node_id`  VARCHAR(32) NULL,                             -- NULL = alle Nodes des Accounts
+  `entity`    ENUM('check','channel','maintenance','node','settings') NOT NULL,
   `entity_id` VARCHAR(50) NOT NULL,
   `op`        ENUM('upsert','delete') NOT NULL,
   `revision`  BIGINT NOT NULL,
-  `origin`    ENUM('portal','api','agent','system') NOT NULL,
+  `origin`    ENUM('portal','api','node','system') NOT NULL,
   `time`      DATETIME(3) NOT NULL,
-  PRIMARY KEY (`id`), KEY `user_id` (`userid`,`id`), KEY `agent_id` (`agent_id`,`id`), KEY `time` (`time`)
+  PRIMARY KEY (`id`), KEY `user_id` (`userid`,`id`), KEY `node_id` (`node_id`,`id`), KEY `time` (`time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `hc2_migration_log` (          -- Protokoll von bots/hc2_migrate.php
