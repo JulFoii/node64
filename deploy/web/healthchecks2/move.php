@@ -25,7 +25,7 @@ if ($start) {
 		$runs[] = array('token' => $c['token'], 'name' => $c['name'], 'id' => $r['id'], 'error' => $r['error']);
 	}
 }
-$label = array('online' => 'Online bei ipv64', 'local' => 'Lokal auf der Node', 'both' => 'Hybrid (Node + ipv64)');
+$label = array('online' => 'Online bei ipv64', 'local' => 'Lokal auf Nodes', 'both' => 'Hybrid (Nodes + ipv64)');
 ?>
 <p></p>
 <div class="container">

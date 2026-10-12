@@ -165,8 +165,8 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 						<div class="form-group"><label>Ausführungsort</label>
 							<select class="custom-select" name="execution" id="execution">
 								<option value="online"<?php echo $sel('execution', 'online'); ?>>Online bei ipv64 (von außen)</option>
-								<option value="local"<?php echo $sel('execution', 'local'); ?><?php echo $nodes ? '' : ' disabled'; ?>>Lokal auf einer Node (von innen)</option>
-								<option value="both"<?php echo $sel('execution', 'both'); ?><?php echo $nodes ? '' : ' disabled'; ?>>Hybrid: Node und ipv64</option>
+								<option value="local"<?php echo $sel('execution', 'local'); ?><?php echo $nodes ? '' : ' disabled'; ?>>Lokal auf Nodes (von innen)</option>
+								<option value="both"<?php echo $sel('execution', 'both'); ?><?php echo $nodes ? '' : ' disabled'; ?>>Hybrid: Nodes und ipv64</option>
 							</select>
 							<?php if (!$nodes) { echo '<small class="form-text text-muted">Lokal/Hybrid erst nach <a href="/link.php">Verknüpfung einer Node</a>.</small>'; } elseif ($old) { echo '<small class="form-text text-muted">Beim Wechsel wird vor der Übernahme ein Testlauf gemacht.</small>'; } ?>
 						</div>
