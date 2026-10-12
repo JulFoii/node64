@@ -117,8 +117,13 @@ if ($c['execution'] === 'both') {
 			<div class="card shadow-sm mb-3">
 				<div class="card-header p-2"><i class="fa-solid fa-satellite-dish"></i> Push-URLs</div>
 				<div class="card-body p-2 small">
-					<div class="mb-1">Online (immer):</div><code class="d-block mb-2 text-break">https://ipv64.net/health.php?token=<?php echo hc2_h($T); ?></code>
-					<?php if ($c['execution'] !== 'online' && $c['node_id']) { ?><div class="mb-1">Lokal an der Node <?php echo hc2_h(hc2_node_label($nodes, $c['node_id'])); ?> (Adresse der Node, Pfad):</div><code class="d-block mb-2 text-break">http://&lt;node&gt;/api/push/<?php echo hc2_h($T); ?></code><?php } ?>
+					<?php if ($c['execution'] !== 'online' && $c['node_id']) { ?>
+					<div class="mb-1"><i class="fa-solid fa-house text-success"></i> <strong>Lokal</strong> an der Node <?php echo hc2_h(hc2_node_label($nodes, $c['node_id'])); ?> (Adresse der Node einsetzen):</div><code class="d-block mb-1 text-break">http://&lt;adresse-der-node&gt;:&lt;port&gt;/api/push/<?php echo hc2_h($T); ?></code>
+					<div class="text-muted mb-2">Funktioniert im eigenen Netz auch ohne Internet. Die genaue Adresse steht in der Node auf der Detailseite des Checks.</div>
+					<div class="mb-1"><i class="fa-solid fa-cloud text-primary"></i> <strong>Online</strong> über ipv64 (wird an die Node weitergereicht, solange sie verbunden ist):</div><code class="d-block mb-2 text-break">https://ipv64.net/health.php?token=<?php echo hc2_h($T); ?></code>
+					<?php } else { ?>
+					<div class="mb-1"><i class="fa-solid fa-cloud text-primary"></i> <strong>Online</strong>:</div><code class="d-block mb-2 text-break">https://ipv64.net/health.php?token=<?php echo hc2_h($T); ?></code>
+					<?php } ?>
 					<div class="text-muted">Optional <code>?status=down&amp;msg=…</code> für eine aktive Störungsmeldung. Erwarteter Abstand <?php echo (int)($p['period_seconds'] ?? 3600); ?> s, Kulanz <?php echo (int)($p['grace_seconds'] ?? 600); ?> s.</div>
 				</div>
 			</div>

@@ -45,10 +45,27 @@ function hc2_json(array $out, int $code = 200): void {
 	exit;
 }
 
-/** UTC-Zeit aus der DB -> Europe/Berlin, formatiert. */
+/** Zeitzone des Accounts (Einstellungen > Benachrichtigungen), Standard Europe/Berlin. */
+function hc2_timezones(): array {
+	return array('UTC', 'Europe/Berlin', 'Europe/Vienna', 'Europe/Zurich', 'Europe/Amsterdam', 'Europe/Brussels', 'Europe/Paris', 'Europe/London', 'Europe/Dublin', 'Europe/Madrid',
+		'Europe/Rome', 'Europe/Warsaw', 'Europe/Prague', 'Europe/Stockholm', 'Europe/Oslo', 'Europe/Copenhagen', 'Europe/Helsinki', 'Europe/Athens', 'Europe/Istanbul', 'Europe/Moscow',
+		'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'America/Sao_Paulo', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore',
+		'Asia/Dubai', 'Asia/Kolkata', 'Australia/Sydney', 'Pacific/Auckland');
+}
+function hc2_tz(): string {
+	static $tz = null;
+	if ($tz !== null) { return $tz; }
+	global $userid;
+	$tz = 'Europe/Berlin';
+	try {
+		if ((int)$userid > 0) { $v = hc2_settings((int)$userid)['notify.quiet_tz'] ?? ''; if (in_array($v, timezone_identifiers_list(), true)) { $tz = $v; } }
+	} catch (Throwable $e) { error_log('hc2_tz: ' . $e->getMessage()); }
+	return $tz;
+}
+/** UTC-Zeit aus der DB -> Zeitzone des Accounts, formatiert. */
 function hc2_dt($utc, string $fmt = 'd.m.Y H:i:s'): string {
 	if (!$utc) { return '–'; }
-	try { $t = new DateTime($utc, new DateTimeZone('UTC')); $t->setTimezone(new DateTimeZone('Europe/Berlin')); return $t->format($fmt); }
+	try { $t = new DateTime($utc, new DateTimeZone('UTC')); $t->setTimezone(new DateTimeZone(hc2_tz())); return $t->format($fmt); }
 	catch (Throwable $e) { return (string)$utc; }
 }
 function hc2_ago($utc): string {

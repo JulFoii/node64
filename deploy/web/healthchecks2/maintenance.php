@@ -7,7 +7,7 @@ hc2_require_login();
 $uid = (int)$userid; $pdo = hc2_pdo();
 $checks = hc2_checks($uid); $byToken = array(); foreach ($checks as $c) { $byToken[$c['token']] = $c['name']; }
 $errors = array();
-$toUTC = function(string $local): ?string { if ($local === '') { return null; } try { $t = new DateTime($local, new DateTimeZone('Europe/Berlin')); $t->setTimezone(new DateTimeZone('UTC')); return $t->format('Y-m-d H:i:s.000'); } catch (Throwable $e) { return null; } };
+$toUTC = function(string $local): ?string { if ($local === '') { return null; } try { $t = new DateTime($local, new DateTimeZone(hc2_tz())); $t->setTimezone(new DateTimeZone('UTC')); return $t->format('Y-m-d H:i:s.000'); } catch (Throwable $e) { return null; } };
 $toLocal = function(?string $utc): string { if (!$utc) { return ''; } return hc2_dt($utc, 'Y-m-d\TH:i'); };
 if (hc2_is_post() && hc2_csrf_ok()) {
 	$a = (string)($_POST['action'] ?? ''); $id = (int)($_POST['id'] ?? 0);
@@ -83,7 +83,7 @@ $now = gmdate('Y-m-d H:i:s');
 						<div class="form-row"><div class="form-group col-6"><label>Wiederholung</label><select class="custom-select" name="repeat"><?php foreach (array('none' => 'einmalig', 'daily' => 'täglich', 'weekly' => 'wöchentlich', 'monthly' => 'monatlich') as $k => $v) { echo '<option value="' . $k . '"' . ($f['repeat'] === $k ? ' selected' : '') . '>' . $v . '</option>'; } ?></select></div><div class="form-group col-6"><label>Wiederholen bis (optional)</label><input class="form-control" type="datetime-local" name="repeat_until" value="<?php echo hc2_h($f['repeat_until']); ?>"></div></div>
 						<div class="form-group"><label>Checks (keine Auswahl = alle)</label><div style="max-height:220px;overflow:auto;border:1px solid #dee2e6;border-radius:.25rem;padding:.4rem">
 							<?php foreach ($checks as $c) { echo '<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="t_' . hc2_h($c['token']) . '" name="tokens[]" value="' . hc2_h($c['token']) . '"' . (in_array($c['token'], (array)$f['tokens'], true) ? ' checked' : '') . '><label class="custom-control-label" for="t_' . hc2_h($c['token']) . '">' . hc2_h($c['name']) . '</label></div>'; } ?>
-						</div><small class="form-text text-muted">Zeiten in Europe/Berlin.</small></div>
+						</div><small class="form-text text-muted">Zeiten in <?php echo hc2_h(hc2_tz()); ?> (änderbar unter Benachrichtigungen).</small></div>
 						<button class="btn btn-primary" type="submit">Speichern</button> <?php if ($edit) { echo '<a class="btn btn-outline-secondary" href="' . HC2_BASE . '/maintenance.php">Abbrechen</a>'; } ?>
 					</form>
 				</div>
