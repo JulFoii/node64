@@ -579,7 +579,11 @@ function hc2_channel_config(string $type, array $in, ?array $old): array {
 		if ($v === '' && !empty($f['required'])) { $err[] = $f['label'] . ' fehlt.'; }
 		if ($v !== '' && ($f['kind'] ?? '') === 'email' && !filter_var($v, FILTER_VALIDATE_EMAIL)) { $err[] = $f['label'] . ' ist keine gültige E-Mail-Adresse.'; }
 		if ($v !== '' && ($f['kind'] ?? '') === 'url' && !preg_match('#^https?://#i', $v)) { $err[] = $f['label'] . ' muss mit http:// oder https:// beginnen.'; }
-		if ($type === 'ipv64_sms' && $k === 'number') { $v = preg_replace('/[^0-9]/', '', $v); if (strlen($v) < 6 || strlen($v) > 20) { $err[] = 'Mobilnummer ungültig.'; } }
+		if ($type === 'ipv64_sms' && $k === 'number') {
+			$plus = strpos($v, '+') === 0; $v = preg_replace('/[^0-9]/', '', $v);
+			if (!$plus && strpos($v, '0') === 0 && strpos($v, '00') !== 0) { $err[] = 'Mobilnummer bitte mit Ländervorwahl angeben, z. B. +49 177 1234567.'; }
+			elseif (strlen($v) < 7 || strlen($v) > 20) { $err[] = 'Mobilnummer ungültig.'; }
+		}
 		if ($v !== '') { $cfg[$k] = !empty($f['secret']) ? hc2_encrypt($v) : $v; }
 	}
 	return array('config_enc' => json_encode($cfg ?: new stdClass(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'errors' => $err);
