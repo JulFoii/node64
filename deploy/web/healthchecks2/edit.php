@@ -174,8 +174,8 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<?php foreach ($nodes as $id => $n) { $on = in_array($id, (array)$f['nodes'], true); ?>
 							<div class="custom-control custom-checkbox"><input class="custom-control-input hc2-node" type="checkbox" id="nd_<?php echo hc2_h($id); ?>" name="nodes[]" value="<?php echo hc2_h($id); ?>"<?php echo $on ? ' checked' : ''; ?>><label class="custom-control-label" for="nd_<?php echo hc2_h($id); ?>"><?php echo hc2_h(hc2_node_label($nodes, $id)); ?><?php echo (int)$n['online'] ? ' <span class="badge badge-success">online</span>' : ' <span class="badge badge-secondary">offline</span>'; ?><?php echo ($old && $id === (string)$old['node_id']) ? ' <span class="badge badge-light" title="Bearbeiten in der Node, Benachrichtigung ohne Verbindung">Besitzer</span>' : ''; ?></label></div>
 							<?php } ?>
-							<small class="form-text text-muted" data-not-type="docker push">Mehrere Nodes möglich, z. B. an verschiedenen Standorten oder mit Zugang über VPN. Jede gewählte Node misst selbst und erscheint als eigene Messstelle.</small>
-							<small class="form-text text-warning" data-type="docker push">Docker- und Push-Checks gehören zu genau einer Node (Container bzw. Push-Adresse)<?php echo ($old && $old['type'] === 'docker') ? ' und sind nicht umhängbar' : ''; ?>.</small>
+							<small class="form-text text-muted" data-not-type="docker">Mehrere Nodes möglich, z. B. an verschiedenen Standorten oder mit Zugang über VPN. Jede gewählte Node misst selbst und erscheint als eigene Messstelle.</small>
+							<small class="form-text text-warning" data-type="docker">Docker-Checks gehören zu der Node, auf der der Container läuft<?php echo ($old && $old['type'] === 'docker') ? ', und sind nicht umhängbar' : ''; ?>.</small>
 						</div>
 						<div class="form-group" id="locbox"><label>Standorte</label>
 							<?php $i = 0; foreach ($locs as $code => $name) { $i++; $allowed = $i <= $acc['hc_locations']; ?>
@@ -227,6 +227,13 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 		$('#nodebox').toggle(ex !== 'online'); $('#locbox').toggle(ex !== 'local'); $('#policybox').toggle(ex === 'both');
 	}
 	$('#type, #execution').on('change', sync); sync();
+	// Docker: genau eine Node; ein bestehender Docker-Check bleibt bei seiner Node
+	var lockDocker = <?php echo ($old && $old['type'] === 'docker') ? 'true' : 'false'; ?>;
+	function single(){ return $('#type').val() === 'docker'; }
+	$('.hc2-node').on('change', function(){ if (single() && this.checked) { $('.hc2-node').not(this).prop('checked', false); } });
+	function lockNodes(){ $('.hc2-node').prop('disabled', lockDocker && $('#type').val() === 'docker'); if (single() && $('.hc2-node:checked').length > 1) { $('.hc2-node:checked').slice(1).prop('checked', false); } }
+	$('#type').on('change', lockNodes); lockNodes();
+	$('#hcform').on('submit', function(){ $('.hc2-node:disabled:checked').each(function(){ $('<input type="hidden" name="nodes[]">').val(this.value).appendTo('#hcform'); }); });
 	// Port-Erwartung in das gemeinsame Feld "expect" uebernehmen
 	$('#hcform').on('submit', function(){ if ($('#type').val() === 'port') { $('<input type="hidden" name="expect">').val($('#expect_port').val()).appendTo(this); } });
 })();

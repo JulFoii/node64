@@ -87,7 +87,7 @@ function hc2_push(string $token, array $get): bool {
 	if ($token === '' || !preg_match('/^[A-Za-z0-9]{20,50}$/', $token)) { return false; }
 	try {
 		$db = HC2_DB; $pdo = hc2_pdo();
-		$st = $pdo->prepare("SELECT token, paused, execution, node_id FROM `$db`.hc2_checks WHERE token = :t AND type = 'push' AND deleted_at IS NULL");
+		$st = $pdo->prepare("SELECT token, paused, execution, node_id, nodes FROM `$db`.hc2_checks WHERE token = :t AND type = 'push' AND deleted_at IS NULL");
 		$st->execute(array('t' => $token));
 		$row = $st->fetch(PDO::FETCH_ASSOC);
 		if (!$row) { return false; }
@@ -99,11 +99,15 @@ function hc2_push(string $token, array $get): bool {
 			->execute(array('t' => $row['token'], 's' => $down ? 0 : 1, 'r' => $down ? 'push_down' : '', 'm' => $msg, 'd' => $details));
 		$pdo->prepare("UPDATE `$db`.hc2_checks SET last_push_at = UTC_TIMESTAMP(3) WHERE token = :t")->execute(array('t' => $row['token']));
 		hc2_signal('hc2:push', $row['token'] . ($down ? ':down' : ':up'));
-		if ($row['execution'] !== 'online' && !empty($row['node_id'])) {
-			// lokaler Push-Check: an die Node weiterreichen (Kommando "push"; die Node verwirft alles aelter als 2 min)
+		if ($row['execution'] !== 'online') {
+			// lokal/hybrid: an alle messenden Nodes weiterreichen (Kommando "push"; Nodes verwerfen alles aelter als 2 min)
+			$ids = array_values(array_unique(array_filter(explode(',', (string)$row['nodes']))));
+			if (!$ids && !empty($row['node_id'])) { $ids = array($row['node_id']); }
 			$args = json_encode(array('token' => $row['token'], 'down' => $down, 'msg' => $msg, 'from' => $_SERVER['REMOTE_ADDR'] ?? '', 'time' => gmdate('Y-m-d\TH:i:s\Z')), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-			$pdo->prepare("INSERT INTO `$db`.hc2_commands (node_id, name, args, created_at) VALUES (:n, 'push', :a, UTC_TIMESTAMP(3))")->execute(array('n' => $row['node_id'], 'a' => $args));
-			hc2_signal('hc2:node:' . $row['node_id'], 'command');
+			foreach ($ids as $nid) {
+				$pdo->prepare("INSERT INTO `$db`.hc2_commands (node_id, name, args, created_at) VALUES (:n, 'push', :a, UTC_TIMESTAMP(3))")->execute(array('n' => $nid, 'a' => $args));
+				hc2_signal('hc2:node:' . $nid, 'command');
+			}
 		}
 		return true;
 	} catch (Throwable $e) {

@@ -129,8 +129,8 @@ function hc2_check_nodes(array $c): array {
 	if (!$l && !empty($c['node_id'])) { $l = array((string)$c['node_id']); }
 	return $l;
 }
-/** Docker (Container der Node) und Push (Adresse der Node) gehoeren zu genau einer Node. */
-function hc2_single_node_type(string $type): bool { return $type === 'docker' || $type === 'push'; }
+/** Docker-Checks gehoeren zur Node mit dem Container; Push-Checks sind frei zuordenbar. */
+function hc2_single_node_type(string $type): bool { return $type === 'docker'; }
 function hc2_same_list(array $a, array $b): bool { sort($a); sort($b); return array_values($a) === array_values($b); }
 function hc2_nodes_label(array $nodes, array $ids): string {
 	$o = array(); foreach ($ids as $id) { $o[] = hc2_node_label($nodes, $id) ?: 'Node'; }
@@ -319,7 +319,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	if ($execution !== 'online') {
 		foreach ($nodeSel as $nid) { if (!isset($nodes[$nid])) { $err[] = 'Eine gewählte Node ist nicht (mehr) verknüpft.'; break; } }
 		if (!$nodeSel) { $err[] = 'Für lokale oder hybride Messung mindestens eine verbundene Node wählen.'; }
-		if (hc2_single_node_type($type) && count($nodeSel) > 1) { $err[] = 'Docker- und Push-Checks gehören zu genau einer Node.'; }
+		if (hc2_single_node_type($type) && count($nodeSel) > 1) { $err[] = 'Docker-Checks gehören zu genau einer Node (der mit dem Container).'; }
 		$nodeId = ($old && in_array((string)$old['node_id'], $nodeSel, true)) ? (string)$old['node_id'] : (string)($nodeSel[0] ?? '');
 		if ($type === 'docker' && $old && !empty($old['node_id']) && $nodeId !== (string)$old['node_id']) { $err[] = 'Docker-Checks gehören zur Node, auf der der Container läuft, und sind nicht umhängbar.'; }
 	}
@@ -425,7 +425,6 @@ function hc2_testrun_create(int $userid, array $c, string $target, $nodeIds, arr
 	$nodeId = null;
 	if ($target !== 'online') {
 		if (!$ids) { return array('id' => 0, 'error' => 'Keine Node gewählt.'); }
-		if (hc2_single_node_type($c['type']) && count($ids) > 1) { return array('id' => 0, 'error' => 'Push-Checks gehören zu genau einer Node.'); }
 		foreach ($ids as $nid) {
 			if (!isset($nodes[$nid])) { return array('id' => 0, 'error' => 'Node nicht gefunden oder getrennt.'); }
 			$nl = hc2_node_label($nodes, $nid);
