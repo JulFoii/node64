@@ -342,12 +342,20 @@ function hc2_channel_save(?array $old): array {
 route('POST', '/hc2/channels', function() { $ch = hc2_channel_save(null); ok(hc2_channel_out($ch) + array('verification_required' => (int)$ch['verified'] !== 1, 'detail' => (int)$ch['verified'] !== 1 ? 'Confirm the channel with the code in the portal (notifications page) before it is used.' : null), 201); });
 route('PATCH', '/hc2/channels/{id}', function($p) {
 	$old = hc2_channel(uid(), (int)$p['id'], true); if (!$old) { fail(404, 'not_found', 'Channel not found.'); }
-	if ($old['node_id']) { fail(409, 'node_channel', 'Channels of a node are edited in the node.'); }
+	if ($old['node_id']) {
+		// Kanal einer Node: Name und Schalter auch hier, die Zugangsdaten nur in der Node
+		if (array_key_exists('config', body())) { fail(409, 'node_channel', 'The configuration of a node channel is edited in the node.'); }
+		$lang = in_str('lang', false, 2) ?? $old['lang']; if ($lang !== 'en') { $lang = 'de'; }
+		hc2_pdo()->prepare("UPDATE hc2_channels SET name = :n, enabled = :e, is_default = :d, lang = :l, notify_down = :nd, notify_up = :nu WHERE id = :i AND userid = :u AND deleted_at IS NULL")->execute(array('u' => uid(), 'i' => (int)$old['id'],
+			'n' => in_str('name', false, 100) ?? $old['name'], 'e' => in_bool('enabled', (int)$old['enabled'] === 1) ? 1 : 0, 'd' => in_bool('default', (int)$old['is_default'] === 1) ? 1 : 0, 'l' => $lang,
+			'nd' => in_bool('notify_down', (int)$old['notify_down'] === 1) ? 1 : 0, 'nu' => in_bool('notify_up', (int)$old['notify_up'] === 1) ? 1 : 0));
+		hc2_log_change(uid(), 'channel', (string)$old['id'], 'upsert', 'api');
+		ok(hc2_channel_out(hc2_channel(uid(), (int)$old['id'])));
+	}
 	ok(hc2_channel_out(hc2_channel_save($old)));
 });
 route('DELETE', '/hc2/channels/{id}', function($p) {
 	$ch = hc2_channel(uid(), (int)$p['id']); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
-	if ($ch['node_id']) { fail(409, 'node_channel', 'Channels of a node are deleted in the node.'); }
 	hc2_log_change(uid(), 'channel', (string)$ch['id'], 'delete', 'api');
 	foreach (hc2_checks(uid()) as $c) { $ids = hc2_check_channels($c); if (in_array((int)$ch['id'], $ids, true)) { hc2_set_check(uid(), $c['token'], array('channels' => implode(',', array_diff($ids, array((int)$ch['id']))))); } }
 	no_content();

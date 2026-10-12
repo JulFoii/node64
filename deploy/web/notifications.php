@@ -131,10 +131,10 @@ $fv = function(string $k) use ($edit) { return hc2_h($_POST['f_' . $k] ?? ($edit
 						<td class="small text-nowrap"><?php echo $ch['last_used'] ? hc2_ago($ch['last_used']) : '–'; ?></td>
 						<td class="text-right text-nowrap"><form method="post" class="d-inline"><?php echo hc2_csrf_field(); ?><input type="hidden" name="id" value="<?php echo (int)$ch['id']; ?>">
 							<button class="btn btn-sm btn-outline-secondary" name="action" value="test" title="Testnachricht"><i class="fa-solid fa-paper-plane"></i></button>
-							<?php if (!$ch['node_id']) { ?><a class="btn btn-sm btn-outline-secondary" href="/notifications.php?edit=<?php echo (int)$ch['id']; ?>" title="Bearbeiten"><i class="fa-solid fa-pen"></i></a>
+							<?php if (!$ch['node_id']) { ?><a class="btn btn-sm btn-outline-secondary" href="/notifications.php?edit=<?php echo (int)$ch['id']; ?>" title="Bearbeiten"><i class="fa-solid fa-pen"></i></a><?php } ?>
 							<button class="btn btn-sm btn-outline-secondary" name="action" value="default" title="Standard umschalten"><i class="fa-solid fa-star"></i></button>
 							<button class="btn btn-sm btn-outline-secondary" name="action" value="toggle" title="<?php echo (int)$ch['enabled'] ? 'Deaktivieren' : 'Aktivieren'; ?>"><i class="fa-solid <?php echo (int)$ch['enabled'] ? 'fa-toggle-on' : 'fa-toggle-off'; ?>"></i></button>
-							<button class="btn btn-sm btn-outline-danger" name="action" value="delete" onclick="return confirm('Kanal löschen?');"><i class="fa-solid fa-trash"></i></button><?php } ?></form></td></tr>
+							<button class="btn btn-sm btn-outline-danger" name="action" value="delete" onclick="return confirm('Kanal löschen?');"><i class="fa-solid fa-trash"></i></button></form></td></tr>
 					<?php } ?>
 					</tbody></table></div>
 			</div>
