@@ -175,7 +175,17 @@ route('PATCH', '/hc2/settings', function() {
 	foreach (body() as $k => $v) {
 		if (!in_array($k, $allowed, true)) { fail(422, 'invalid_setting', "Unknown setting '$k'. Allowed: " . implode(', ', $allowed) . '.', array('field' => $k)); }
 		if (is_bool($v)) { $v = $v ? '1' : '0'; } elseif (is_array($v)) { $v = implode(',', array_map('intval', $v)); }
-		hc2_set_setting(uid(), $k, (string)$v); $n++;
+		$v = trim((string)$v); $bad = false;
+		// Werte pruefen wie Node und hub (sonst wuerde eine ungueltige Uhrzeit die Ruhezeit still abschalten)
+		switch ($k) {
+			case 'notify.quiet_enabled': $v = in_array(strtolower($v), array('1', 'true', 'on'), true) ? '1' : '0'; break;
+			case 'notify.quiet_from': case 'notify.quiet_to': $bad = !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v); break;
+			case 'notify.quiet_days': $d = array_unique(array_map('intval', array_filter(explode(',', $v), 'strlen'))); sort($d); $bad = (bool)array_filter($d, function($x) { return $x < 1 || $x > 7; }); $v = implode(',', $d); break;
+			case 'notify.quiet_tz': $bad = $v !== '' && !in_array($v, timezone_identifiers_list(), true); break;
+			default: $lim = array('notify.rate_per_hour' => 1000, 'notify.batch_threshold' => 100, 'notify.batch_window_seconds' => 600)[$k]; $bad = !preg_match('/^\d+$/', $v) || (int)$v > $lim; break;
+		}
+		if ($bad) { fail(422, 'invalid_value', "Invalid value for '$k'.", array('field' => $k)); }
+		hc2_set_setting(uid(), $k, $v); $n++;
 	}
 	if ($n) { hc2_log_change(uid(), 'settings', 'notify', 'upsert', 'api'); }
 	ok(hc2_settings(uid()) ?: new stdClass());
