@@ -48,7 +48,14 @@ try {
 			if (!filter_var($to, FILTER_VALIDATE_EMAIL)) { bridge_out(false, 'invalid address', 400); }
 			$mail = new PHPMailer();
 			$body = $html !== '' ? $html : nl2br(htmlspecialchars($text));
-			// send_mail() nimmt freien HTML-Text als Body, wenn er kein Schluesselwort/keine Check-ID ist
+			if ((new ReflectionFunction('send_mail'))->getNumberOfParameters() >= 9) {
+				// send_mail() mit hc2-Option: Betreff und Inhalt unveraendert, eigener Textteil, Ergebnis des Versands
+				$ok = send_mail($pdo, $mail, '', 'IPv64.net Healthchecks', $to, $subject !== '' ? $subject : 'IPv64.net Healthchecks', $body, $updown, array('text' => $text));
+				$mail->smtpClose();
+				if ($ok === false) { bridge_out(false, 'mail not sent', 502); }
+				bridge_out(true);
+			}
+			// aeltere send_mail(): nimmt freien HTML-Text als Body, wenn er kein Schluesselwort/keine Check-ID ist
 			$info = send_mail($pdo, $mail, '', '', $to, $subject !== '' ? $subject : 'IPv64.net Healthcheck', $body, $updown);
 			$mail->smtpClose();
 			bridge_out(true);
