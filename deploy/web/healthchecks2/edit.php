@@ -15,7 +15,7 @@ $cloneOf = isset($_GET['clone']) ? hc2_check($uid, (string)$_GET['clone']) : nul
 // Formularwerte (Standard / aus Check / aus POST)
 $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60, 'retry_interval_sec' => 20, 'retries' => 1, 'connect_timeout' => 5, 'total_timeout' => 10, 'stabilize' => 3, 'ip_mode' => 'auto',
 	'tags' => '', 'group_name' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
-	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
+	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'nodes' => isset($_GET['node']) ? array((string)$_GET['node']) : array_slice(array_keys($nodes), 0, 1), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
 	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0, 'cert_min_days' => 14,
 	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '');
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
@@ -23,7 +23,7 @@ $src = $old ?: $cloneOf;
 if ($src) {
 	foreach (array('type','name','target','interval_sec','retry_interval_sec','retries','stabilize','ip_mode','tags','group_name','description','repeat_minutes','notify_down','notify_up','notify_degraded','critical','invert','paused','execution','policy') as $k) { $f[$k] = $src[$k]; }
 	$f['connect_timeout'] = $src['connect_timeout_ms'] / 1000; $f['total_timeout'] = $src['total_timeout_ms'] / 1000;
-	$f['parent_token'] = (string)$src['parent_token']; $f['channels'] = hc2_check_channels($src); $f['node_id'] = (string)$src['node_id']; $f['locations'] = array_filter(explode(',', $src['locations']));
+	$f['parent_token'] = (string)$src['parent_token']; $f['channels'] = hc2_check_channels($src); $f['node_id'] = (string)$src['node_id']; $f['nodes'] = hc2_check_nodes($src) ?: array_slice(array_keys($nodes), 0, 1); $f['locations'] = array_filter(explode(',', $src['locations']));
 	$p = hc2_check_params($src);
 	if (!isset($p['cert_min_days'])) { $f['cert_min_days'] = 0; }
 	foreach ($p as $k => $v) {
@@ -38,7 +38,7 @@ if ($src) {
 if (hc2_is_post()) {
 	if (!hc2_csrf_ok()) { $errors[] = 'Ungültige Anfrage, bitte Seite neu laden.'; }
 	foreach ($f as $k => $v) { if (array_key_exists($k, $_POST)) { $f[$k] = $_POST[$k]; } elseif (in_array($k, array('notify_down','notify_up','notify_degraded','critical','invert','paused','follow_redirects','keyword_absent','insecure_tls','tls','skip_chain','skip_hostname'), true)) { $f[$k] = 0; } }
-	$f['channels'] = (array)($_POST['channels'] ?? array()); $f['locations'] = (array)($_POST['locations'] ?? array());
+	$f['channels'] = (array)($_POST['channels'] ?? array()); $f['locations'] = (array)($_POST['locations'] ?? array()); $f['nodes'] = (array)($_POST['nodes'] ?? array());
 	if (!$errors) {
 		$v = hc2_validate_check(array_merge($f, array('follow_redirects_present' => 1)), $uid, $old);
 		$errors = array_merge($errors, $v['errors']);
@@ -47,11 +47,12 @@ if (hc2_is_post()) {
 				$row = $v['row'];
 				if ($old) {
 					// Ausfuehrungsort geaendert? Dann erst speichern (ohne Ort), danach Umhaengen mit Testlauf.
-					$moved = $row['execution'] !== $old['execution'] || ($row['execution'] !== 'online' && (string)$row['node_id'] !== (string)$old['node_id']) || ($row['execution'] !== 'local' && $row['locations'] !== $old['locations']);
-					$target = $row['execution']; $nodeSel = $row['node_id']; $locSel = $row['locations'];
-					if ($moved) { $row['execution'] = $old['execution']; $row['node_id'] = $old['node_id']; $row['locations'] = $old['locations']; }
+					$newNodes = array_filter(explode(',', (string)$row['nodes']));
+					$moved = $row['execution'] !== $old['execution'] || ($row['execution'] !== 'online' && !hc2_same_list($newNodes, hc2_check_nodes($old))) || ($row['execution'] !== 'local' && $row['locations'] !== $old['locations']);
+					$target = $row['execution']; $locSel = $row['locations'];
+					if ($moved) { $row['execution'] = $old['execution']; $row['node_id'] = $old['node_id']; $row['nodes'] = (string)$old['nodes']; $row['locations'] = $old['locations']; }
 					hc2_update_check($uid, $old['token'], $row);
-					if ($moved) { hc2_redirect(HC2_BASE . '/move.php?tokens=' . $old['token'] . '&to=' . $target . '&node=' . urlencode((string)$nodeSel) . '&locations=' . urlencode($locSel) . '&auto=1'); }
+					if ($moved) { hc2_redirect(HC2_BASE . '/move.php?tokens=' . $old['token'] . '&to=' . $target . '&nodes=' . urlencode(implode(',', $newNodes)) . '&locations=' . urlencode($locSel) . '&auto=1'); }
 					hc2_flash('success', 'Check gespeichert.');
 					hc2_redirect(HC2_BASE . '/check.php?token=' . $old['token']);
 				}
@@ -169,7 +170,13 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							</select>
 							<?php if (!$nodes) { echo '<small class="form-text text-muted">Lokal/Hybrid erst nach <a href="/link.php">Verknüpfung einer Node</a>.</small>'; } elseif ($old) { echo '<small class="form-text text-muted">Beim Wechsel wird vor der Übernahme ein Testlauf gemacht.</small>'; } ?>
 						</div>
-						<div class="form-group" id="nodebox"><label>Node</label><select class="custom-select" name="node_id"><?php foreach ($nodes as $id => $n) { echo '<option value="' . hc2_h($id) . '"' . $sel('node_id', $id) . '>' . hc2_h(hc2_node_label($nodes, $id)) . ((int)$n['online'] ? '' : ' – offline') . '</option>'; } ?></select></div>
+						<div class="form-group" id="nodebox"><label><i class="fa-solid fa-server text-primary"></i> Messende Nodes</label>
+							<?php foreach ($nodes as $id => $n) { $on = in_array($id, (array)$f['nodes'], true); ?>
+							<div class="custom-control custom-checkbox"><input class="custom-control-input hc2-node" type="checkbox" id="nd_<?php echo hc2_h($id); ?>" name="nodes[]" value="<?php echo hc2_h($id); ?>"<?php echo $on ? ' checked' : ''; ?>><label class="custom-control-label" for="nd_<?php echo hc2_h($id); ?>"><?php echo hc2_h(hc2_node_label($nodes, $id)); ?><?php echo (int)$n['online'] ? ' <span class="badge badge-success">online</span>' : ' <span class="badge badge-secondary">offline</span>'; ?><?php echo ($old && $id === (string)$old['node_id']) ? ' <span class="badge badge-light" title="Bearbeiten in der Node, Benachrichtigung ohne Verbindung">Besitzer</span>' : ''; ?></label></div>
+							<?php } ?>
+							<small class="form-text text-muted" data-not-type="docker push">Mehrere Nodes möglich, z. B. an verschiedenen Standorten oder mit Zugang über VPN. Jede gewählte Node misst selbst und erscheint als eigene Messstelle.</small>
+							<small class="form-text text-warning" data-type="docker push">Docker- und Push-Checks gehören zu genau einer Node (Container bzw. Push-Adresse)<?php echo ($old && $old['type'] === 'docker') ? ' und sind nicht umhängbar' : ''; ?>.</small>
+						</div>
 						<div class="form-group" id="locbox"><label>Standorte</label>
 							<?php $i = 0; foreach ($locs as $code => $name) { $i++; $allowed = $i <= $acc['hc_locations']; ?>
 							<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="loc_<?php echo $code; ?>" name="locations[]" value="<?php echo $code; ?>"<?php echo in_array($code, (array)$f['locations'], true) && $allowed ? ' checked' : ''; echo $allowed ? '' : ' disabled'; ?>><label class="custom-control-label" for="loc_<?php echo $code; ?>"><?php echo hc2_h($name); ?><?php echo $allowed ? '' : ' <span class="badge badge-secondary">ab Supporter</span>'; ?></label></div>

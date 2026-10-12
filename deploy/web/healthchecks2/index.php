@@ -56,7 +56,7 @@ $list = array_values(array_filter($all, function($c) use ($q, $fState, $fType, $
 	if ($fState !== '' && $stateOf($c) !== $fState) { return false; }
 	if ($fType !== '' && $c['type'] !== $fType) { return false; }
 	if ($fExec !== '' && $c['execution'] !== $fExec) { return false; }
-	if ($fNode !== '' && (string)$c['node_id'] !== $fNode) { return false; }
+	if ($fNode !== '' && !in_array($fNode, hc2_check_nodes($c), true)) { return false; }
 	if ($fTag !== '' && !in_array($fTag, explode(',', $c['tags']), true)) { return false; }
 	if ($fGroup !== '' && $c['group_name'] !== $fGroup) { return false; }
 	return true;

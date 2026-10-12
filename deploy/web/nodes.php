@@ -23,14 +23,17 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 					hc2_log_change($uid, 'node', $nid, 'delete', 'portal');
 					hc2_signal('hc2:node:' . $nid, 'revoke');
 					$keep = !empty($_POST['keep_checks']);
-					$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE node_id = :n AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both')"); $st->execute(array('n' => $nid, 'u' => $uid));
-					$kept = 0; $dropped = 0;
+					$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE (node_id = :n OR FIND_IN_SET(:n2, nodes) > 0) AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both')"); $st->execute(array('n' => $nid, 'n2' => $nid, 'u' => $uid));
+					$kept = 0; $dropped = 0; $moved = 0;
 					foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
+						// weitere messende Nodes: diese austragen, Besitz an die naechste
+						$rest = array_values(array_diff(hc2_check_nodes($c), array($nid)));
+						if ($rest) { hc2_set_check($uid, $c['token'], array('nodes' => implode(',', $rest), 'node_id' => (string)$c['node_id'] === $nid ? $rest[0] : $c['node_id'])); $moved++; continue; }
 						$acc = hc2_account($uid); $locs = array_filter(explode(',', $c['locations'])) ?: array_keys(hc2_locations());
 						$fits = $keep && !hc2_private_target($c['type'], $c['target']) && ($acc['healthcheck_limit'] <= 0 || hc2_online_used($uid, $c['token']) + count($locs) <= $acc['healthcheck_limit']);
-						if ($fits) { hc2_set_check($uid, $c['token'], array('execution' => 'online', 'node_id' => null)); $kept++; } else { hc2_delete_check($uid, $c['token']); $dropped++; }
+						if ($fits) { hc2_set_check($uid, $c['token'], array('execution' => 'online', 'node_id' => null, 'nodes' => '')); $kept++; } else { hc2_delete_check($uid, $c['token']); $dropped++; }
 					}
-					$msg = 'Node getrennt. ' . ($keep ? $kept . ' Check(s) laufen online weiter, ' . $dropped . ' gelöscht (privates Ziel oder Limit).' : $dropped . ' Check(s) der Node gelöscht.');
+					$msg = 'Node getrennt. ' . ($moved ? $moved . ' Check(s) messen andere Nodes weiter. ' : '') . ($keep ? $kept . ' Check(s) laufen online weiter, ' . $dropped . ' gelöscht (privates Ziel oder Limit).' : $dropped . ' Check(s) der Node gelöscht.');
 					$nid = '';
 					break;
 				case 'rename':
@@ -55,7 +58,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 		}
 	} catch (Throwable $e) { error_log('nodes.php: ' . $e->getMessage()); $msg = 'Aktion fehlgeschlagen.'; }
 }
-$st = $pdo->prepare("SELECT n.*, (SELECT COUNT(*) FROM hc2_checks c WHERE c.node_id = n.node_id AND c.deleted_at IS NULL AND c.execution IN ('local','both')) AS checks FROM hc2_nodes n WHERE userid = :u ORDER BY revoked_at IS NOT NULL, created_at DESC");
+$st = $pdo->prepare("SELECT n.*, (SELECT COUNT(*) FROM hc2_checks c WHERE (c.node_id = n.node_id OR FIND_IN_SET(n.node_id, c.nodes) > 0) AND c.deleted_at IS NULL AND c.execution IN ('local','both')) AS checks FROM hc2_nodes n WHERE userid = :u ORDER BY revoked_at IS NOT NULL, created_at DESC");
 $st->execute(array('u' => $uid)); $nodes = $st->fetchAll(PDO::FETCH_ASSOC);
 $detail = $loadNode($nid); $nodeMap = hc2_nodes($uid);
 ?>
@@ -86,7 +89,7 @@ $detail = $loadNode($nid); $nodeMap = hc2_nodes($uid);
 		<?php } ?>
 	</div>
 	<?php if ($detail && empty($detail['revoked_at'])) { $N = $detail['node_id'];
-		$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE node_id = :n AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both') ORDER BY name"); $st->execute(array('n' => $N, 'u' => $uid)); $nchecks = $st->fetchAll(PDO::FETCH_ASSOC);
+		$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE (node_id = :n OR FIND_IN_SET(:n2, nodes) > 0) AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both') ORDER BY name"); $st->execute(array('n' => $N, 'n2' => $N, 'u' => $uid)); $nchecks = $st->fetchAll(PDO::FETCH_ASSOC);
 		$st = $pdo->prepare("SELECT * FROM hc2_commands WHERE node_id = :n ORDER BY id DESC LIMIT 10"); $st->execute(array('n' => $N)); $cmds = $st->fetchAll(PDO::FETCH_ASSOC);
 		$pills = hc2_pills_many(array_column($nchecks, 'token'), 20, $nodeMap);
 	?>

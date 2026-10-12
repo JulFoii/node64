@@ -105,6 +105,20 @@ function hc2_nodes(int $userid, bool $fresh = false): array {
 	foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $n) { $out[$n['node_id']] = $n; }
 	return $cache[$userid] = $out;
 }
+/** Messende Nodes eines Checks (Spalte nodes; alte Checks: nur die Besitzer-Node). */
+function hc2_check_nodes(array $c): array {
+	if (($c['execution'] ?? 'online') === 'online') { return array(); }
+	$l = array_values(array_unique(array_filter(explode(',', (string)($c['nodes'] ?? '')))));
+	if (!$l && !empty($c['node_id'])) { $l = array((string)$c['node_id']); }
+	return $l;
+}
+/** Docker (Container der Node) und Push (Adresse der Node) gehoeren zu genau einer Node. */
+function hc2_single_node_type(string $type): bool { return $type === 'docker' || $type === 'push'; }
+function hc2_same_list(array $a, array $b): bool { sort($a); sort($b); return array_values($a) === array_values($b); }
+function hc2_nodes_label(array $nodes, array $ids): string {
+	$o = array(); foreach ($ids as $id) { $o[] = hc2_node_label($nodes, $id) ?: 'Node'; }
+	return implode(', ', $o);
+}
 function hc2_node_label(array $nodes, ?string $nodeId): string {
 	if (!$nodeId) { return ''; }
 	if (!isset($nodes[$nodeId])) { return 'Node (getrennt)'; }
@@ -146,7 +160,7 @@ function hc2_reason_text(?string $r): string {
 	return $m[$r ?? ''] ?? (string)$r;
 }
 function hc2_exec_badge(array $c, array $nodes): string {
-	$node = hc2_node_label($nodes, $c['node_id'] ?? null);
+	$node = hc2_nodes_label($nodes, hc2_check_nodes($c));
 	$locs = array(); foreach (explode(',', (string)($c['locations'] ?? '')) as $l) { if ($l !== '') { $locs[] = hc2_locations()[$l] ?? $l; } }
 	$online = 'ipv64 (' . implode(', ', $locs) . ')';
 	switch ($c['execution'] ?? 'online') {
@@ -278,9 +292,19 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 
 	// Messstellen und Bewertung
 	$execution = (string)($in['execution'] ?? 'online'); if (!in_array($execution, array('local','online','both'), true)) { $execution = 'online'; }
-	$nodeId = (string)($in['node_id'] ?? ($old['node_id'] ?? ''));
+	// Messende Nodes (mehrere moeglich); node_id = Besitzer: bleibt, solange er gewaehlt ist
+	$oldNodes = $old ? hc2_check_nodes($old) : array();
+	if (isset($in['nodes']) && is_array($in['nodes'])) { $req = $in['nodes']; }
+	elseif (isset($in['node_id']) && (string)$in['node_id'] !== '') { $req = array((string)$in['node_id']); }
+	else { $req = $oldNodes ?: (($old && !empty($old['node_id'])) ? array($old['node_id']) : array()); }
+	$nodeSel = array(); foreach ($req as $nid) { $nid = (string)$nid; if ($nid !== '' && !in_array($nid, $nodeSel, true)) { $nodeSel[] = $nid; } }
+	$nodeId = '';
 	if ($execution !== 'online') {
-		if ($nodeId === '' || !isset($nodes[$nodeId])) { $err[] = 'Für lokale oder hybride Messung muss eine verbundene Node gewählt sein.'; }
+		foreach ($nodeSel as $nid) { if (!isset($nodes[$nid])) { $err[] = 'Eine gewählte Node ist nicht (mehr) verknüpft.'; break; } }
+		if (!$nodeSel) { $err[] = 'Für lokale oder hybride Messung mindestens eine verbundene Node wählen.'; }
+		if (hc2_single_node_type($type) && count($nodeSel) > 1) { $err[] = 'Docker- und Push-Checks gehören zu genau einer Node.'; }
+		$nodeId = ($old && in_array((string)$old['node_id'], $nodeSel, true)) ? (string)$old['node_id'] : (string)($nodeSel[0] ?? '');
+		if ($type === 'docker' && $old && !empty($old['node_id']) && $nodeId !== (string)$old['node_id']) { $err[] = 'Docker-Checks gehören zur Node, auf der der Container läuft, und sind nicht umhängbar.'; }
 	}
 	$sel = array(); foreach ((array)($in['locations'] ?? array_keys($locs)) as $l) { if (isset($locs[$l]) && !in_array($l, $sel, true)) { $sel[] = $l; } }
 	if (!$sel) { $sel = array_keys($locs); }
@@ -300,7 +324,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 		'invert' => $flag('invert') ? 1 : 0, 'stabilize' => $stab, 'ip_mode' => $ipMode, 'tags' => $tags, 'group_name' => $group, 'description' => $desc, 'paused' => $flag('paused') ? 1 : 0,
 		'parent_token' => $parent !== '' ? $parent : null, 'critical' => $flag('critical') ? 1 : 0, 'notify_down' => $flag('notify_down') ? 1 : 0, 'notify_up' => $flag('notify_up') ? 1 : 0,
 		'channels' => implode(',', $channels), 'repeat_minutes' => $repeat,
-		'execution' => $execution, 'node_id' => $execution === 'online' ? ($old['node_id'] ?? null) : $nodeId, 'locations' => implode(',', $sel), 'policy' => $policy, 'notify_degraded' => $flag('notify_degraded') ? 1 : 0,
+		'execution' => $execution, 'node_id' => $execution === 'online' ? ($old['node_id'] ?? null) : $nodeId, 'nodes' => $execution === 'online' ? '' : implode(',', $nodeSel), 'locations' => implode(',', $sel), 'policy' => $policy, 'notify_degraded' => $flag('notify_degraded') ? 1 : 0,
 	);
 	if ($execution === 'online' && $row['node_id'] === '') { $row['node_id'] = null; }
 	return array('row' => $row, 'errors' => $err);
@@ -376,14 +400,22 @@ function hc2_wire_def(array $c): array {
  * Testlauf fuer ein Umhaengen anlegen: online/both -> die hubs messen je Standort; local/both -> Kommando test_check an die Node.
  * Liefert array('id' => ..., 'error' => '') .
  */
-function hc2_testrun_create(int $userid, array $c, string $target, ?string $nodeId, array $locations): array {
+function hc2_testrun_create(int $userid, array $c, string $target, $nodeIds, array $locations): array {
 	$acc = hc2_account($userid); $nodes = hc2_nodes($userid);
+	$ids = array(); foreach ((array)$nodeIds as $x) { $x = (string)$x; if ($x !== '' && !in_array($x, $ids, true)) { $ids[] = $x; } }
 	if (!in_array($target, array('local','online','both'), true)) { return array('id' => 0, 'error' => 'Ungültiger Ausführungsort.'); }
 	if ($c['type'] === 'docker') { return array('id' => 0, 'error' => 'Docker-Checks laufen nur lokal auf ihrer Node und sind nicht umhängbar.'); }
+	$nodeId = null;
 	if ($target !== 'online') {
-		if (!$nodeId || !isset($nodes[$nodeId])) { return array('id' => 0, 'error' => 'Node nicht gefunden oder getrennt.'); }
-		if ((int)$nodes[$nodeId]['online'] !== 1) { return array('id' => 0, 'error' => 'Die Node ist offline; der Testlauf braucht eine verbundene Node.'); }
-		if ($nodes[$nodeId]['remote_mgmt'] === 'off') { return array('id' => 0, 'error' => 'Die Node nimmt keine Befehle an (Fernverwaltung aus).'); }
+		if (!$ids) { return array('id' => 0, 'error' => 'Keine Node gewählt.'); }
+		if (hc2_single_node_type($c['type']) && count($ids) > 1) { return array('id' => 0, 'error' => 'Push-Checks gehören zu genau einer Node.'); }
+		foreach ($ids as $nid) {
+			if (!isset($nodes[$nid])) { return array('id' => 0, 'error' => 'Node nicht gefunden oder getrennt.'); }
+			$nl = hc2_node_label($nodes, $nid);
+			if ((int)$nodes[$nid]['online'] !== 1) { return array('id' => 0, 'error' => 'Die Node ' . $nl . ' ist offline; der Testlauf braucht verbundene Nodes.'); }
+			if ($nodes[$nid]['remote_mgmt'] === 'off') { return array('id' => 0, 'error' => 'Die Node ' . $nl . ' nimmt keine Befehle an (Fernverwaltung aus).'); }
+		}
+		$nodeId = in_array((string)$c['node_id'], $ids, true) ? (string)$c['node_id'] : $ids[0]; // Besitzer bleibt, solange gewaehlt
 	}
 	if ($target !== 'local') {
 		if (hc2_private_target($c['type'], $c['target'])) { return array('id' => 0, 'error' => 'Online-Checks können keine privaten Ziele prüfen.'); }
@@ -395,11 +427,11 @@ function hc2_testrun_create(int $userid, array $c, string $target, ?string $node
 	} else { $locations = array_keys(hc2_locations()); }
 	$def = json_encode(hc2_wire_def($c), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 	$pdo = hc2_pdo();
-	$pdo->prepare("INSERT INTO hc2_testruns (userid, token, definition, target_execution, node_id, locations, status, created_at) VALUES (:u, :t, :d, :e, :n, :l, 'pending', UTC_TIMESTAMP(3))")
-		->execute(array('u' => $userid, 't' => $c['token'], 'd' => $def, 'e' => $target, 'n' => $target === 'online' ? null : $nodeId, 'l' => implode(',', $locations)));
+	$pdo->prepare("INSERT INTO hc2_testruns (userid, token, definition, target_execution, node_id, nodes, locations, status, created_at) VALUES (:u, :t, :d, :e, :n, :ns, :l, 'pending', UTC_TIMESTAMP(3))")
+		->execute(array('u' => $userid, 't' => $c['token'], 'd' => $def, 'e' => $target, 'n' => $nodeId, 'ns' => $target === 'online' ? '' : implode(',', $ids), 'l' => implode(',', $locations)));
 	$id = (int)$pdo->lastInsertId();
 	if ($target !== 'online') {
-		hc2_command($nodeId, 'test_check', array('definition' => json_decode($def), 'testrun_id' => $id, 'token' => $c['token']));
+		foreach ($ids as $nid) { hc2_command($nid, 'test_check', array('definition' => json_decode($def), 'testrun_id' => $id, 'token' => $c['token'])); }
 	}
 	return array('id' => $id, 'error' => '');
 }
@@ -415,7 +447,7 @@ function hc2_testrun_status(int $userid, int $id): array {
 	$nodes = hc2_nodes($userid);
 	foreach ($res as $k => $r) {
 		if ($k === 'applied' || !is_array($r)) { continue; }
-		$label = $k === 'node' ? (hc2_node_label($nodes, $t['node_id']) ?: 'Node') : 'ipv64 ' . (hc2_locations()[$k] ?? $k);
+		$label = $k === 'node' ? (hc2_node_label($nodes, $t['node_id']) ?: 'Node') : (strncmp($k, 'node:', 5) === 0 ? (hc2_node_label($nodes, substr($k, 5)) ?: 'Node') : 'ipv64 ' . (hc2_locations()[$k] ?? $k));
 		$msg = $r['error'] ?? '';
 		if ($msg === '' && !empty($r['results']) && is_array($r['results'])) { $parts = array(); foreach ($r['results'] as $x) { $parts[] = ($x['family'] ?? '') . ' ' . ($x['status'] ?? '') . (isset($x['latency_ms']) ? ' ' . round((float)$x['latency_ms'], 1) . ' ms' : '') . (!empty($x['message']) ? ' (' . $x['message'] . ')' : ''); } $msg = implode(' | ', $parts); }
 		$out['results'][] = array('source' => $label, 'ok' => !empty($r['ok']), 'message' => trim($msg));
@@ -424,7 +456,7 @@ function hc2_testrun_status(int $userid, int $id): array {
 		$c = hc2_check($userid, $t['token']);
 		if ($c) {
 			$fields = array('execution' => $t['target_execution'], 'locations' => $t['locations']);
-			if ($t['target_execution'] !== 'online') { $fields['node_id'] = $t['node_id']; }
+			if ($t['target_execution'] !== 'online') { $fields['node_id'] = $t['node_id']; $fields['nodes'] = (string)($t['nodes'] ?? '') !== '' ? $t['nodes'] : $t['node_id']; } else { $fields['nodes'] = ''; }
 			hc2_set_check($userid, $t['token'], $fields);
 		}
 		$pdo->prepare("UPDATE hc2_testruns SET result = JSON_SET(COALESCE(result,'{}'), '$.applied', true) WHERE id = :i")->execute(array('i' => $id));

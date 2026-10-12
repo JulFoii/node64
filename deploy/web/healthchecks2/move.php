@@ -10,14 +10,18 @@ $tokens = array(); foreach (explode(',', (string)($_GET['tokens'] ?? $_POST['tok
 $checks = array(); foreach ($tokens as $t) { if ($c = hc2_check($uid, $t)) { $checks[] = $c; } }
 if (!$checks) { echo '<div class="container"><div class="alert alert-danger mt-3">Keine Checks gewählt.</div></div>'; include("../footer.php"); exit; }
 $to = (string)($_POST['to'] ?? $_GET['to'] ?? ($checks[0]['execution'] === 'online' ? 'local' : 'online'));
-$nodeSel = (string)($_POST['node'] ?? $_GET['node'] ?? ($checks[0]['node_id'] ?: (string)array_key_first($nodes)));
+if (isset($_POST['nodes'])) { $nodesSel = (array)$_POST['nodes']; }
+elseif (isset($_GET['nodes'])) { $nodesSel = array_filter(explode(',', (string)$_GET['nodes'])); }
+elseif (isset($_GET['node'])) { $nodesSel = array((string)$_GET['node']); }
+else { $nodesSel = hc2_check_nodes($checks[0]) ?: array_slice(array_keys($nodes), 0, 1); }
+$nodesSel = array_values(array_unique(array_map('strval', $nodesSel)));
 $locSel = (array)($_POST['locations'] ?? array_filter(explode(',', (string)($_GET['locations'] ?? $checks[0]['locations']))));
 $runs = array(); $errors = array();
 $start = (hc2_is_post() && hc2_csrf_ok() && ($_POST['start'] ?? '') === '1') || (!hc2_is_post() && ($_GET['auto'] ?? '') === '1');
 if ($start) {
 	foreach ($checks as $c) {
-		if ($c['execution'] === $to && ($to === 'online' || (string)$c['node_id'] === $nodeSel) && ($to === 'local' || implode(',', $locSel) === $c['locations'])) { $runs[] = array('token' => $c['token'], 'name' => $c['name'], 'id' => 0, 'skip' => 'unverändert'); continue; }
-		$r = hc2_testrun_create($uid, $c, $to, $nodeSel, $locSel);
+		if ($c['execution'] === $to && ($to === 'online' || hc2_same_list(hc2_check_nodes($c), $nodesSel)) && ($to === 'local' || implode(',', $locSel) === $c['locations'])) { $runs[] = array('token' => $c['token'], 'name' => $c['name'], 'id' => 0, 'skip' => 'unverändert'); continue; }
+		$r = hc2_testrun_create($uid, $c, $to, $nodesSel, $locSel);
 		$runs[] = array('token' => $c['token'], 'name' => $c['name'], 'id' => $r['id'], 'error' => $r['error']);
 	}
 }
@@ -29,18 +33,18 @@ $label = array('online' => 'Online bei ipv64', 'local' => 'Lokal auf der Node', 
 	<div class="card shadow-sm mb-3">
 		<div class="card-header p-2"><i class="fa-solid fa-right-left"></i> Umhängen: <?php echo count($checks); ?> Check(s)</div>
 		<div class="card-body">
-			<p class="small text-muted">Vor dem Wechsel wird ein Testlauf gemacht: online von jedem gewählten Standort, lokal auf der Node. Erst wenn alle Messstellen OK melden, wird der Ausführungsort übernommen. Der Token und die Messhistorie bleiben erhalten.</p>
+			<p class="small text-muted">Vor dem Wechsel wird ein Testlauf gemacht: online von jedem gewählten Standort, lokal auf jeder gewählten Node. Erst wenn alle Messstellen OK melden, wird der Ausführungsort übernommen. Der Token und die Messhistorie bleiben erhalten.</p>
 			<ul class="small mb-3"><?php foreach ($checks as $c) { echo '<li><a href="' . HC2_BASE . '/check.php?token=' . hc2_h($c['token']) . '">' . hc2_h($c['name']) . '</a> – derzeit ' . hc2_exec_badge($c, $nodes) . '</li>'; } ?></ul>
 			<?php if (!$start) { ?>
 			<form method="post" class="form-row align-items-end">
 				<?php echo hc2_csrf_field(); ?><input type="hidden" name="tokens" value="<?php echo hc2_h(implode(',', $tokens)); ?>"><input type="hidden" name="start" value="1">
 				<div class="form-group col-md-4"><label>Neuer Ausführungsort</label><select class="custom-select" name="to" id="to"><?php foreach ($label as $k => $v) { echo '<option value="' . $k . '"' . ($to === $k ? ' selected' : '') . (($k !== 'online' && !$nodes) ? ' disabled' : '') . '>' . $v . '</option>'; } ?></select></div>
-				<div class="form-group col-md-4" id="nodebox"><label>Node</label><select class="custom-select" name="node"><?php foreach ($nodes as $id => $n) { echo '<option value="' . hc2_h($id) . '"' . ($nodeSel === $id ? ' selected' : '') . '>' . hc2_h(hc2_node_label($nodes, $id)) . ((int)$n['online'] ? '' : ' – offline') . '</option>'; } ?></select></div>
+				<div class="form-group col-md-4" id="nodebox"><label>Messende Nodes</label><div><?php foreach ($nodes as $id => $n) { echo '<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="n_' . hc2_h($id) . '" name="nodes[]" value="' . hc2_h($id) . '"' . (in_array($id, $nodesSel, true) ? ' checked' : '') . '><label class="custom-control-label" for="n_' . hc2_h($id) . '">' . hc2_h(hc2_node_label($nodes, $id)) . ((int)$n['online'] ? '' : ' <span class="badge badge-secondary">offline</span>') . '</label></div>'; } ?></div></div>
 				<div class="form-group col-md-4" id="locbox"><label>Standorte</label><div><?php $i = 0; foreach ($locs as $code => $name) { $i++; $ok = $i <= $acc['hc_locations']; echo '<div class="custom-control custom-checkbox custom-control-inline"><input class="custom-control-input" type="checkbox" id="l_' . $code . '" name="locations[]" value="' . $code . '"' . ((in_array($code, $locSel, true) && $ok) ? ' checked' : '') . ($ok ? '' : ' disabled') . '><label class="custom-control-label" for="l_' . $code . '">' . hc2_h($name) . '</label></div>'; } ?></div></div>
 				<div class="form-group col-12"><button class="btn btn-primary" type="submit"><i class="fa-solid fa-flask"></i> Testlauf starten</button> <a class="btn btn-outline-secondary" href="<?php echo count($checks) === 1 ? HC2_BASE . '/check.php?token=' . hc2_h($checks[0]['token']) : HC2_BASE . '/'; ?>">Abbrechen</a></div>
 			</form>
 			<?php } else { ?>
-			<p>Ziel: <strong><?php echo $label[$to] ?? $to; ?></strong><?php echo $to !== 'online' ? ' · Node ' . hc2_h(hc2_node_label($nodes, $nodeSel)) : ''; echo $to !== 'local' ? ' · Standorte ' . hc2_h(implode(', ', array_map(function($l) use ($locs) { return $locs[$l] ?? $l; }, $locSel))) : ''; ?></p>
+			<p>Ziel: <strong><?php echo $label[$to] ?? $to; ?></strong><?php echo $to !== 'online' ? ' · Nodes ' . hc2_h(hc2_nodes_label($nodes, $nodesSel)) : ''; echo $to !== 'local' ? ' · Standorte ' . hc2_h(implode(', ', array_map(function($l) use ($locs) { return $locs[$l] ?? $l; }, $locSel))) : ''; ?></p>
 			<table class="table table-sm" id="runs"><thead><tr><th>Check</th><th>Status</th><th>Ergebnis</th></tr></thead><tbody>
 			<?php foreach ($runs as $r) { ?>
 				<tr data-id="<?php echo (int)$r['id']; ?>"><td><?php echo hc2_h($r['name']); ?></td>

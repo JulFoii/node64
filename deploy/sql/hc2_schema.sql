@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS `hc2_checks` (
   `token`              VARCHAR(50) NOT NULL,                -- wie healthchecks.healthtoken
   `userid`             INT NOT NULL,
   `node_id`           VARCHAR(32) NULL,                    -- Besitzer-Node bei execution local/both, sonst Herkunft
+  `nodes`              VARCHAR(600) NOT NULL DEFAULT '',  -- messende Nodes (Komma-Liste), node_id = Besitzer
   `execution`          ENUM('local','online','both') NOT NULL DEFAULT 'online',
   `locations`          SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',   -- Online-Standorte; Portal kuerzt auf user_class.hc_locations
   `policy`             ENUM('all','any','majority') NOT NULL DEFAULT 'all',
@@ -321,6 +322,7 @@ CREATE TABLE IF NOT EXISTS `hc2_testruns` (               -- Testlaeufe beim Umh
   `definition`       JSON NOT NULL,
   `target_execution` ENUM('local','online','both') NOT NULL,
   `node_id`         VARCHAR(32) NULL,
+  `nodes`      VARCHAR(600) NOT NULL DEFAULT '',          -- Testlauf auf mehreren Nodes
   `locations`        SET('nbg','fsn') NOT NULL DEFAULT 'nbg,fsn',
   `status`           ENUM('pending','running','ok','failed','expired') NOT NULL DEFAULT 'pending',
   `result`           JSON NULL,

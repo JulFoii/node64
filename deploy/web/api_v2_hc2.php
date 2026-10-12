@@ -40,6 +40,7 @@ function hc2_check_out(array $c, bool $detail = false): array {
 		'invert' => (int)$c['invert'] === 1, 'stabilize' => (int)$c['stabilize'], 'ip_mode' => $c['ip_mode'], 'tags' => array_values(array_filter(explode(',', (string)$c['tags']))), 'group' => (string)$c['group_name'],
 		'description' => (string)$c['description'], 'paused' => (int)$c['paused'] === 1, 'parent' => (string)$c['parent_token'], 'critical' => (int)$c['critical'] === 1,
 		'execution' => $c['execution'], 'node_id' => $c['node_id'], 'node_name' => $c['node_id'] ? hc2_node_label($nodes, $c['node_id']) : null,
+		'nodes' => array_map(function($id) use ($nodes) { return array('node_id' => $id, 'name' => hc2_node_label($nodes, $id) ?: null); }, hc2_check_nodes($c)),
 		'locations' => array_values(array_filter(explode(',', (string)$c['locations']))), 'policy' => $c['policy'], 'notify_degraded' => (int)$c['notify_degraded'] === 1,
 		'notify_down' => (int)$c['notify_down'] === 1, 'notify_up' => (int)$c['notify_up'] === 1, 'channels' => hc2_check_channels($c), 'repeat_minutes' => (int)$c['repeat_minutes'],
 		'revision' => (int)$c['revision'], 'created_at' => hc2_iso($c['created_at']), 'updated_at' => hc2_iso($c['updated_at']),
@@ -90,7 +91,7 @@ function hc2_node_out(array $n, bool $detail = false): array {
 		'remote_mgmt' => $n['remote_mgmt'], 'online' => (int)$n['online'] === 1, 'last_seen' => hc2_iso($n['last_seen']), 'last_sync' => hc2_iso($n['last_sync']), 'outbox_size' => (int)$n['outbox_size'],
 		'conflicts' => (int)$n['conflicts'], 'hub' => $n['node'] ?? '', 'linked_at' => hc2_iso($n['created_at']));
 	if ($detail) {
-		$st = hc2_pdo()->prepare("SELECT * FROM hc2_checks WHERE node_id = :n AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both') ORDER BY name"); $st->execute(array('n' => $n['node_id'], 'u' => uid()));
+		$st = hc2_pdo()->prepare("SELECT * FROM hc2_checks WHERE (node_id = :n OR FIND_IN_SET(:n2, nodes) > 0) AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both') ORDER BY name"); $st->execute(array('n' => $n['node_id'], 'n2' => $n['node_id'], 'u' => uid()));
 		$o['checks'] = array_map(fn($c) => hc2_check_out($c), $st->fetchAll(PDO::FETCH_ASSOC));
 	}
 	return $o;
@@ -129,6 +130,10 @@ function hc2_check_input(?array $old): array {
 	}
 	$f['execution'] = (string)($b['execution'] ?? ($old['execution'] ?? 'online'));
 	$f['node_id'] = (string)($b['node_id'] ?? ($old['node_id'] ?? ''));
+	// messende Nodes: Liste "nodes" (IDs); nur node_id = eine Node; sonst bisherige Liste
+	if (isset($b['nodes']) && is_array($b['nodes'])) { $f['nodes'] = array_values(array_map('strval', $b['nodes'])); }
+	elseif (isset($b['node_id'])) { $f['nodes'] = array((string)$b['node_id']); }
+	elseif ($old) { $f['nodes'] = hc2_check_nodes($old); }
 	$f['locations'] = isset($b['locations']) && is_array($b['locations']) ? $b['locations'] : ($old ? array_filter(explode(',', $old['locations'])) : array_keys(hc2_locations()));
 	$f['policy'] = (string)($b['policy'] ?? ($old['policy'] ?? 'all'));
 	return $f;
@@ -184,7 +189,7 @@ route('GET', '/hc2/checks', function() {
 	if (($t = qp('type')) !== null) { $list = array_filter($list, fn($c) => $c['type'] === $t); }
 	if (($s = qp('state')) !== null) { $list = array_filter($list, fn($c) => $stateOf($c) === $s); }
 	if (($e = qp('execution')) !== null) { $list = array_filter($list, fn($c) => $c['execution'] === $e); }
-	if (($n = qp('node_id')) !== null) { $list = array_filter($list, fn($c) => (string)$c['node_id'] === $n); }
+	if (($n = qp('node_id')) !== null) { $list = array_filter($list, fn($c) => in_array($n, hc2_check_nodes($c), true)); }
 	if (($g = qp('tag')) !== null) { $list = array_filter($list, fn($c) => in_array($g, explode(',', $c['tags']), true)); }
 	if (($gr = qp('group')) !== null) { $list = array_filter($list, fn($c) => $c['group_name'] === $gr); }
 	if (($q = qp('q')) !== null && $q !== '') { $list = array_filter($list, fn($c) => stripos($c['name'] . ' ' . $c['target'], $q) !== false); }
@@ -202,12 +207,12 @@ route('GET', '/hc2/checks/{token}', function($p) { ok(hc2_check_out(hc2_find($p[
 route('PATCH', '/hc2/checks/{token}', function($p) {
 	$old = hc2_find($p['token']);
 	$row = hc2_validate_or_fail(hc2_check_input($old), $old);
-	$moved = $row['execution'] !== $old['execution'] || ($row['execution'] !== 'online' && (string)$row['node_id'] !== (string)$old['node_id']) || ($row['execution'] !== 'local' && $row['locations'] !== $old['locations']);
+	$moved = $row['execution'] !== $old['execution'] || ($row['execution'] !== 'online' && !hc2_same_list(array_filter(explode(',', (string)$row['nodes'])), hc2_check_nodes($old))) || ($row['execution'] !== 'local' && $row['locations'] !== $old['locations']);
 	if ($moved && !in_bool('force_move', false)) {
 		// Ausfuehrungsort nur ueber den Testlauf (POST .../move); alle anderen Felder werden gespeichert
-		$row['execution'] = $old['execution']; $row['node_id'] = $old['node_id']; $row['locations'] = $old['locations'];
+		$row['execution'] = $old['execution']; $row['node_id'] = $old['node_id']; $row['nodes'] = (string)$old['nodes']; $row['locations'] = $old['locations'];
 		hc2_update_check(uid(), $old['token'], $row);
-		fail(409, 'move_requires_test', 'execution/node_id/locations changed: start a test run with POST /hc2/checks/{token}/move (other fields were saved), or send force_move=true to switch without a test.');
+		fail(409, 'move_requires_test', 'execution/nodes/locations changed: start a test run with POST /hc2/checks/{token}/move (other fields were saved), or send force_move=true to switch without a test.');
 	}
 	hc2_update_check(uid(), $old['token'], $row);
 	ok(hc2_check_out(hc2_find($old['token']), true));
@@ -219,9 +224,9 @@ route('POST', '/hc2/checks/{token}/resume', function($p) { $c = hc2_find($p['tok
 route('POST', '/hc2/checks/{token}/run', function($p) {
 	$c = hc2_find($p['token']);
 	if ($c['type'] === 'push') { fail(422, 'not_applicable', 'Push checks are not measured actively.'); }
-	if ($c['execution'] === 'online' || !$c['node_id']) { ok(array('queued' => false, 'detail' => 'Online checks run on their interval; the next measurement follows shortly.')); }
-	$id = hc2_command($c['node_id'], 'run_check', array('token' => $c['token']));
-	ok(array('queued' => true, 'command_id' => $id, 'node_id' => $c['node_id']), 202);
+	if ($c['execution'] === 'online' || !hc2_check_nodes($c)) { ok(array('queued' => false, 'detail' => 'Online checks run on their interval; the next measurement follows shortly.')); }
+	$ids = array(); foreach (hc2_check_nodes($c) as $rn) { $ids[$rn] = hc2_command($rn, 'run_check', array('token' => $c['token'])); }
+	ok(array('queued' => true, 'command_id' => reset($ids), 'node_id' => array_key_first($ids), 'commands' => $ids), 202);
 });
 
 /** Umhaengen: Testlauf starten; Ergebnis per GET /hc2/testruns/{id} (bei ok wird der Wechsel angewendet) */
@@ -229,10 +234,11 @@ route('POST', '/hc2/checks/{token}/move', function($p) {
 	$c = hc2_find($p['token']);
 	$to = in_str('execution', true, 10);
 	if (!in_array($to, array('local', 'online', 'both'), true)) { fail(422, 'invalid_execution', 'execution must be local, online or both.', array('field' => 'execution')); }
-	$node = in_str('node_id', false, 32) ?? (string)$c['node_id'];
+	$one = in_str('node_id', false, 32);
+	$nl = in_list('nodes') ?? ($one !== null && $one !== '' ? array($one) : (hc2_check_nodes($c) ?: array()));
 	$locs = in_list('locations') ?? array_filter(explode(',', $c['locations']));
-	if ($c['execution'] === $to && ($to === 'online' || $node === (string)$c['node_id']) && ($to === 'local' || implode(',', $locs) === $c['locations'])) { fail(409, 'unchanged', 'The check already runs this way.'); }
-	$r = hc2_testrun_create(uid(), $c, $to, $node !== '' ? $node : null, array_values($locs));
+	if ($c['execution'] === $to && ($to === 'online' || hc2_same_list($nl, hc2_check_nodes($c))) && ($to === 'local' || implode(',', $locs) === $c['locations'])) { fail(409, 'unchanged', 'The check already runs this way.'); }
+	$r = hc2_testrun_create(uid(), $c, $to, $nl, array_values($locs));
 	if ($r['error'] !== '') { fail(422, 'move_rejected', $r['error']); }
 	ok(hc2_testrun_out(hc2_testrun_status(uid(), $r['id'])), 202);
 });
@@ -432,12 +438,14 @@ route('DELETE', '/hc2/nodes/{node_id}', function($p) {
 	$pdo->prepare("UPDATE hc2_node_tokens SET revoked_at = UTC_TIMESTAMP(3) WHERE node_id = :n AND revoked_at IS NULL")->execute(array('n' => $n['node_id']));
 	$pdo->prepare("UPDATE hc2_nodes SET revoked_at = UTC_TIMESTAMP(3), online = 0 WHERE node_id = :n")->execute(array('n' => $n['node_id']));
 	hc2_log_change(uid(), 'node', $n['node_id'], 'delete', 'api'); hc2_signal('hc2:node:' . $n['node_id'], 'revoke');
-	$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE node_id = :n AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both')"); $st->execute(array('n' => $n['node_id'], 'u' => uid()));
+	$st = $pdo->prepare("SELECT * FROM hc2_checks WHERE (node_id = :n OR FIND_IN_SET(:n2, nodes) > 0) AND userid = :u AND deleted_at IS NULL AND execution IN ('local','both')"); $st->execute(array('n' => $n['node_id'], 'n2' => $n['node_id'], 'u' => uid()));
 	$kept = 0; $dropped = 0; $acc = hc2_account(uid());
 	foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
+		$rest = array_values(array_diff(hc2_check_nodes($c), array($n['node_id'])));
+		if ($rest) { hc2_set_check(uid(), $c['token'], array('nodes' => implode(',', $rest), 'node_id' => (string)$c['node_id'] === $n['node_id'] ? $rest[0] : $c['node_id'])); continue; }
 		$locs = array_filter(explode(',', $c['locations'])) ?: array_keys(hc2_locations());
 		$fits = $keep && !hc2_private_target($c['type'], $c['target']) && ($acc['healthcheck_limit'] <= 0 || hc2_online_used(uid(), $c['token']) + count($locs) <= $acc['healthcheck_limit']);
-		if ($fits) { hc2_set_check(uid(), $c['token'], array('execution' => 'online', 'node_id' => null)); $kept++; } else { hc2_delete_check(uid(), $c['token']); $dropped++; }
+		if ($fits) { hc2_set_check(uid(), $c['token'], array('execution' => 'online', 'node_id' => null, 'nodes' => '')); $kept++; } else { hc2_delete_check(uid(), $c['token']); $dropped++; }
 	}
 	ok(array('unlinked' => true, 'checks_kept_online' => $kept, 'checks_deleted' => $dropped));
 });

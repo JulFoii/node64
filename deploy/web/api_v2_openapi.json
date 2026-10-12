@@ -10472,7 +10472,14 @@
                   },
                   "node_id": {
                     "type": "string",
-                    "description": "Node für local/both"
+                    "description": "Besitzer-Node für local/both (bearbeitet in der Node, benachrichtigt ohne Verbindung); allein angegeben = eine messende Node"
+                  },
+                  "nodes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Messende Nodes (IDs) für local/both; mehrere möglich, Docker/Push genau eine. Ausgabe: Liste {node_id, name}"
                   },
                   "locations": {
                     "type": "array",
@@ -15698,7 +15705,14 @@
           },
           "node_id": {
             "type": "string",
-            "description": "Node für local/both"
+            "description": "Besitzer-Node für local/both (bearbeitet in der Node, benachrichtigt ohne Verbindung); allein angegeben = eine messende Node"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Messende Nodes (IDs) für local/both; mehrere möglich, Docker/Push genau eine. Ausgabe: Liste {node_id, name}"
           },
           "locations": {
             "type": "array",
@@ -16149,7 +16163,14 @@
           },
           "node_id": {
             "type": "string",
-            "description": "Node für local/both"
+            "description": "Besitzer-Node für local/both (bearbeitet in der Node, benachrichtigt ohne Verbindung); allein angegeben = eine messende Node"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Messende Nodes (IDs) für local/both; mehrere möglich, Docker/Push genau eine. Ausgabe: Liste {node_id, name}"
           },
           "locations": {
             "type": "array",

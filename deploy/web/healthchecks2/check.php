@@ -17,7 +17,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 			case 'resume': hc2_set_check($uid, $T, array('paused' => 0)); hc2_flash('success', 'Check fortgesetzt.'); break;
 			case 'delete': hc2_delete_check($uid, $T); hc2_flash('success', 'Check gelöscht.'); hc2_redirect(HC2_BASE . '/');
 			case 'run':
-				if ($c['execution'] !== 'online' && $c['node_id']) { hc2_command($c['node_id'], 'run_check', array('token' => $T)); hc2_flash('info', 'Sofortige Prüfung an die Node gegeben.'); }
+				if ($c['execution'] !== 'online' && hc2_check_nodes($c)) { foreach (hc2_check_nodes($c) as $rn) { hc2_command($rn, 'run_check', array('token' => $T)); } hc2_flash('info', count(hc2_check_nodes($c)) > 1 ? 'Sofortige Prüfung an ' . count(hc2_check_nodes($c)) . ' Nodes gegeben.' : 'Sofortige Prüfung an die Node gegeben.'); }
 				else { hc2_flash('info', 'Online-Checks werden im Intervall geprüft; die nächste Messung folgt in Kürze.'); }
 				break;
 		}
