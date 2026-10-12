@@ -559,9 +559,78 @@ function hc2_set_setting(int $userid, string $key, string $value): void {
 function hc2_subnav(string $active): string {
 	$items = array('index' => array(HC2_BASE . '/', 'fa-heart-pulse', 'Healthchecks'), 'incidents' => array(HC2_BASE . '/incidents.php', 'fa-triangle-exclamation', 'Störungen'),
 		'maintenance' => array(HC2_BASE . '/maintenance.php', 'fa-wrench', 'Wartungsfenster'), 'notifications' => array('/notifications.php', 'fa-bell', 'Benachrichtigungen'), 'nodes' => array('/nodes.php', 'fa-server', 'Nodes'));
-	$o = '<ul class="nav nav-pills mb-3">';
+	$o = hc2_ui_assets() . '<ul class="nav nav-pills mb-3 hc2-subnav">';
 	foreach ($items as $k => [$href, $ico, $label]) { $o .= '<li class="nav-item"><a class="nav-link' . ($k === $active ? ' active' : '') . '" href="' . $href . '"><i class="fa-solid ' . $ico . '"></i> ' . $label . '</a></li>'; }
 	return $o . '</ul>';
+}
+
+/**
+ * Optik wie im Node64-Container: Symbole vor den Eingabefeldern, farbige Knoepfe und Kartenkoepfe,
+ * Tabellen mit Schatten. Einmal je Seite (ueber hc2_subnav), wirkt nur im Container der Unternavigation.
+ */
+function hc2_ui_assets(): string {
+	static $done = false;
+	if ($done) { return ''; }
+	$done = true;
+	return <<<'HTML'
+<style>
+.hc2-page .card { border-radius: .6rem; }
+.hc2-page .card.shadow-sm, .hc2-page .table-responsive { box-shadow: 0 .125rem .35rem rgba(0,0,0,.08) !important; }
+.hc2-page .card-header { background: rgba(0,0,0,.025); font-weight: 600; }
+.hc2-page .card-header > i, .hc2-page .card-header > span > i { color: #007bff; margin-right: .2rem; }
+.hc2-page .card-header .fa-bell { color: #e0a800 !important; }
+.hc2-page .card-header .fa-clock, .hc2-page .card-header .fa-stopwatch { color: #17a2b8 !important; }
+.hc2-page .card-header .fa-triangle-exclamation { color: #dc3545 !important; }
+.hc2-page .card-header .fa-location-dot { color: #28a745 !important; }
+.hc2-page .table-responsive { border: 1px solid rgba(0,0,0,.08); border-radius: .5rem; background: #fff; }
+.hc2-page .table-responsive > .table { margin-bottom: 0; }
+.hc2-page .table thead th { border-top: 0; font-size: .85rem; color: #6c757d; font-weight: 600; white-space: nowrap; }
+.hc2-page .input-group-text { background: #f8f9fa; min-width: 2.4rem; justify-content: center; }
+.hc2-page .input-group > .input-group-prepend > .input-group-text { border-right: 0; }
+.hc2-page .input-group > .input-group-prepend + .form-control, .hc2-page .input-group > .input-group-prepend + .custom-select { border-left-color: #ced4da; }
+.hc2-page label { font-weight: 500; font-size: .9rem; margin-bottom: .3rem; }
+.hc2-page .form-control:focus, .hc2-page .custom-select:focus { box-shadow: 0 0 0 .15rem rgba(0,123,255,.18); }
+.hc2-page .nav-pills .nav-link { border-radius: .5rem; }
+.hc2-page .btn { border-radius: .4rem; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+	var nav = document.querySelector('.hc2-subnav'); if (!nav) { return; }
+	var page = nav.closest('.container, .container-fluid') || document.body; page.classList.add('hc2-page');
+	// Symbol je Feld (wie im Container)
+	var icons = { name: 'fa-tag text-primary', target: 'fa-bullseye text-danger', type: 'fa-shapes text-secondary', method: 'fa-right-left text-secondary',
+		accept_status: 'fa-check-double text-success', keyword: 'fa-magnifying-glass text-primary', basic_user: 'fa-user text-secondary', basic_password: 'fa-key text-warning',
+		count: 'fa-hashtag text-secondary', max_loss_percent: 'fa-percent text-warning', max_latency_ms: 'fa-gauge-high text-warning', port: 'fa-plug text-primary',
+		send: 'fa-paper-plane text-secondary', expect: 'fa-reply text-secondary', expect_port: 'fa-door-open text-success', min_days: 'fa-calendar-days text-success',
+		server_name: 'fa-server text-secondary', docker_host: 'fa-brands fa-docker text-primary', period_seconds: 'fa-clock text-info', grace_seconds: 'fa-hourglass-half text-warning',
+		tags: 'fa-tags text-secondary', parent_token: 'fa-sitemap text-secondary', interval_sec: 'fa-stopwatch text-info', retry_interval_sec: 'fa-rotate text-warning',
+		connect_timeout: 'fa-plug-circle-bolt text-secondary', total_timeout: 'fa-hourglass-end text-secondary', ip_mode: 'fa-network-wired text-primary',
+		execution: 'fa-location-dot text-success', node_id: 'fa-server text-primary', policy: 'fa-scale-balanced text-secondary', retries: 'fa-repeat text-warning',
+		stabilize: 'fa-wave-square text-info', repeat_minutes: 'fa-bell text-warning', start_at: 'fa-calendar-plus text-success', end_at: 'fa-calendar-xmark text-danger',
+		repeat: 'fa-repeat text-secondary', repeat_until: 'fa-calendar-check text-secondary', email: 'fa-envelope text-primary', url: 'fa-link text-primary',
+		server: 'fa-server text-primary', topic: 'fa-hashtag text-primary', token: 'fa-key text-warning', app_token: 'fa-key text-warning', user_key: 'fa-key text-warning',
+		chat_id: 'fa-comments text-primary', bot_token: 'fa-robot text-warning', webhook_url: 'fa-link text-primary', priority: 'fa-flag text-warning', host: 'fa-server text-primary',
+		username: 'fa-user text-secondary', password: 'fa-key text-warning', from: 'fa-at text-secondary', to: 'fa-at text-secondary', phone: 'fa-mobile-screen text-primary',
+		location: 'fa-location-dot text-success', code: 'fa-qrcode text-primary', q: 'fa-magnifying-glass text-secondary', tag: 'fa-tag text-secondary' };
+	page.querySelectorAll('input.form-control[name], select.custom-select[name], select.form-control[name]').forEach(function (el) {
+		if (el.type === 'hidden' || el.closest('.input-group')) { return; }
+		var key = el.name.replace(/\[\]$/, '').replace(/^cfg_|^config\[|\]$/g, ''), ic = icons[key];
+		if (!ic) { return; }
+		var g = document.createElement('div'); g.className = 'input-group' + (el.classList.contains('form-control-sm') || el.classList.contains('custom-select-sm') ? ' input-group-sm' : '');
+		var pre = document.createElement('div'); pre.className = 'input-group-prepend';
+		pre.innerHTML = '<span class="input-group-text"><i class="' + (ic.indexOf('fa-brands') === 0 ? '' : 'fa-solid ') + ic + '"></i></span>';
+		if (el.style.width) { g.style.width = el.style.width; el.style.width = ''; }
+		el.parentNode.insertBefore(g, el); g.appendChild(pre); g.appendChild(el);
+	});
+	// Knoepfe farbig wie im Container (Pause gelb, Fortsetzen gruen, Pruefen hellblau, Bearbeiten/Umhaengen blau)
+	var colors = { 'fa-pause': 'warning', 'fa-play': 'success', 'fa-rotate': 'info', 'fa-arrows-rotate': 'info', 'fa-pen': 'primary', 'fa-right-left': 'primary', 'fa-paper-plane': 'info', 'fa-star': 'warning' };
+	page.querySelectorAll('.btn-outline-secondary').forEach(function (b) {
+		var i = b.querySelector('i'); if (!i) { return; }
+		for (var k in colors) { if (i.classList.contains(k)) { b.classList.remove('btn-outline-secondary'); b.classList.add('btn-outline-' + colors[k]); break; } }
+	});
+});
+</script>
+HTML;
 }
 
 /** Pillen fuer viele Checks auf einmal (eine Abfrage, Fensterfunktion). Liefert token => HTML. */
