@@ -3,6 +3,7 @@
  * Healthchecks 2.0 – Benachrichtigungskanäle, Ruhezeiten, Zustellprotokoll (ersetzt integrations.php für die neue Welt).
  * Bewusst ohne Menülink. Mail/SMS werden NACH dem Login per Code bestätigt (kein Link ohne Anmeldung).
  */
+ob_start(); // header.php gibt HTML aus; hc2_redirect()/hc2_json() verwerfen es
 include("header.php");
 require_once(__DIR__ . '/healthchecks2/hc2_lib.php');
 hc2_require_login();

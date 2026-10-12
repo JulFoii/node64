@@ -1,5 +1,6 @@
 <?php
 /** Healthchecks 2.0 – Übersicht. Ohne Menülink; nur über die URL erreichbar. */
+ob_start(); // header.php gibt HTML aus; hc2_redirect()/hc2_json() verwerfen es
 include("../header.php");
 require_once(__DIR__ . '/hc2_lib.php');
 hc2_require_login();

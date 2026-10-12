@@ -3,6 +3,7 @@
  * Healthchecks 2.0: Meine Nodes – Liste und Detail (Checks der Node, Konflikte, Umbenennen, Fernverwaltung,
  * Token widerrufen, entfernen). Bewusst ohne Menülink; nur per URL erreichbar.
  */
+ob_start(); // header.php gibt HTML aus; hc2_redirect()/hc2_json() verwerfen es
 include("header.php");
 require_once(__DIR__ . '/healthchecks2/hc2_lib.php');
 hc2_require_login();

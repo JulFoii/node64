@@ -1,5 +1,6 @@
 <?php
 /** Healthchecks 2.0 – Umhängen (Ausführungsort ändern) mit Testlauf, einzeln oder mehrere Checks (Sync-Plan 3.11). */
+ob_start(); // header.php gibt HTML aus; hc2_redirect()/hc2_json() verwerfen es
 include("../header.php");
 require_once(__DIR__ . '/hc2_lib.php');
 hc2_require_login();

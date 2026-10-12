@@ -4,6 +4,7 @@
  * Ablauf: die Node zeigt einen Code, der Nutzer gibt ihn hier ein und waehlt Standort und Fernverwaltung;
  * danach holt sich die Node ihren Token selbst beim hub ab (Sync-Plan 3.2).
  */
+ob_start(); // header.php gibt HTML aus; hc2_redirect()/hc2_json() verwerfen es
 include("header.php");
 
 if ($userid == "") { echo '<div class="container"><div class="alert alert-warning mt-3">Bitte zuerst anmelden.</div></div>'; include("footer.php"); exit; }

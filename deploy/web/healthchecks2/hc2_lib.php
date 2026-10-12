@@ -30,7 +30,7 @@ function hc2_csrf_ok(): bool {
 	return !empty($_SESSION['hc2_csrf']) && hash_equals($_SESSION['hc2_csrf'], $t);
 }
 function hc2_is_post(): bool { return $_SERVER['REQUEST_METHOD'] === 'POST'; }
-function hc2_redirect(string $url): void { header('Location: ' . $url); exit; }
+function hc2_redirect(string $url): void { while (ob_get_level() > 0) { ob_end_clean(); } header('Location: ' . $url); exit; } // Ausgabe aus header.php verwerfen, sonst scheitert die Weiterleitung
 function hc2_flash(string $kind, string $msg): void { $_SESSION['hc2_flash'] = array($kind, $msg); }
 function hc2_flash_out(): string {
 	if (empty($_SESSION['hc2_flash'])) { return ''; }
