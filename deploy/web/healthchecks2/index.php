@@ -98,8 +98,8 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 			<span class="ml-auto"><a class="btn btn-sm btn-primary" href="<?php echo HC2_BASE; ?>/edit.php"><i class="fa-solid fa-plus"></i> Neuer Check</a></span>
 		</div>
 	</div>
-	<form method="get" class="form-inline mb-2" style="gap:.4rem">
-		<input class="form-control form-control-sm" name="q" value="<?php echo hc2_h($q); ?>" placeholder="Suche Name, Ziel, Tag">
+	<form method="get" class="form-inline mb-2" style="gap:.4rem" id="hc2-filter">
+		<input class="form-control form-control-sm" type="search" name="q" value="<?php echo hc2_h($q); ?>" placeholder="Suche Name, Ziel, Tag">
 		<select class="custom-select custom-select-sm" name="type"><option value="">Alle Typen</option><?php foreach (hc2_types() as $k => $v) { echo '<option value="' . $k . '"' . ($fType === $k ? ' selected' : '') . '>' . hc2_h($v) . '</option>'; } ?></select>
 		<select class="custom-select custom-select-sm" name="exec"><option value="">Alle Ausführungsorte</option><option value="online"<?php echo $fExec === 'online' ? ' selected' : ''; ?>>Online (ipv64)</option><option value="local"<?php echo $fExec === 'local' ? ' selected' : ''; ?>>Lokal (Node)</option><option value="both"<?php echo $fExec === 'both' ? ' selected' : ''; ?>>Hybrid</option></select>
 		<?php if ($nodes) { ?><select class="custom-select custom-select-sm" name="node"><option value="">Alle Nodes</option><?php foreach ($nodes as $id => $n) { echo '<option value="' . hc2_h($id) . '"' . ($fNode === $id ? ' selected' : '') . '>' . hc2_h(hc2_node_label($nodes, $id)) . '</option>'; } ?></select><?php } ?>
@@ -110,6 +110,12 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 		<button class="btn btn-sm btn-outline-secondary" type="submit">Filtern</button>
 		<?php if ($q !== '' || $fState !== '' || $fType !== '' || $fExec !== '' || $fNode !== '' || $fTag !== '' || $fGroup !== '') { ?><a class="btn btn-sm btn-link" href="<?php echo HC2_BASE; ?>/">Zurücksetzen</a><?php } ?>
 	</form>
+	<script id="hc2-filter-auto">/* Filter sofort anwenden; Suche bei Enter, beim Verlassen des Feldes oder beim Leeren */
+	(function () { var f = document.getElementById('hc2-filter'); if (!f) { return; }
+		var go = function () { Array.prototype.forEach.call(f.querySelectorAll('input[name], select[name]'), function (el) { if (!el.value) { el.disabled = true; } }); f.submit(); };
+		Array.prototype.forEach.call(f.querySelectorAll('select'), function (s) { s.addEventListener('change', go); });
+		var q = f.querySelector('input[name=q]'); if (q) { q.addEventListener('change', go); q.addEventListener('search', function () { if (!q.value) { go(); } }); }
+	})();</script>
 	<form method="post" id="bulk">
 		<?php echo hc2_csrf_field(); ?>
 		<div class="card shadow-sm">
