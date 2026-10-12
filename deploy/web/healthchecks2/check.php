@@ -155,14 +155,48 @@ if ($c['execution'] === 'both') {
 (function(){
 	$('[data-toggle="tooltip"]').tooltip();
 	var chart = null, colors = ['#007bff','#28a745','#fd7e14','#6f42c1','#20c997'];
+	// Echte Zeitachse wie im Container: jede Messstelle hat eigene Zeitpunkte; Luecken nur bei Fehlern und Messpausen
+	var spans = {'6h': 6 * 36e5, '24h': 24 * 36e5, '7d': 7 * 864e5, '30d': 30 * 864e5, '1y': 365 * 864e5};
+	var steps = {'6h': 36e5, '24h': 3 * 36e5, '7d': 864e5, '30d': 5 * 864e5, '1y': 30 * 864e5};
+	function pad(n){ return (n < 10 ? '0' : '') + n; }
+	function fmt(ms, range, long){
+		var t = new Date(ms), d = pad(t.getDate()) + '.' + pad(t.getMonth() + 1) + '.', hm = pad(t.getHours()) + ':' + pad(t.getMinutes());
+		if (long) { return d + t.getFullYear() + (range === '1y' ? '' : ' ' + hm); }
+		if (range === '6h' || range === '24h') { return hm; }
+		if (range === '1y') { return pad(t.getMonth() + 1) + '/' + String(t.getFullYear()).substr(2); }
+		return d;
+	}
+	function ticks(min, max, range){
+		var out = [], d = new Date(min), step = steps[range];
+		if (range === '1y') { d = new Date(d.getFullYear(), d.getMonth() + 1, 1); while (d.getTime() <= max) { out.push({value: d.getTime()}); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); } return out; }
+		if (step >= 864e5) { d.setHours(24, 0, 0, 0); } else { var mins = step / 6e4, cur = d.getHours() * 60 + d.getMinutes(); d.setSeconds(0, 0); d.setMinutes(Math.ceil(cur / mins) * mins - d.getHours() * 60); }
+		for (var t = d.getTime(); t <= max; t += step) { out.push({value: t}); }
+		return out;
+	}
+	function withGaps(pts){
+		if (pts.length < 3) { return pts; }
+		var diffs = []; for (var i = 1; i < pts.length; i++) { diffs.push(pts[i].x - pts[i - 1].x); }
+		diffs.sort(function(a, b){ return a - b; });
+		var limit = Math.max(3 * diffs[Math.floor(diffs.length / 2)], 120000), out = [pts[0]];
+		for (var j = 1; j < pts.length; j++) { if (pts[j].x - pts[j - 1].x > limit) { out.push({x: pts[j - 1].x + 1, y: null}); } out.push(pts[j]); }
+		return out;
+	}
 	function load(range){
 		$.getJSON('<?php echo HC2_BASE; ?>/data.php', {token: '<?php echo hc2_h($T); ?>', range: range}, function(d){
-			var labels = []; d.series.forEach(function(s){ s.points.forEach(function(p){ if (labels.indexOf(p.t) < 0) { labels.push(p.t); } }); }); labels.sort();
-			var ds = d.series.map(function(s, i){ var m = {}; s.points.forEach(function(p){ m[p.t] = p.ms; }); return {label: s.label, data: labels.map(function(t){ return m.hasOwnProperty(t) ? m[t] : null; }), borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length], borderWidth: 1.5, pointRadius: (range === '6h' || range === '24h') ? 1.5 : 0, spanGaps: false, tension: 0.2}; });
-			var cfg = {type: 'line', data: {labels: labels, datasets: ds}, options: {animation: false, scales: {x: {ticks: {maxTicksLimit: 8, callback: function(v, i){ var t = labels[i] || ''; return t.substr(5, 11).replace('T', ' '); }}}, y: {beginAtZero: true, title: {display: true, text: 'ms'}}}, plugins: {legend: {display: ds.length > 1}, tooltip: {callbacks: {title: function(items){ return (labels[items[0].dataIndex] || '').substr(0, 19).replace('T', ' '); }}}}}};
+			var raw = range === '6h' || range === '24h', now = Date.now(), xmin = now - spans[range];
+			var ds = d.series.map(function(s, i){
+				var pts = s.points.map(function(p){ return {x: Date.parse(p.t), y: p.ms}; }).sort(function(a, b){ return a.x - b.x; });
+				return {label: s.label, data: withGaps(pts), borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length], borderWidth: 1.5, pointRadius: raw ? 1.5 : 0, pointHoverRadius: 4, spanGaps: false, tension: 0.2};
+			});
+			var cfg = {type: 'line', data: {datasets: ds}, options: {animation: false, interaction: {mode: 'nearest', axis: 'x', intersect: false},
+				scales: {x: {type: 'linear', min: xmin, max: now, afterBuildTicks: function(axis){ axis.ticks = ticks(xmin, now, range); }, ticks: {autoSkip: false, callback: function(v){ return fmt(v, range, false); }}},
+					y: {beginAtZero: true, title: {display: true, text: 'ms'}}},
+				plugins: {legend: {display: ds.length > 1}, tooltip: {callbacks: {
+					title: function(items){ return items.length ? fmt(items[0].parsed.x, range, true) : ''; },
+					label: function(it){ return it.dataset.label + ': ' + (it.parsed.y === null ? '–' : it.parsed.y + ' ms'); }}}}}};
 			if (chart) { chart.destroy(); }
 			chart = new Chart(document.getElementById('chart').getContext('2d'), cfg);
-			$('#chartnote').text(ds.length ? (range === '6h' || range === '24h' ? 'Einzelmessungen; Lücken = Fehler' : 'Mittelwerte je ' + (range === '1y' ? 'Tag' : 'Stunde')) : 'Noch keine Daten für diesen Zeitraum.');
+			$('#chartnote').text(ds.length ? (raw ? 'Einzelmessungen je Messstelle; Lücken = gestört oder keine Messung' : 'Mittelwerte je ' + (range === '1y' ? 'Tag' : 'Stunde') + ' und Messstelle') : 'Noch keine Daten für diesen Zeitraum.');
 		});
 	}
 	$('#ranges button').on('click', function(){ $('#ranges button').removeClass('active'); $(this).addClass('active'); load($(this).data('range')); });
