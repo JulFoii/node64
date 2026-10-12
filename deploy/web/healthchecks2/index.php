@@ -133,7 +133,7 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 					<td><input type="checkbox" name="tokens[]" value="<?php echo hc2_h($c['token']); ?>"></td>
 					<td><?php echo hc2_state_badge($s); if ($c['last_reason'] && $s !== 'up' && $s !== 'paused') { echo '<br><small class="text-muted">' . hc2_h(hc2_reason_text($c['last_reason'])) . '</small>'; } ?></td>
 					<td><a class="font-weight-bold" href="<?php echo HC2_BASE; ?>/check.php?token=<?php echo hc2_h($c['token']); ?>"><?php echo hc2_h($c['name']); ?></a>
-						<?php echo hc2_exec_badge($c, $nodes); if ((int)$c['critical']) { echo ' <span class="badge badge-danger" title="Kritisch">!</span>'; } foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { echo ' <a class="badge badge-pill badge-secondary" href="' . $qs(array('tag' => $t)) . '">' . hc2_h($t) . '</a>'; } } ?>
+						<?php echo hc2_exec_short($c, $nodes); if ((int)$c['critical']) { echo ' <span class="badge badge-danger" title="Kritisch">!</span>'; } foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { echo ' <a class="badge badge-pill badge-secondary" href="' . $qs(array('tag' => $t)) . '">' . hc2_h($t) . '</a>'; } } ?>
 						<div class="small text-muted text-truncate" style="max-width:420px" title="<?php echo hc2_h($c['target']); ?>"><?php echo $c['target'] !== '' ? hc2_h($c['target']) : 'Push / Heartbeat'; ?></div></td>
 					<td><span class="badge badge-light"><?php echo hc2_h(hc2_types()[$c['type']] ?? $c['type']); ?></span></td>
 					<td class="text-right text-nowrap"><?php echo (float)$c['last_latency_ms'] > 0 ? round((float)$c['last_latency_ms'], 1) . ' ms' : '–'; ?></td>

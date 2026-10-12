@@ -176,6 +176,20 @@ function hc2_reason_text(?string $r): string {
 		'icmp_not_permitted' => 'ICMP nicht erlaubt', 'family_unreachable' => 'IP-Familie nicht erreichbar');
 	return $m[$r ?? ''] ?? (string)$r;
 }
+/** Kurzform fuer Listen (wie im Container); Einzelheiten im Tooltip. */
+function hc2_exec_short(array $c, array $nodes): string {
+	$ids = hc2_check_nodes($c);
+	$locs = array(); foreach (explode(',', (string)($c['locations'] ?? '')) as $l) { if ($l !== '') { $locs[] = hc2_locations()[$l] ?? $l; } }
+	$tip = array();
+	if ($ids) { $tip[] = 'Nodes: ' . hc2_nodes_label($nodes, $ids); }
+	if (($c['execution'] ?? 'online') !== 'local') { $tip[] = 'ipv64: ' . implode(', ', $locs); }
+	$t = hc2_h(implode(' · ', $tip));
+	switch ($c['execution'] ?? 'online') {
+		case 'local': return '<span class="badge badge-light" title="' . $t . '"><i class="fa-solid fa-house"></i> Lokal auf Nodes</span>';
+		case 'both': return '<span class="badge badge-light" title="' . $t . '"><i class="fa-solid fa-house"></i>+<i class="fa-solid fa-cloud"></i> Lokal und online (Hybrid)</span>';
+		default: return '<span class="badge badge-light" title="' . $t . '"><i class="fa-solid fa-cloud"></i> Nur online bei ipv64</span>';
+	}
+}
 function hc2_exec_badge(array $c, array $nodes): string {
 	$node = hc2_nodes_label($nodes, hc2_check_nodes($c));
 	$locs = array(); foreach (explode(',', (string)($c['locations'] ?? '')) as $l) { if ($l !== '') { $locs[] = hc2_locations()[$l] ?? $l; } }
@@ -500,7 +514,7 @@ function hc2_channel_types(): array {
 		'ipv64_mail' => array('label' => 'E-Mail (ipv64)', 'icon' => 'fa-envelope', 'verify' => true, 'fields' => array(
 			array('key' => 'email', 'label' => 'E-Mail-Adresse', 'required' => true, 'kind' => 'email'))),
 		'ipv64_sms' => array('label' => 'SMS (ipv64)', 'icon' => 'fa-mobile-screen', 'verify' => true, 'fields' => array(
-			array('key' => 'number', 'label' => 'Mobilnummer (nur Ziffern, mit Ländervorwahl, z. B. 491771234567)', 'required' => true, 'kind' => 'text'))),
+			array('key' => 'number', 'label' => 'Mobilnummer mit Ländervorwahl, z. B. +49 177 1234567 oder 0049 177 1234567', 'required' => true, 'kind' => 'text'))),
 		'app' => array('label' => 'IPv64 App (Push)', 'icon' => 'fa-bell', 'fields' => array(
 			array('key' => 'device_token', 'label' => 'Geräte-Token aus der App', 'required' => true, 'secret' => true, 'kind' => 'password'))),
 		'telegram' => array('label' => 'Telegram', 'icon' => 'fa-paper-plane', 'fields' => array(
