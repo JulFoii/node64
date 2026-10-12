@@ -1,5 +1,6 @@
 <?php
 /** Healthchecks 2.0 – Status eines Testlaufs (JSON, Session-Login). Bei "ok" wird der Wechsel genau einmal angewendet. */
+ob_start(); // header.php gibt HTML aus; hc2_json() verwirft es
 include("../header.php");
 require_once(__DIR__ . '/hc2_lib.php');
 if ($userid == '') { hc2_json(array('error' => 'login'), 401); }

@@ -38,6 +38,7 @@ function hc2_flash_out(): string {
 	return '<div class="alert alert-' . hc2_h($k) . '" role="alert">' . hc2_h($m) . '</div>';
 }
 function hc2_json(array $out, int $code = 200): void {
+	while (ob_get_level() > 0) { ob_end_clean(); } // HTML aus header.php verwerfen
 	http_response_code($code);
 	header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store');
 	echo json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -331,6 +332,7 @@ function hc2_set_check(int $userid, string $token, array $fields): void {
 }
 function hc2_delete_check(int $userid, string $token): void {
 	hc2_log_change($userid, 'check', $token, 'delete', 'portal'); // setzt deleted_at
+	hc2_pdo()->prepare("UPDATE hc2_incidents SET ended_at = UTC_TIMESTAMP(3) WHERE userid = :u AND token = :t AND ended_at IS NULL")->execute(array('u' => $userid, 't' => $token));
 	hc2_pdo()->prepare("UPDATE hc2_checks SET parent_token = NULL WHERE userid = :u AND parent_token = :t")->execute(array('u' => $userid, 't' => $token));
 }
 
