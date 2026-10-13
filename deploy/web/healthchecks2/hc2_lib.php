@@ -332,11 +332,17 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if (($ml = $num('max_latency_ms', 0, 0, 60000)) !== 0) { $p['max_latency_ms'] = $ml; }
 			break;
 		case 'tcp': case 'port': case 'cert':
-			if ($target === '') { $err[] = 'Ziel (Host oder IP, optional :Port) fehlt.'; }
+			if ($target === '') { $err[] = 'Ziel (Host oder IP) fehlt.'; }
 			$port = $num('port', 0, 0, 65535);
-			$hasPort = (bool)preg_match('/^(\[[^\]]+\]|[^:]+):\d+$/', $target);
-			if ($type === 'cert' && $port === 0 && !$hasPort) { $port = 443; }
-			if ($port > 0) { $p['port'] = $port; } elseif (!$hasPort && $type !== 'cert') { $err[] = 'Port fehlt (im Ziel als host:port oder im Feld Port).'; }
+			// Port nur im Feld Port: host:port im Ziel wird uebernommen, zwei verschiedene Ports sind ein Fehler
+			if (preg_match('/^(\[[^\]]+\]|[^:]+):(\d+)$/', $target, $tm)) {
+				$tp = (int)$tm[2];
+				if ($tp < 1 || $tp > 65535) { $err[] = 'Port im Ziel muss zwischen 1 und 65535 liegen.'; }
+				elseif ($port > 0 && $port !== $tp) { $err[] = 'Im Ziel steht Port ' . $tp . ', im Feld Port ' . $port . '. Den Port bitte nur im Feld Port eintragen.'; }
+				else { $port = $tp; $target = trim($tm[1], '[]'); }
+			}
+			if ($type === 'cert' && $port === 0) { $port = 443; }
+			if ($port > 0) { $p['port'] = $port; } else { $err[] = 'Port fehlt.'; }
 			if ($type === 'tcp') { if (($s = (string)($in['send'] ?? '')) !== '') { $p['send'] = $s; } if (($e = (string)($in['expect'] ?? '')) !== '') { $p['expect'] = $e; } if ($flag('tls')) { $p['tls'] = true; } }
 			if ($type === 'port') { $e = (string)($in['expect'] ?? 'open'); if ($e === 'closed') { $p['expect'] = 'closed'; } }
 			if ($type === 'cert') { if (($d = $num('min_days', 14, 0, 3650)) !== 14) { $p['min_days'] = $d; } if (($sn = trim((string)($in['server_name'] ?? ''))) !== '') { $p['server_name'] = $sn; } if ($flag('skip_chain')) { $p['skip_chain'] = true; } if ($flag('skip_hostname')) { $p['skip_hostname'] = true; } }

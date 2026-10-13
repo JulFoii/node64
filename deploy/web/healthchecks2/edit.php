@@ -83,7 +83,7 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="form-group col-md-4"><label>Typ</label><select class="custom-select" name="type" id="type"><?php foreach (hc2_types() as $k => $v) { echo '<option value="' . $k . '"' . $sel('type', $k) . '>' . hc2_h($v) . '</option>'; } ?></select></div>
 							<div class="form-group col-md-8"><label>Name</label><input class="form-control" name="name" value="<?php echo $val('name'); ?>" maxlength="200" required></div>
 						</div>
-						<div class="form-group" data-not-type="push"><label>Ziel</label><input class="form-control" name="target" id="target" value="<?php echo $val('target'); ?>" maxlength="500" placeholder="https://example.com/  ·  host  ·  host:port"><small class="form-text text-muted" id="target_hint"></small></div>
+						<div class="form-group" data-not-type="push"><label>Ziel</label><input class="form-control" name="target" id="target" value="<?php echo $val('target'); ?>" maxlength="500" placeholder="https://example.com/  ·  host"><small class="form-text text-muted" id="target_hint"></small></div>
 						<div class="alert alert-info small" data-type="push">Ein Push-Check wartet auf regelmäßige Meldungen deines Systems (Cronjob, Backup, Skript). Die Push-URL steht nach dem Anlegen auf der Detailseite.</div>
 						<!-- HTTP / Keyword -->
 						<div data-type="http keyword">
@@ -218,7 +218,7 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 <?php include("../footer.php"); ?>
 <script>
 (function(){
-	var hints = {http:'Vollständige URL, z. B. https://example.com/status', keyword:'URL, deren Antwort das Schlüsselwort enthalten (oder nicht enthalten) soll', icmp:'Hostname oder IP-Adresse', tcp:'Host oder host:port', port:'Host oder host:port', cert:'Host (Port 443) oder host:port', push:''};
+	var hints = {http:'Vollständige URL, z. B. https://example.com/status', keyword:'URL, deren Antwort das Schlüsselwort enthalten (oder nicht enthalten) soll', icmp:'Hostname oder IP-Adresse', tcp:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', port:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', cert:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', push:''};
 	function sync(){
 		var t = $('#type').val(), ex = $('#execution').val();
 		$('[data-type]').each(function(){ var ok = $(this).data('type').split(' ').indexOf(t) >= 0; $(this).toggle(ok); });
