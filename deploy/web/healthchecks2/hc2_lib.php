@@ -194,6 +194,21 @@ function hc2_target_display(array $c): string {
 	return (strpos($h, ':') !== false ? '[' . $h . ']' : $h) . ':' . $port;
 }
 
+/** Ziel als dezentes Badge mit Symbol je Art (wie im Container); URL ohne https:// und "/" am Ende. */
+function hc2_target_badge(array $c): string {
+	$t = hc2_target_display($c);
+	$style = 'display:inline-flex;align-items:center;max-width:100%;padding:.2rem .55rem;border:1px solid #dee2e6;border-radius:50rem;background:#f8f9fa;font-weight:normal;font-size:.8rem';
+	if ($t === '') { return '<span class="badge" style="' . $style . '"><i class="fa-solid fa-circle-down text-muted mr-1"></i> Push / Heartbeat</span>'; }
+	$icon = array('tcp' => 'fa-plug', 'port' => 'fa-plug', 'icmp' => 'fa-tower-broadcast', 'cert' => 'fa-shield-halved', 'docker' => 'fa-box')[$c['type']] ?? 'fa-bullseye';
+	$cls = 'text-muted'; $short = $t;
+	if (in_array($c['type'], array('http', 'keyword'), true)) {
+		$secure = stripos($t, 'http://') !== 0;
+		$icon = $secure ? 'fa-lock' : 'fa-lock-open'; $cls = $secure ? 'text-success' : 'text-warning';
+		$short = rtrim(preg_replace('#^[a-z]+://#i', '', $t), '/');
+	}
+	return '<span class="badge" style="' . $style . '" title="' . hc2_h($t) . '"><i class="fa-solid ' . $icon . ' ' . $cls . ' mr-1"></i><span class="text-truncate text-monospace">' . hc2_h($short) . '</span></span>';
+}
+
 /** Badge fuer einen Grund (OK gruen, Warnungen gelb, Fehler rot). */
 function hc2_reason_badge(?string $r): string {
 	if ($r === null || $r === '') { return ''; }
