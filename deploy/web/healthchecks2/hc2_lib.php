@@ -183,6 +183,17 @@ function hc2_reason_text(?string $r): string {
 	return $m[$r ?? ''] ?? (string)$r;
 }
 
+/** Ziel fuer Listen: bei TCP/Port mit Port, beim Zertifikat mit abweichendem Port (wie im Container). */
+function hc2_target_display(array $c): string {
+	$t = trim((string)$c['target']);
+	if ($t === '' || preg_match('/^\[.*\]:\d+$|^[^:\[\]]+:\d+$/', $t) || preg_match('#^[a-z]+://#i', $t)) { return $t; }
+	$p = json_decode((string)($c['params'] ?? ''), true); $port = (int)($p['port'] ?? 0);
+	if ($c['type'] === 'cert' && $port === 443) { $port = 0; }
+	if (!in_array($c['type'], array('tcp', 'port', 'cert'), true) || $port <= 0) { return $t; }
+	$h = trim($t, '[]');
+	return (strpos($h, ':') !== false ? '[' . $h . ']' : $h) . ':' . $port;
+}
+
 /** Badge fuer einen Grund (OK gruen, Warnungen gelb, Fehler rot). */
 function hc2_reason_badge(?string $r): string {
 	if ($r === null || $r === '') { return ''; }

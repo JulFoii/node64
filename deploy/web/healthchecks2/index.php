@@ -129,18 +129,20 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 				<button class="btn btn-sm btn-outline-danger" name="action" value="delete" type="submit" onclick="return confirm('Markierte Checks mit allen Messdaten löschen?');"><i class="fa-solid fa-trash"></i> Löschen</button>
 			</div>
 			<div class="table-responsive"><table class="table table-sm table-hover mb-0">
-				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked});"></th><th>Zustand</th><th>Name</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
+				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked});"></th><th>Zustand</th><th>Name</th><th>Ziel</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
 				<tbody>
-				<?php if (!$list) { echo '<tr><td colspan="8" class="text-muted p-3">Keine Checks' . ($all ? ' für diesen Filter' : '') . '. <a href="' . HC2_BASE . '/edit.php">Ersten Check anlegen</a>' . ($nodes ? '' : ' oder eine <a href="/link.php">Node verknüpfen</a>') . '.</td></tr>'; } ?>
+				<?php if (!$list) { echo '<tr><td colspan="9" class="text-muted p-3">Keine Checks' . ($all ? ' für diesen Filter' : '') . '. <a href="' . HC2_BASE . '/edit.php">Ersten Check anlegen</a>' . ($nodes ? '' : ' oder eine <a href="/link.php">Node verknüpfen</a>') . '.</td></tr>'; } ?>
 				<?php $lastGroup = null; foreach ($list as $c) { $s = $stateOf($c);
 					if ($allGroups && $c['group_name'] !== $lastGroup) { $lastGroup = $c['group_name']; $gUp = 0; $gDown = 0; $gOther = 0; foreach ($list as $x) { if ($x['group_name'] === $lastGroup) { $xs = $stateOf($x); if ($xs === 'up') { $gUp++; } elseif ($xs === 'down') { $gDown++; } else { $gOther++; } } }
-						echo '<tr class="table-light"><td colspan="8" class="py-1"><i class="fa-solid fa-layer-group text-primary"></i> <strong>' . hc2_h($lastGroup !== '' ? $lastGroup : 'Ohne Gruppe') . '</strong> <span class="ml-2 small">' . ($gUp ? '<span class="badge badge-success">' . $gUp . '</span> ' : '') . ($gDown ? '<span class="badge badge-danger">' . $gDown . '</span> ' : '') . ($gOther ? '<span class="badge badge-secondary">' . $gOther . '</span>' : '') . '</span></td></tr>'; } ?>
+						echo '<tr class="table-light"><td colspan="9" class="py-1"><i class="fa-solid fa-layer-group text-primary"></i> <strong>' . hc2_h($lastGroup !== '' ? $lastGroup : 'Ohne Gruppe') . '</strong> <span class="ml-2 small">' . ($gUp ? '<span class="badge badge-success">' . $gUp . '</span> ' : '') . ($gDown ? '<span class="badge badge-danger">' . $gDown . '</span> ' : '') . ($gOther ? '<span class="badge badge-secondary">' . $gOther . '</span>' : '') . '</span></td></tr>'; } ?>
 				<tr>
 					<td><input type="checkbox" name="tokens[]" value="<?php echo hc2_h($c['token']); ?>"></td>
 					<td><?php echo hc2_state_badge($s); if ($c['last_reason'] && $s !== 'up' && $s !== 'paused') { echo '<br><small class="text-muted">' . hc2_h(hc2_reason_text($c['last_reason'])) . '</small>'; } ?></td>
 					<td><a class="font-weight-bold" href="<?php echo HC2_BASE; ?>/check.php?token=<?php echo hc2_h($c['token']); ?>"><?php echo hc2_h($c['name']); ?></a>
 						<?php echo hc2_exec_short($c, $nodes); if ((int)$c['critical']) { echo ' <span class="badge badge-danger" title="Kritisch">!</span>'; } foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { echo ' <a class="badge badge-pill badge-secondary" href="' . $qs(array('tag' => $t)) . '">' . hc2_h($t) . '</a>'; } } ?>
-						<div class="small text-muted text-truncate" style="max-width:420px" title="<?php echo hc2_h($c['target']); ?>"><?php echo $c['target'] !== '' ? hc2_h($c['target']) : 'Push / Heartbeat'; ?></div></td>
+					</td>
+					<?php $tgt = hc2_target_display($c); ?>
+					<td class="small" style="max-width:320px"><?php echo $tgt !== '' ? '<span class="d-block text-truncate text-monospace" title="' . hc2_h($tgt) . '">' . hc2_h($tgt) . '</span>' : '<span class="text-muted">Push / Heartbeat</span>'; ?></td>
 					<td><span class="badge badge-light"><?php echo hc2_h(hc2_types()[$c['type']] ?? $c['type']); ?></span></td>
 					<td class="text-right text-nowrap"><?php echo (float)$c['last_latency_ms'] > 0 ? round((float)$c['last_latency_ms'], 1) . ' ms' : '–'; ?></td>
 					<td class="barr2 text-nowrap"><?php echo $pills[$c['token']] ?? '<span class="text-muted small">noch keine Messungen</span>'; ?></td>
