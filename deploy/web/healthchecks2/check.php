@@ -77,10 +77,11 @@ if ($c['execution'] === 'both') {
 			<div class="card shadow-sm mb-3">
 				<div class="card-header p-2"><i class="fa-solid fa-list"></i> Ereignisse</div>
 				<div class="table-responsive"><table class="table table-sm mb-0">
-					<thead><tr><th>Zeit</th><th>Messstelle</th><th>Ereignis</th><th>Grund</th><th>Dauer</th></tr></thead><tbody>
-					<?php if (!$events) { echo '<tr><td colspan="5" class="text-muted">Noch keine Ereignisse.</td></tr>'; } ?>
+					<?php $httpCol = in_array($c['type'], array('http', 'keyword'), true); ?>
+					<thead><tr><th>Zeit</th><th>Messstelle</th><th>Ereignis</th><th>Grund</th><?php echo $httpCol ? '<th>HTTP</th>' : ''; ?><th>Details</th><th>Dauer</th></tr></thead><tbody>
+					<?php if (!$events) { echo '<tr><td colspan="' . ($httpCol ? 7 : 6) . '" class="text-muted">Noch keine Ereignisse.</td></tr>'; } ?>
 					<?php foreach ($events as $e) { $kinds = array('down' => array('Gestört', 'danger'), 'up' => array('Wieder OK', 'success'), 'degraded' => array('Teilweise gestört', 'warning'), 'degraded_end' => array('Wieder vollständig OK', 'success'), 'flapping_start' => array('Instabil', 'warning'), 'flapping_end' => array('Stabil', 'success'), 'reminder' => array('Erinnerung', 'secondary')); $k = $kinds[$e['kind']] ?? array($e['kind'], 'secondary'); ?>
-					<tr><td class="text-nowrap small"><?php echo hc2_dt($e['time']); ?></td><td class="small"><?php echo hc2_h(hc2_source_label($e['source'], $nodes)); ?></td><td><span class="badge badge-<?php echo $k[1]; ?>"><?php echo hc2_h($k[0]); ?></span><?php echo ((int)$e['flags'] & 2) ? ' <small class="text-muted">(ohne Alarm)</small>' : ''; ?></td><td class="small"><?php echo hc2_h(hc2_reason_text($e['reason'])); echo $e['message'] ? ' – ' . hc2_h($e['message']) : ''; ?></td><td class="small text-nowrap"><?php echo (int)$e['duration_sec'] > 0 ? hc2_dur((int)$e['duration_sec']) : ''; ?></td></tr>
+					<tr><td class="text-nowrap small"><?php echo hc2_dt($e['time']); ?></td><td class="small"><?php echo hc2_h(hc2_source_label($e['source'], $nodes)); ?></td><td><span class="badge badge-<?php echo $k[1]; ?>"><?php echo hc2_h($k[0]); ?></span><?php echo ((int)$e['flags'] & 2) ? ' <small class="text-muted">(ohne Alarm)</small>' : ''; ?></td><td><?php echo hc2_reason_badge($e['reason']); ?></td><?php if ($httpCol) { echo '<td class="text-nowrap">' . hc2_http_badges((string)$e['message']) . '</td>'; } ?><td class="small text-break"><?php echo hc2_h((string)$e['message']); ?></td><td class="small text-nowrap"><?php echo (int)$e['duration_sec'] > 0 ? hc2_dur((int)$e['duration_sec']) : ''; ?></td></tr>
 					<?php } ?>
 					</tbody></table></div>
 			</div>
@@ -155,6 +156,25 @@ if ($c['execution'] === 'both') {
 (function(){
 	$('[data-toggle="tooltip"]').tooltip();
 	var chart = null, colors = ['#007bff','#28a745','#fd7e14','#6f42c1','#20c997'];
+	// Legende filtert nach Messstelle: Klick = nur diese (nochmal = alle), Strg/Cmd/Umschalt-Klick = mehrere; bleibt beim Zeitraumwechsel
+	var only = null;
+	function applyOnly(ch){
+		var names = ch.data.datasets.map(function(d){ return d.label; });
+		if (only && !names.some(function(n){ return only.indexOf(n) >= 0; })) { only = null; }
+		ch.data.datasets.forEach(function(d, i){ ch.setDatasetVisibility(i, !only || only.indexOf(d.label) >= 0); });
+		ch.update();
+	}
+	function legendClick(e, item, legend){
+		var ch = legend.chart, label = ch.data.datasets[item.datasetIndex].label, ev = e.native || {}, n = ch.data.datasets.length;
+		if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+			var sel = (only || []).slice(), at = sel.indexOf(label);
+			if (at >= 0) { sel.splice(at, 1); } else { sel.push(label); }
+			only = sel.length && sel.length < n ? sel : null;
+		} else {
+			only = only && only.length === 1 && only[0] === label ? null : [label];
+		}
+		applyOnly(ch);
+	}
 	// Echte Zeitachse wie im Container: jede Messstelle hat eigene Zeitpunkte; Luecken nur bei Fehlern und Messpausen
 	var spans = {'6h': 6 * 36e5, '24h': 24 * 36e5, '7d': 7 * 864e5, '30d': 30 * 864e5, '1y': 365 * 864e5};
 	var steps = {'6h': 36e5, '24h': 3 * 36e5, '7d': 864e5, '30d': 5 * 864e5, '1y': 30 * 864e5};
@@ -191,12 +211,14 @@ if ($c['execution'] === 'both') {
 			var cfg = {type: 'line', data: {datasets: ds}, options: {animation: false, interaction: {mode: 'nearest', axis: 'x', intersect: false},
 				scales: {x: {type: 'linear', min: xmin, max: now, afterBuildTicks: function(axis){ axis.ticks = ticks(xmin, now, range); }, ticks: {autoSkip: false, callback: function(v){ return fmt(v, range, false); }}},
 					y: {beginAtZero: true, title: {display: true, text: 'ms'}}},
-				plugins: {legend: {display: ds.length > 1}, tooltip: {callbacks: {
+				plugins: {legend: {display: ds.length > 1, onClick: legendClick}, tooltip: {callbacks: {
 					title: function(items){ return items.length ? fmt(items[0].parsed.x, range, true) : ''; },
 					label: function(it){ return it.dataset.label + ': ' + (it.parsed.y === null ? '–' : it.parsed.y + ' ms'); }}}}}};
 			if (chart) { chart.destroy(); }
 			chart = new Chart(document.getElementById('chart').getContext('2d'), cfg);
-			$('#chartnote').text(ds.length ? (raw ? 'Einzelmessungen je Messstelle; Lücken = gestört oder keine Messung' : 'Mittelwerte je ' + (range === '1y' ? 'Tag' : 'Stunde') + ' und Messstelle') : 'Noch keine Daten für diesen Zeitraum.');
+			if (only) { applyOnly(chart); }
+			$('#chartnote').text((ds.length ? (raw ? 'Einzelmessungen je Messstelle; Lücken = gestört oder keine Messung' : 'Mittelwerte je ' + (range === '1y' ? 'Tag' : 'Stunde') + ' und Messstelle') : 'Noch keine Daten für diesen Zeitraum.')
+				+ (ds.length > 1 ? '. Klick auf eine Messstelle in der Legende zeigt nur diese (nochmal: alle), mit Strg-Klick mehrere.' : ''));
 		});
 	}
 	$('#ranges button').on('click', function(){ $('#ranges button').removeClass('active'); $(this).addClass('active'); load($(this).data('range')); });

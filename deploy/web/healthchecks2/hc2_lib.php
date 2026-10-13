@@ -173,8 +173,32 @@ function hc2_reason_text(?string $r): string {
 		'http_status' => 'HTTP-Status', 'keyword_missing' => 'Schlüsselwort fehlt', 'keyword_present' => 'Schlüsselwort vorhanden', 'port_closed' => 'Port geschlossen', 'port_open' => 'Port offen',
 		'packet_loss' => 'Paketverlust', 'latency' => 'Latenz zu hoch', 'cert_expiring' => 'Zertifikat läuft ab', 'cert_expired' => 'Zertifikat abgelaufen', 'cert_invalid' => 'Zertifikat ungültig',
 		'push_missing' => 'Push ausgeblieben', 'push_down' => 'Push meldet Störung', 'invalid_definition' => 'Definition ungültig', 'unreachable' => 'Nicht erreichbar', 'inverted' => 'Invertiert',
-		'icmp_not_permitted' => 'ICMP nicht erlaubt', 'family_unreachable' => 'IP-Familie nicht erreichbar');
+		'icmp_not_permitted' => 'ICMP nicht erlaubt', 'family_unreachable' => 'IP-Familie nicht erreichbar',
+		// Codes der Nodes und des hubs (wie im Container)
+		'dns_failed' => 'DNS-Fehler', 'connect_failed' => 'Verbindung fehlgeschlagen', 'tls_failed' => 'TLS-Fehler', 'status_mismatch' => 'Falscher HTTP-Status',
+		'too_many_redirects' => 'Zu viele Weiterleitungen', 'banner_mismatch' => 'Banner passt nicht', 'latency_high' => 'Latenz zu hoch', 'no_address_for_family' => 'Keine Adresse für IP-Version',
+		'cert_hostname_mismatch' => 'Zertifikat passt nicht zum Namen', 'push_reported_down' => 'Push meldet Störung', 'container_missing' => 'Container fehlt',
+		'container_stopped' => 'Container gestoppt', 'container_paused' => 'Container pausiert', 'container_restarting' => 'Container startet neu',
+		'container_unhealthy' => 'Container ungesund', 'docker_unavailable' => 'Docker nicht erreichbar', 'dependency_down' => 'Abhängigkeit gestört', 'internal_error' => 'Interner Fehler');
 	return $m[$r ?? ''] ?? (string)$r;
+}
+
+/** Badge fuer einen Grund (OK gruen, Warnungen gelb, Fehler rot). */
+function hc2_reason_badge(?string $r): string {
+	if ($r === null || $r === '') { return ''; }
+	$cls = $r === 'ok' ? 'success' : (in_array($r, array('cert_expiring', 'latency', 'latency_high', 'packet_loss', 'dependency_down', 'container_restarting', 'container_paused'), true) ? 'warning' : 'danger');
+	return '<span class="badge badge-' . $cls . '" title="' . hc2_h($r) . '">' . hc2_h(hc2_reason_text($r)) . '</span>';
+}
+
+/** Badges fuer die HTTP-Codes einer Meldung (ipv4/ipv6 je einmal). */
+function hc2_http_badges(string $msg): string {
+	if (!preg_match_all('/\bHTTP (\d{3})\b/', $msg, $m)) { return ''; }
+	$out = '';
+	foreach (array_unique($m[1]) as $code) {
+		$cls = array('2' => 'success', '3' => 'info', '4' => 'warning', '5' => 'danger')[$code[0]] ?? 'secondary';
+		$out .= '<span class="badge badge-' . $cls . ' mr-1">' . hc2_h($code) . '</span>';
+	}
+	return $out;
 }
 /** Kurzform fuer Listen (wie im Container); Einzelheiten im Tooltip. */
 function hc2_exec_short(array $c, array $nodes): string {
