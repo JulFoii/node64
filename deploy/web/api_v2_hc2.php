@@ -89,7 +89,8 @@ function hc2_channel_out(array $ch): array {
 	return array('id' => (int)$ch['id'], 'type' => $ch['type'], 'type_label' => $types[$ch['type']]['label'] ?? $ch['type'], 'name' => $ch['name'], 'config' => $cfg ?: new stdClass(),
 		'secrets_set' => array_values($ch['has_secret']), 'enabled' => (int)$ch['enabled'] === 1, 'default' => (int)$ch['is_default'] === 1, 'verified' => (int)$ch['verified'] === 1, 'lang' => $ch['lang'],
 		'notify_down' => (int)$ch['notify_down'] === 1, 'notify_up' => (int)$ch['notify_up'] === 1, 'execution' => $ch['execution'], 'node_id' => $ch['node_id'],
-		'last_used' => hc2_iso($ch['last_used']), 'last_error' => (string)$ch['last_error'], 'revision' => (int)$ch['revision'], 'created_at' => hc2_iso($ch['created_at']));
+		'last_used' => hc2_iso($ch['last_used']), 'last_error' => (string)$ch['last_error'], 'revision' => (int)$ch['revision'], 'created_at' => hc2_iso($ch['created_at']),
+		'sendable_via_api' => !$ch['node_id'] && array_key_exists($ch['type'], HC2_API_SEND_TYPES) && (int)$ch['verified'] === 1 && (int)$ch['enabled'] === 1);
 }
 function hc2_maint_out(array $m): array {
 	return array('id' => (int)$m['id'], 'name' => $m['name'], 'start_at' => hc2_iso($m['start_at']), 'end_at' => hc2_iso($m['end_at']), 'repeat' => $m['repeat'], 'repeat_until' => hc2_iso($m['repeat_until']),
@@ -380,6 +381,70 @@ route('DELETE', '/hc2/channels/{id}', function($p) {
 	foreach (hc2_checks(uid()) as $c) { $ids = hc2_check_channels($c); if (in_array((int)$ch['id'], $ids, true)) { hc2_set_check(uid(), $c['token'], array('channels' => implode(',', array_diff($ids, array((int)$ch['id']))))); } }
 	no_content();
 });
+// Direkter Versand ueber einen ipv64-Kanal (Mail, SMS, App) ohne hub, z. B. fuer DynDNS-Meldungen einer Node.
+// Empfaenger nur aus dem verifizierten Kanal; Tageslimit SMS wie beim hub (hc2_sms_counter), Rate-Limit je Account,
+// doppelte event_id innerhalb von 24 h wird nicht erneut verschickt.
+const HC2_API_SEND_TYPES = array('ipv64_mail' => 'mail', 'ipv64_sms' => 'sms', 'app' => 'app');
+const HC2_API_SEND_PER_DAY = 200;
+function hc2_sms_left(int $userid): ?int {
+	$limit = hc2_account($userid)['sms_limit'];
+	if ($limit <= 0) { return null; }
+	$st = hc2_pdo()->prepare("SELECT count FROM hc2_sms_counter WHERE userid = :u AND day = UTC_DATE()"); $st->execute(array('u' => $userid));
+	return max(0, $limit - (int)$st->fetchColumn());
+}
+route('POST', '/hc2/channels/{id}/send', function($p) {
+	global $pdo;
+	require_once __DIR__ . '/hc2_send_lib.php';
+	$ch = hc2_channel(uid(), (int)$p['id'], true); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
+	if ($ch['node_id'] || !array_key_exists($ch['type'], HC2_API_SEND_TYPES)) { fail(422, 'not_server_channel', 'Only ipv64 channels (ipv64_mail, ipv64_sms, app) can send via the API.'); }
+	if (!(int)$ch['verified']) { fail(409, 'not_verified', 'Confirm the channel in the portal first.'); }
+	if (!(int)$ch['enabled']) { fail(409, 'disabled', 'The channel is disabled.'); }
+	$subject = trim(in_str('subject', true, 200)); $text = trim(in_str('text', true, 4000));
+	$kind = (string)(in_str('kind', false, 40) ?? ''); $event = trim((string)(in_str('event_id', false, 100) ?? '')); $source = (string)(in_str('source', false, 60) ?? 'api');
+	$type = HC2_API_SEND_TYPES[$ch['type']]; $db = hc2_pdo(); $cid = (int)$ch['id'];
+	if ($event !== '') {
+		$st = $db->prepare("SELECT 1 FROM hc2_api_sends WHERE userid = :u AND channel_id = :c AND event_id = :e AND ok = 1 AND sent_at > UTC_TIMESTAMP(3) - INTERVAL 1 DAY");
+		$st->execute(array('u' => uid(), 'c' => $cid, 'e' => $event));
+		if ($st->fetchColumn()) { ok(array('sent' => false, 'duplicate' => true, 'sms_left' => $type === 'sms' ? hc2_sms_left(uid()) : null)); }
+	}
+	rl_enforce('hc2send:' . uid(), 30, 30 / 3600, 'notifications'); // 30 auf einmal, danach 30 je Stunde
+	$st = $db->prepare("SELECT COUNT(*) FROM hc2_api_sends WHERE userid = :u AND sent_at >= UTC_DATE()"); $st->execute(array('u' => uid()));
+	if ((int)$st->fetchColumn() >= HC2_API_SEND_PER_DAY) { fail(429, 'rate_limited', 'Daily limit of ' . HC2_API_SEND_PER_DAY . ' notifications via the API reached.'); }
+	$updown = preg_match('/fail|down|error|limit/', strtolower($kind)) ? '0' : (preg_match('/(^|_)(up|ok|recovered)$/', strtolower($kind)) ? '1' : '');
+	$html = ''; $msg = $text;
+	switch ($type) {
+		case 'mail':
+			$to = trim((string)($ch['config']['email'] ?? ''));
+			$brand = stripos($source, 'node64') === 0 ? 'IPv64.net Node64' : 'IPv64.net';
+			$html = hc2_mail_html($subject, $text, $kind, (string)$ch['lang'], $brand);
+			break;
+		case 'sms':
+			$to = hc2_sms_number((string)($ch['config']['number'] ?? ''));
+			if ($to === '') { fail(422, 'invalid_number', 'The SMS channel has no valid number.'); }
+			$limit = hc2_account(uid())['sms_limit'];
+			$db->prepare("INSERT INTO hc2_sms_counter (userid, day, count) VALUES (:u, UTC_DATE(), 0) ON DUPLICATE KEY UPDATE count = count")->execute(array('u' => uid()));
+			$st = $db->prepare("UPDATE hc2_sms_counter SET count = count + 1 WHERE userid = :u AND day = UTC_DATE()" . ($limit > 0 ? " AND count < :l" : ""));
+			$st->execute($limit > 0 ? array('u' => uid(), 'l' => $limit) : array('u' => uid()));
+			if ($st->rowCount() !== 1) { fail(429, 'sms_limit', 'Daily SMS limit reached.'); }
+			$lines = preg_split('/\r?\n/', $text);
+			$msg = preg_replace('/\s+/u', ' ', preg_replace('/[\x{1F000}-\x{1FFFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', $subject . (isset($lines[0]) && $lines[0] !== '' ? ' - ' . $lines[0] : '')));
+			$msg = mb_substr(trim($msg), 0, 300);
+			break;
+		default:
+			$to = trim((string)($ch['config']['device_token'] ?? ''));
+			$msg = $subject;
+	}
+	if ($to === '') { fail(422, 'invalid_channel', 'The channel has no recipient.'); }
+	try { $err = hc2_deliver($pdo, $type, $to, $subject, $msg, $html, $updown, uid()); }
+	catch (Throwable $e) { error_log('api hc2 send: ' . $e->getMessage()); $err = 'send failed'; }
+	$db->prepare("INSERT INTO hc2_api_sends (userid, channel_id, event_id, kind, source, sent_at, ok, error) VALUES (:u, :c, :e, :k, :s, UTC_TIMESTAMP(3), :o, :x)")
+		->execute(array('u' => uid(), 'c' => $cid, 'e' => $event !== '' ? $event : null, 'k' => $kind, 's' => $source, 'o' => $err === '' ? 1 : 0, 'x' => $err));
+	$db->prepare("UPDATE hc2_channels SET last_used = UTC_TIMESTAMP(3), last_error = :x WHERE id = :c AND userid = :u")->execute(array('x' => $err, 'c' => $cid, 'u' => uid()));
+	if (mt_rand(1, 100) === 1) { $db->exec("DELETE FROM hc2_api_sends WHERE sent_at < UTC_TIMESTAMP() - INTERVAL 35 DAY"); }
+	if ($err !== '') { fail(502, 'delivery_failed', $err); }
+	ok(array('sent' => true, 'duplicate' => false, 'sms_left' => $type === 'sms' ? hc2_sms_left(uid()) : null));
+});
+
 route('POST', '/hc2/channels/{id}/test', function($p) {
 	$ch = hc2_channel(uid(), (int)$p['id']); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
 	if (!(int)$ch['verified']) { fail(409, 'not_verified', 'Confirm the channel in the portal first.'); }

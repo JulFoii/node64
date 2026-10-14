@@ -362,6 +362,13 @@ CREATE TABLE IF NOT EXISTS `hc2_usage_daily` (            -- Tageskontingent Onl
   PRIMARY KEY (`userid`,`day`), KEY `day` (`day`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS `hc2_api_sends` (              -- Versand ueber ipv64-Kanaele per API v2 (Dedup, Tagesobergrenze)
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, `userid` INT NOT NULL, `channel_id` INT NOT NULL, `event_id` VARCHAR(100) NULL,
+  `kind` VARCHAR(40) NOT NULL DEFAULT '', `source` VARCHAR(60) NOT NULL DEFAULT '', `sent_at` DATETIME(3) NOT NULL,
+  `ok` TINYINT NOT NULL DEFAULT 1, `error` VARCHAR(255) NOT NULL DEFAULT '',
+  PRIMARY KEY (`id`), KEY `user_day` (`userid`,`sent_at`), KEY `dedup` (`userid`,`channel_id`,`event_id`), KEY `sent_at` (`sent_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS `hc2_sms_counter` (            -- Tageslimit SMS je Account
   `userid` INT NOT NULL, `day` DATE NOT NULL, `count` INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`userid`,`day`)

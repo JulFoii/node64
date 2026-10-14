@@ -9,8 +9,7 @@
  * nur POST mit JSON. Antwort: {"ok":true} oder {"ok":false,"error":"..."}.
  */
 include("dbconnect.php");
-
-use PHPMailer\PHPMailer\PHPMailer;
+require_once __DIR__ . '/hc2_send_lib.php';  // hc2_deliver(): derselbe Versand wie fuer die API v2
 
 const HC2_BRIDGE_SECRET_FILE = '/var/www/clients/client1/web58/private/hc2_bridge.secret';
 
@@ -40,35 +39,11 @@ $html = (string)($req['html'] ?? '');
 $updown = (string)($req['updown'] ?? '');
 $userid = (int)($req['userid'] ?? 0);
 if ($to === '' || $userid <= 0) { bridge_out(false, 'missing to/userid', 400); }
-if (!in_array($updown, array('', '0', '1'), true)) { $updown = ''; }
 
 try {
-	switch ($type) {
-		case 'mail':
-			if (!filter_var($to, FILTER_VALIDATE_EMAIL)) { bridge_out(false, 'invalid address', 400); }
-			$mail = new PHPMailer();
-			$body = $html !== '' ? $html : nl2br(htmlspecialchars($text));
-			if ((new ReflectionFunction('send_mail'))->getNumberOfParameters() >= 9) {
-				// send_mail() mit hc2-Option: Betreff und Inhalt unveraendert, eigener Textteil, Ergebnis des Versands
-				$ok = send_mail($pdo, $mail, '', 'IPv64.net Healthchecks', $to, $subject !== '' ? $subject : 'IPv64.net Healthchecks', $body, $updown, array('text' => $text));
-				$mail->smtpClose();
-				if ($ok === false) { bridge_out(false, 'mail not sent', 502); }
-				bridge_out(true);
-			}
-			// aeltere send_mail(): nimmt freien HTML-Text als Body, wenn er kein Schluesselwort/keine Check-ID ist
-			$info = send_mail($pdo, $mail, '', '', $to, $subject !== '' ? $subject : 'IPv64.net Healthcheck', $body, $updown);
-			$mail->smtpClose();
-			bridge_out(true);
-		case 'sms':
-			if (!preg_match('/^[0-9]{6,20}$/', $to)) { bridge_out(false, 'invalid number', 400); }
-			send_sms($pdo, json_encode(array('completenumber' => $to)), mb_substr($text, 0, 300), $updown, $userid);
-			bridge_out(true);
-		case 'app':
-			send_firebase($pdo, json_encode(array('devicetoken' => $to)), mb_substr($text !== '' ? $text : $subject, 0, 200), $updown);
-			bridge_out(true);
-		default:
-			bridge_out(false, 'unknown type', 400);
-	}
+	$err = hc2_deliver($pdo, $type, $to, $subject, $text, $html, $updown, $userid);
+	if ($err === '') { bridge_out(true); }
+	bridge_out(false, $err, in_array($err, array('invalid address', 'invalid number', 'unknown type'), true) ? 400 : 502);
 } catch (Throwable $e) {
 	error_log('hc2_send: ' . $e->getMessage());
 	bridge_out(false, 'send failed', 500);

@@ -12137,6 +12137,154 @@
           }
         }
       }
+    },
+    "/hc2/channels/{id}/send": {
+      "post": {
+        "tags": [
+          "Healthchecks 2.0"
+        ],
+        "summary": "Nachricht über einen ipv64-Kanal senden",
+        "description": "Verschickt eine Nachricht über einen verifizierten, aktiven ipv64-Kanal (ipv64_mail, ipv64_sms, app) direkt, ohne hub, z. B. für Meldungen der Node-Module (DynDNS). Der Empfänger kommt nur aus dem Kanal. Mails werden im ipv64-Design gesetzt. SMS zählen gegen das Tageslimit des Tarifs. Rate-Limit: 30 auf einmal, danach 30 je Stunde, höchstens 200 je Tag. Eine event_id, die innerhalb von 24 h schon erfolgreich verschickt wurde, wird nicht erneut gesendet (duplicate=true).",
+        "operationId": "post_hc2_channel_send",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Nummer",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "text"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "example": "DynDNS: neue IPv4-Adresse"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "Text; Zeilen \"Bezeichnung: Wert\" erscheinen in der Mail als Tabelle",
+                    "example": "Domain: home.ipv64.net\nAlt: 192.0.2.1\nNeu: 192.0.2.7"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "Art der Meldung, z. B. dyndns_ip, dyndns_fail (steuert Farbe und Status der Mail)",
+                    "example": "dyndns_ip"
+                  },
+                  "event_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Kennung zum Erkennen doppelter Meldungen (24 h)"
+                  },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "example": "node64"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verschickt oder schon verschickt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "sent": {
+                          "type": "boolean"
+                        },
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "sms_left": {
+                          "type": "integer",
+                          "nullable": true,
+                          "description": "SMS heute noch übrig (nur bei SMS-Kanälen, null = unbegrenzt)"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Kanal nicht gefunden (detail \"Channel not found.\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Kanal nicht verifiziert oder deaktiviert (not_verified, disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Kein ipv64-Kanal oder ungültige Eingaben (not_server_channel, invalid_number)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "SMS-Tageslimit oder Rate-Limit erreicht (sms_limit, rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zustellung fehlgeschlagen (delivery_failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16611,6 +16759,10 @@
             "format": "date-time",
             "nullable": true,
             "description": ""
+          },
+          "sendable_via_api": {
+            "type": "boolean",
+            "description": "Über POST /hc2/channels/{id}/send nutzbar (ipv64-Kanal, verifiziert, aktiv)"
           }
         }
       },
