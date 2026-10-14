@@ -165,6 +165,7 @@ route('GET', '/hc2/account', function() {
 	$acc = hc2_account(uid()); $nodes = hc2_nodes(uid()); $on = 0; foreach ($nodes as $n) { if ((int)$n['online']) { $on++; } }
 	$locs = array(); foreach (hc2_locations() as $code => $name) { $locs[] = array('code' => $code, 'name' => $name); }
 	ok(array('plan' => $acc['class_name'], 'online_measuring_points' => array('used' => hc2_online_used(uid()), 'limit' => $acc['healthcheck_limit'] ?: null), 'locations_per_check' => $acc['hc_locations'],
+		'checks_per_day' => array('used' => hc2_checks_today(uid()), 'limit' => $acc['checks_per_day'] ?: null),
 		'sms_per_day' => $acc['sms_limit'], 'locations' => $locs, 'nodes' => array('total' => count($nodes), 'online' => $on), 'checks' => count(hc2_checks(uid()))));
 });
 

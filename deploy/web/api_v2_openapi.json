@@ -16962,6 +16962,20 @@
               }
             }
           },
+          "checks_per_day": {
+            "type": "object",
+            "description": "Tageskontingent: Online-Messungen je Standort plus Pushes an die Online-Adresse (Tag Europe/Berlin). Erreicht: Online-Checks pausieren bis Mitternacht.",
+            "properties": {
+              "used": {
+                "type": "integer",
+                "description": "heute"
+              },
+              "limit": {
+                "type": "integer",
+                "description": "null = unbegrenzt"
+              }
+            }
+          },
           "locations_per_check": {
             "type": "integer",
             "description": ""

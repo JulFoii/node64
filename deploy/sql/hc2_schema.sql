@@ -357,6 +357,11 @@ CREATE TABLE IF NOT EXISTS `hc2_settings` (               -- Benachrichtigungs-E
   PRIMARY KEY (`userid`,`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS `hc2_usage_daily` (            -- Tageskontingent Online-Checks (healthcheck_update_limit)
+  `userid` INT NOT NULL, `day` DATE NOT NULL, `checks` INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (`userid`,`day`), KEY `day` (`day`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS `hc2_sms_counter` (            -- Tageslimit SMS je Account
   `userid` INT NOT NULL, `day` DATE NOT NULL, `count` INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`userid`,`day`)

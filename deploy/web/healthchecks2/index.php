@@ -92,6 +92,8 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 	<div class="card shadow-sm mb-3">
 		<div class="card-body p-2 d-flex flex-wrap align-items-center" style="gap:.5rem">
 			<span class="badge badge-<?php echo ($limit > 0 && $used >= $limit) ? 'danger' : 'success'; ?>" title="Online-Messstellen (Check × Standorte) gegen dein Limit">Online-Messstellen <?php echo $used; ?> / <?php echo $limit > 0 ? $limit : '∞'; ?></span>
+			<?php $today = hc2_checks_today($uid); $perDay = $acc['checks_per_day']; ?>
+			<span class="badge badge-<?php echo ($perDay > 0 && $today >= $perDay) ? 'danger' : 'light'; ?>" title="Online-Messungen und Pushes heute; ist das Tageskontingent erreicht, pausieren die Online-Checks bis Mitternacht (lokale Messungen der Nodes laufen weiter)">Heute <?php echo $today; ?> / <?php echo $perDay > 0 ? $perDay : '∞'; ?> Online-Messungen</span>
 			<span class="badge badge-light"><?php echo hc2_h($acc['class_name']); ?> · bis zu <?php echo $acc['hc_locations']; ?> Standort(e) je Check</span>
 			<span class="badge badge-light"><i class="fa-solid fa-cloud"></i> online <?php echo $counts['online']; ?> · <i class="fa-solid fa-house"></i> lokal <?php echo $counts['local']; ?> · hybrid <?php echo $counts['both']; ?></span>
 			<span class="badge badge-light"><i class="fa-solid fa-server"></i> Nodes: <?php $on = 0; foreach ($nodes as $n) { if ((int)$n['online']) { $on++; } } echo $on . ' online / ' . count($nodes); ?></span>

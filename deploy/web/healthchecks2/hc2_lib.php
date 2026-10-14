@@ -96,13 +96,23 @@ function hc2_slot(string $token): int { return (int)(sprintf('%u', crc32($token)
 function hc2_account(int $userid): array {
 	static $cache = array();
 	if (isset($cache[$userid])) { return $cache[$userid]; }
-	$st = hc2_pdo()->prepare("SELECT id, email, user_class, hc2, healthcheck_limit, hc_locations, sms_limit FROM ipv64.hc2_users_v WHERE id = :u");
+	$st = hc2_pdo()->prepare("SELECT v.id, v.email, v.user_class, v.hc2, v.healthcheck_limit, v.hc_locations, v.sms_limit, c.healthcheck_update_limit FROM ipv64.hc2_users_v v LEFT JOIN ipv64.user_class c ON c.id = v.user_class WHERE v.id = :u");
 	$st->execute(array('u' => $userid));
 	$a = $st->fetch(PDO::FETCH_ASSOC) ?: array('id' => $userid, 'email' => '', 'user_class' => 1, 'hc2' => 0, 'healthcheck_limit' => 0, 'hc_locations' => 1, 'sms_limit' => 0);
 	$names = array(1 => 'Standard', 2 => 'VIP', 3 => 'Premium', 4 => 'Business', 5 => 'Company', 6 => 'Supporter');
 	$a['class_name'] = $names[(int)$a['user_class']] ?? ('Klasse ' . $a['user_class']);
 	$a['healthcheck_limit'] = (int)$a['healthcheck_limit']; $a['hc_locations'] = max(1, (int)$a['hc_locations']); $a['sms_limit'] = (int)$a['sms_limit'];
+	$a['checks_per_day'] = (int)($a['healthcheck_update_limit'] ?? 0); // Tageskontingent Online-Messungen + Pushes, 0 = unbegrenzt
 	return $cache[$userid] = $a;
+}
+
+/** Online-Messungen und Pushes heute (Tageskontingent, vom hub alle 30 s geschrieben; Tag Europe/Berlin). */
+function hc2_checks_today(int $userid): int {
+	try {
+		$st = hc2_pdo()->prepare("SELECT checks FROM hc2_usage_daily WHERE userid = :u AND day = :d");
+		$st->execute(array('u' => $userid, 'd' => (new DateTime('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d')));
+		return (int)$st->fetchColumn();
+	} catch (Throwable $e) { return 0; } // Tabelle noch nicht angelegt
 }
 
 /** Belegte Online-Messstellen (Check x Standorte), optional ohne einen Token. */
