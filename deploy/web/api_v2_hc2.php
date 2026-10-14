@@ -33,6 +33,15 @@ function hc2_find_node(string $id): array {
 function hc2_check_out(array $c, bool $detail = false): array {
 	$nodes = hc2_nodes(uid());
 	$state = (int)$c['paused'] ? 'paused' : ($c['state'] ?: 'pending');
+	// letzte Messung aus den Zustaenden je Messstelle (hc2_checks.last_check_at aendert sich nur beim Zustandswechsel)
+	static $last = null;
+	if ($last === null) {
+		$last = array();
+		$st = hc2_pdo()->prepare("SELECT s.token, MAX(s.last_check_at) AS m FROM hc2_check_states s JOIN hc2_checks c ON c.token = s.token WHERE c.userid = :u AND c.deleted_at IS NULL GROUP BY s.token");
+		$st->execute(array('u' => uid()));
+		foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $last[$r['token']] = $r['m']; }
+	}
+	$lastCheck = (isset($last[$c['token']]) && $last[$c['token']] > (string)$c['last_check_at']) ? $last[$c['token']] : $c['last_check_at'];
 	$o = array(
 		'token' => $c['token'], 'name' => $c['name'], 'type' => $c['type'], 'target' => $c['target'], 'params' => hc2_check_params($c) ?: new stdClass(),
 		'interval_seconds' => (int)$c['interval_sec'], 'retry_interval_seconds' => (int)$c['retry_interval_sec'], 'retries' => (int)$c['retries'],
@@ -44,7 +53,7 @@ function hc2_check_out(array $c, bool $detail = false): array {
 		'locations' => array_values(array_filter(explode(',', (string)$c['locations']))), 'policy' => $c['policy'], 'notify_degraded' => (int)$c['notify_degraded'] === 1,
 		'notify_down' => (int)$c['notify_down'] === 1, 'notify_up' => (int)$c['notify_up'] === 1, 'channels' => hc2_check_channels($c), 'repeat_minutes' => (int)$c['repeat_minutes'],
 		'revision' => (int)$c['revision'], 'created_at' => hc2_iso($c['created_at']), 'updated_at' => hc2_iso($c['updated_at']),
-		'state' => array('state' => $state, 'since' => hc2_iso($c['state_since']), 'last_check_at' => hc2_iso($c['last_check_at']), 'last_status' => $c['last_status'],
+		'state' => array('state' => $state, 'since' => hc2_iso($c['state_since']), 'last_check_at' => hc2_iso($lastCheck), 'last_status' => $c['last_status'],
 			'last_latency_ms' => $c['last_latency_ms'] !== null ? (float)$c['last_latency_ms'] : null, 'last_reason' => $c['last_reason'], 'last_message' => $c['last_message'],
 			'down_since' => hc2_iso($c['down_since']), 'last_push_at' => hc2_iso($c['last_push_at'])),
 	);
