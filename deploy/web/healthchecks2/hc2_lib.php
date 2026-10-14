@@ -122,6 +122,21 @@ function hc2_online_used(int $userid, string $except = ''): int {
 	return (int)$st->fetchColumn();
 }
 
+/** Hochrechnung des Tagesverbrauchs (Online-Messungen je Standort) aller aktiven Online-/Hybrid-Checks
+ *  ohne $except, wie der hub zaehlt (leere Standorte = beide, bei nur einem Standort je Check hoechstens 1). */
+function hc2_daily_projection(int $userid, string $except = ''): int {
+	$acc = hc2_account($userid);
+	$st = hc2_pdo()->prepare("SELECT interval_sec, locations FROM hc2_checks WHERE userid = :u AND deleted_at IS NULL AND execution IN ('online','both') AND paused = 0 AND type <> 'push' AND token <> :t");
+	$st->execute(array('u' => $userid, 't' => $except));
+	$sum = 0;
+	foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
+		$n = $c['locations'] === '' ? 2 : count(explode(',', $c['locations']));
+		if ($acc['hc_locations'] === 1) { $n = min($n, 1); }
+		if ((int)$c['interval_sec'] > 0) { $sum += intdiv(86400, (int)$c['interval_sec']) * $n; }
+	}
+	return $sum;
+}
+
 /** Aktive Nodes des Accounts, Schluessel node_id. */
 function hc2_nodes(int $userid, bool $fresh = false): array {
 	static $cache = array();

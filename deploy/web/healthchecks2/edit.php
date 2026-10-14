@@ -182,6 +182,7 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="loc_<?php echo $code; ?>" name="locations[]" value="<?php echo $code; ?>"<?php echo in_array($code, (array)$f['locations'], true) && $allowed ? ' checked' : ''; echo $allowed ? '' : ' disabled'; ?>><label class="custom-control-label" for="loc_<?php echo $code; ?>"><?php echo hc2_h($name); ?><?php echo $allowed ? '' : ' <span class="badge badge-secondary">ab Supporter</span>'; ?></label></div>
 							<?php } ?>
 							<small class="form-text text-muted">Jeder Standort zählt als Messstelle gegen dein Online-Limit (<?php echo hc2_online_used($uid, $old['token'] ?? ''); ?> von <?php echo $acc['healthcheck_limit'] ?: '∞'; ?> belegt).</small>
+							<?php if ($acc['checks_per_day'] > 0) { ?><small class="form-text" id="hc2-proj" data-other="<?php echo hc2_daily_projection($uid, $old['token'] ?? ''); ?>" data-today="<?php echo hc2_checks_today($uid); ?>" data-limit="<?php echo $acc['checks_per_day']; ?>" data-acclocs="<?php echo $acc['hc_locations']; ?>"></small><?php } ?>
 						</div>
 						<div class="form-group" id="policybox"><label>Gestört, wenn …</label>
 							<select class="custom-select" name="policy"><option value="all"<?php echo $sel('policy', 'all'); ?>>alle Messstellen gestört melden (sonst „teilweise gestört“)</option><option value="any"<?php echo $sel('policy', 'any'); ?>>eine Messstelle gestört meldet</option><option value="majority"<?php echo $sel('policy', 'majority'); ?>>die Mehrheit gestört meldet</option></select>
@@ -227,6 +228,25 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 		$('#nodebox').toggle(ex !== 'online'); $('#locbox').toggle(ex !== 'local'); $('#policybox').toggle(ex === 'both');
 	}
 	$('#type, #execution').on('change', sync); sync();
+	// Tageskontingent: Verbrauch dieses Checks und des Accounts pro Tag hochrechnen (wie der hub zaehlt, ohne Pushes)
+	var $p = $('#hc2-proj');
+	function proj(){
+		if (!$p.length) { return; }
+		var num = function(k){ return parseInt($p.data(k), 10) || 0; }, fmt = function(n){ return n.toLocaleString('de-DE'); };
+		var sec = parseInt($('[name=interval_sec]').val(), 10) || 0, locs = $('[name="locations[]"]:checked').length || 2;
+		if (num('acclocs') === 1 && locs > 1) { locs = 1; }
+		var cost = ($('#execution').val() !== 'local' && $('#type').val() !== 'push' && !$('#paused').prop('checked') && sec > 0) ? Math.floor(86400 / sec) * locs : 0;
+		var total = num('other') + cost, limit = num('limit'), over = total > limit;
+		var t = (cost > 0 ? 'Dieser Check: ' + fmt(cost) + ' Online-Messungen pro Tag (' + sec + ' s × ' + locs + ' Standort(e)). ' : 'Dieser Check verbraucht kein Tageskontingent (lokal, pausiert oder Push). ')
+			+ 'Account gesamt voraussichtlich ' + fmt(total) + ' von ' + fmt(limit) + ' pro Tag (ohne Pushes).';
+		if (over) {
+			var left = limit - num('today'), msg = ' Das reicht nicht für den ganzen Tag: Ist das Kontingent erreicht, pausieren die Online-Checks bis Mitternacht.';
+			if (left > 0) { var at = new Date(Date.now() + left / (total / 1440) * 60000); if (at.toDateString() === new Date().toDateString()) { msg = ' Bei diesem Stand ist das Kontingent heute gegen ' + at.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'}) + ' Uhr erreicht, danach pausieren die Online-Checks bis Mitternacht.'; } }
+			t += msg;
+		}
+		$p.text(t).toggleClass('text-warning font-weight-bold', over).toggleClass('text-muted', !over);
+	}
+	$('form').on('change input', proj); proj();
 	// Docker: genau eine Node; ein bestehender Docker-Check bleibt bei seiner Node
 	var lockDocker = <?php echo ($old && $old['type'] === 'docker') ? 'true' : 'false'; ?>;
 	function single(){ return $('#type').val() === 'docker'; }
