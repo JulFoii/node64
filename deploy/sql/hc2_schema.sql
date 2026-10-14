@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS `hc2_nodes` (
   `version`      VARCHAR(32) NOT NULL DEFAULT '',
   `timezone`     VARCHAR(64) NOT NULL DEFAULT 'UTC',
   `modules`      VARCHAR(255) NOT NULL DEFAULT '',          -- aktive Module, kommagetrennt
-  `remote_mgmt`  ENUM('off','read','full') NOT NULL DEFAULT 'read',
+  `remote_mgmt`  ENUM('off','read','full') NOT NULL DEFAULT 'full',
   `last_seen`    DATETIME(3) NULL,
   `last_sync`    DATETIME(3) NULL,
   `last_ack_seq` BIGINT NOT NULL DEFAULT 0,                 -- hoechste bestaetigte Messpunkt-Nummer

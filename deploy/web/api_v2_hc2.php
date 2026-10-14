@@ -444,7 +444,7 @@ route('GET', '/hc2/nodes/{node_id}/commands', function($p) {
 route('POST', '/hc2/nodes/link', function() {
 	$code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', in_str('code', true, 9)));
 	if (strlen($code) !== 8) { fail(422, 'invalid_code', 'The code has 8 characters.', array('field' => 'code')); }
-	$loc = in_str('location', false, 100) ?? ''; $rm = in_str('remote_mgmt', false, 10) ?? 'read';
+	$loc = in_str('location', false, 100) ?? ''; $rm = in_str('remote_mgmt', false, 10) ?? 'full';
 	if (!in_array($rm, array('off', 'read', 'full'), true)) { fail(422, 'invalid_remote_mgmt', 'remote_mgmt must be off, read or full.', array('field' => 'remote_mgmt')); }
 	$st = hc2_pdo()->prepare("UPDATE hc2_link_codes SET userid = :u, location = :l, remote_mgmt = :r WHERE code = :c AND userid IS NULL AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(3)");
 	$st->execute(array('u' => uid(), 'l' => $loc, 'r' => $rm, 'c' => $code));

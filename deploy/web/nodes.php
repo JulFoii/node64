@@ -36,6 +36,18 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 					$msg = 'Node getrennt. ' . ($moved ? $moved . ' Check(s) messen andere Nodes weiter. ' : '') . ($keep ? $kept . ' Check(s) laufen online weiter, ' . $dropped . ' gelöscht (privates Ziel oder Limit).' : $dropped . ' Check(s) der Node gelöscht.');
 					$nid = '';
 					break;
+				case 'delete':
+					// nur getrennte Nodes: Eintrag samt Token, Befehlen und Agent-Kanaelen entfernen (Messwerte bleiben)
+					if (empty($node['revoked_at'])) { $msg = 'Bitte die Node zuerst trennen.'; break; }
+					$st = $pdo->prepare("SELECT id FROM hc2_channels WHERE node_id = :n AND userid = :u AND deleted_at IS NULL"); $st->execute(array('n' => $nid, 'u' => $uid));
+					foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $chId) {
+						$chId = (int)$chId; hc2_log_change($uid, 'channel', (string)$chId, 'delete', 'portal');
+						foreach (hc2_checks($uid) as $c) { $ids = hc2_check_channels($c); if (in_array($chId, $ids, true)) { hc2_set_check($uid, $c['token'], array('channels' => implode(',', array_diff($ids, array($chId))))); } }
+					}
+					foreach (array('hc2_node_tokens', 'hc2_commands', 'hc2_send_orders', 'hc2_link_codes') as $t) { $pdo->prepare("DELETE FROM $t WHERE node_id = :n")->execute(array('n' => $nid)); }
+					$pdo->prepare("DELETE FROM hc2_nodes WHERE node_id = :n AND userid = :u AND revoked_at IS NOT NULL")->execute(array('n' => $nid, 'u' => $uid));
+					$msg = 'Node „' . $node['name'] . '“ entfernt.'; $nid = '';
+					break;
 				case 'rename':
 					$name = mb_substr(trim((string)($_POST['name'] ?? '')), 0, 100); $loc = mb_substr(trim((string)($_POST['location'] ?? '')), 0, 100);
 					$rm = in_array($_POST['remote_mgmt'] ?? '', array('off','read','full'), true) ? $_POST['remote_mgmt'] : $node['remote_mgmt'];
@@ -81,7 +93,7 @@ $detail = $loadNode($nid); $nodeMap = hc2_nodes($uid);
 				<td><?php echo (int)$n['checks']; ?></td>
 				<td><?php echo (int)$n['outbox_size']; if ((int)$n['conflicts'] > 0) { echo ' <span class="badge badge-danger">' . (int)$n['conflicts'] . ' Konflikte</span>'; } ?></td>
 				<td><?php echo array('off' => 'aus', 'read' => 'lesen + Tests', 'full' => 'vollständig')[$n['remote_mgmt']] ?? hc2_h($n['remote_mgmt']); ?></td>
-				<td class="text-nowrap text-right"><?php if (!$revoked) { ?><a class="btn btn-sm btn-outline-secondary" href="nodes.php?node=<?php echo hc2_h($n['node_id']); ?>">Details</a><?php } ?></td>
+				<td class="text-nowrap text-right"><?php if (!$revoked) { ?><a class="btn btn-sm btn-outline-secondary" href="nodes.php?node=<?php echo hc2_h($n['node_id']); ?>">Details</a><?php } else { ?><form method="post" class="d-inline" onsubmit="return confirm('Getrennte Node endgültig aus der Liste entfernen?');"><?php echo hc2_csrf_field(); ?><input type="hidden" name="node_id" value="<?php echo hc2_h($n['node_id']); ?>"><input type="hidden" name="action" value="delete"><button class="btn btn-sm btn-outline-danger" type="submit" title="Entfernen"><i class="fa-solid fa-trash"></i> Entfernen</button></form><?php } ?></td>
 			</tr>
 			<?php } ?>
 			</tbody>
@@ -136,7 +148,7 @@ $detail = $loadNode($nid); $nodeMap = hc2_nodes($uid);
 					<form method="post"><?php echo hc2_csrf_field(); ?><input type="hidden" name="node_id" value="<?php echo hc2_h($N); ?>"><input type="hidden" name="action" value="rename">
 						<div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?php echo hc2_h($detail['name']); ?>" maxlength="100" required></div>
 						<div class="form-group"><label>Standort</label><input class="form-control" name="location" value="<?php echo hc2_h($detail['location']); ?>" maxlength="100"></div>
-						<div class="form-group"><label>Fernverwaltung</label><select class="custom-select" name="remote_mgmt"><option value="read"<?php echo $detail['remote_mgmt'] === 'read' ? ' selected' : ''; ?>>Nur lesen und Testläufe</option><option value="full"<?php echo $detail['remote_mgmt'] === 'full' ? ' selected' : ''; ?>>Vollständig</option><option value="off"<?php echo $detail['remote_mgmt'] === 'off' ? ' selected' : ''; ?>>Aus</option></select><small class="form-text text-muted">Die Node entscheidet selbst, was sie annimmt; die Einstellung wird mit dem nächsten Abgleich übertragen.</small></div>
+						<div class="form-group"><label>Fernverwaltung</label><select class="custom-select" name="remote_mgmt"><option value="full"<?php echo $detail['remote_mgmt'] === 'full' ? ' selected' : ''; ?>>Vollständig</option><option value="read"<?php echo $detail['remote_mgmt'] === 'read' ? ' selected' : ''; ?>>Nur lesen und Testläufe</option><option value="off"<?php echo $detail['remote_mgmt'] === 'off' ? ' selected' : ''; ?>>Aus</option></select><small class="form-text text-muted">Die Node entscheidet selbst, was sie annimmt; die Einstellung wird mit dem nächsten Abgleich übertragen.</small></div>
 						<button class="btn btn-primary btn-sm" type="submit">Speichern</button>
 					</form>
 					<hr>

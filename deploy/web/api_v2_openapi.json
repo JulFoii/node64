@@ -11755,8 +11755,8 @@
                   },
                   "remote_mgmt": {
                     "type": "string",
-                    "description": "off, read, full",
-                    "example": "read"
+                    "description": "off, read, full (Standard: full)",
+                    "example": "full"
                   }
                 },
                 "required": [

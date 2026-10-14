@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} else {
 		$code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)($_POST['code'] ?? '')));
 		$location = mb_substr(trim((string)($_POST['location'] ?? '')), 0, 100);
-		$remote = in_array($_POST['remote_mgmt'] ?? '', array('off', 'read', 'full'), true) ? $_POST['remote_mgmt'] : 'read';
+		$remote = in_array($_POST['remote_mgmt'] ?? '', array('off', 'read', 'full'), true) ? $_POST['remote_mgmt'] : 'full';
 		if (strlen($code) !== 8) {
 			$msg = 'Der Code hat 8 Zeichen (ohne Bindestrich).';
 		} else {
@@ -60,8 +60,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 						<div class="form-group">
 							<label for="remote_mgmt">Fernverwaltung aus dem Portal</label>
 							<select class="form-control" id="remote_mgmt" name="remote_mgmt">
-								<option value="read" selected>Nur lesen und Testläufe (empfohlen)</option>
-								<option value="full">Vollständig (Checks anlegen, pausieren, prüfen)</option>
+								<option value="full" selected>Vollständig (Checks anlegen, ändern, löschen, prüfen)</option>
+								<option value="read">Nur lesen und Testläufe</option>
 								<option value="off">Aus (Node sendet nur, nimmt keine Befehle an)</option>
 							</select>
 						</div>
