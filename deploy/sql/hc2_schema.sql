@@ -55,9 +55,10 @@ CREATE TABLE IF NOT EXISTS `hc2_nodes` (
   `conflicts`    INT NOT NULL DEFAULT 0,
   `online`       TINYINT NOT NULL DEFAULT 0,
   `node`         VARCHAR(64) NOT NULL DEFAULT '',           -- hub-Instanz, die die Verbindung haelt
+  `proxy_via`    VARCHAR(32) NULL DEFAULT NULL,             -- Stellvertreter-Node: meldet ueber diese Node (kein Token)
   `created_at`   DATETIME(3) NOT NULL,
   `revoked_at`   DATETIME(3) NULL,
-  PRIMARY KEY (`id`), UNIQUE KEY `node_id` (`node_id`), KEY `userid` (`userid`)
+  PRIMARY KEY (`id`), UNIQUE KEY `node_id` (`node_id`), KEY `userid` (`userid`), KEY `proxy_via` (`proxy_via`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `hc2_node_tokens` (
