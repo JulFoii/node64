@@ -1,0 +1,359 @@
+<?php
+/**
+ * IPv64.net API v2 – CDN64 online (Pfade /cdn64o/...). Wird von api_v2.php vor dispatch() eingebunden:
+ *     require __DIR__ . '/api_v2_cdn64o.php';
+ * Tunnel zu den CDN64-Servern srv07/srv08.cdn64.de: Nodes melden Tunnel und Namen an (API-Key), die Server holen
+ * ihre Konfiguration und melden Traffic (Server-Geheimnis). Eigene Tabellen cdn64o_* (deploy/sql/cdn64_online.sql),
+ * nichts aus dem alten CDN wird geschrieben; das Kontingent (user_class.cdn_domains, cdn_traffic) teilen sich beide.
+ * DNS: A/AAAA beider Server mit TTL 10 in subdomain_records (cdn_tmp = 3: von update.php und API geschuetzt),
+ * vorhandene A/AAAA des Namens werden deaktiviert und beim Ausschalten wieder aktiviert.
+ * Planung: docs/CDN64-ONLINE.md im Node64-Repo.
+ */
+
+const C64O_TTL          = 10;   // TTL der Server-Eintraege
+const C64O_CDN_TMP      = 3;    // Markierung in subdomain_records (1/2 = altes CDN)
+const C64O_MAX_TUNNELS  = 10;   // Tunnels je Account
+const C64O_MODES        = array(1);  // T3: nur durchreichen; 2 (terminieren) ab T5, 3 (direkt) ab T7
+
+// ---------------------------------------------------------------- Hilfen
+
+function c64o_edges(bool $all = false): array {
+	return qa("SELECT * FROM cdn64o_edges" . ($all ? "" : " WHERE disabled = 0") . " ORDER BY name");
+}
+
+function c64o_edge_out(array $e): array {
+	$ips = array_values(array_filter(array($e['ipv6'], $e['ipv4'])));
+	return array('name' => $e['name'], 'host' => $e['hostname'], 'port' => (int)$e['tunnel_port'], 'ips' => $ips);
+}
+
+/** Kontingent des Accounts: altes und neues CDN zusammen (Domains, Traffic des Monats in MB), Bandbreite. */
+function c64o_quota(int $u, array $class): array {
+	$old = (int)q1("SELECT count(id) c FROM cdn_domains WHERE userid = :u", array('u' => $u))['c'];
+	$new = (int)q1("SELECT count(id) c FROM cdn64o_hosts WHERE userid = :u", array('u' => $u))['c'];
+	$me = q1("SELECT cdn_traffic_input, cdn_traffic_output FROM users WHERE id = :u", array('u' => $u)) ?? array();
+	$oldMB = (float)($me['cdn_traffic_input'] ?? 0) + (float)($me['cdn_traffic_output'] ?? 0);
+	$t = q1("SELECT COALESCE(SUM(bytes_in + bytes_out), 0) b FROM cdn64o_traffic WHERE userid = :u AND day >= :d", array('u' => $u, 'd' => date('Y-m-01')));
+	$newMB = (float)$t['b'] / 1048576;
+	return array(
+		'domains' => array('used' => $old + $new, 'old_cdn' => $old, 'limit' => (int)($class['cdn_domains'] ?? 0)),
+		'traffic_mb' => array('used' => round($oldMB + $newMB, 1), 'old_cdn' => round($oldMB, 1), 'limit' => (int)($class['cdn_traffic'] ?? 0) * 1024),
+		'bandwidth_mbit' => (int)($class['cdn_bandwidth'] ?? 0),
+	);
+}
+
+function c64o_over_traffic(array $q): bool { return $q['traffic_mb']['limit'] <= 0 || $q['traffic_mb']['used'] >= $q['traffic_mb']['limit']; }
+
+function c64o_event(int $hostId, int $u, string $kind, string $msg = ''): void {
+	q("INSERT INTO cdn64o_events (host_id, userid, kind, message) VALUES (:h, :u, :k, :m)", array('h' => $hostId, 'u' => $u, 'k' => $kind, 'm' => mb_substr($msg, 0, 255)));
+}
+
+function c64o_tunnel_out(array $t): array {
+	return array('id' => $t['id'], 'name' => $t['name'], 'node_id' => $t['node_id'], 'status' => $t['status'], 'created_at' => iso($t['created_at']),
+		'last_seen' => iso($t['last_seen']), 'last_edge' => $t['last_edge'] ?: null, 'node_version' => $t['node_version'] ?: null);
+}
+
+function c64o_host_out(array $h): array {
+	$tun = array_column(qa("SELECT tunnel_id FROM cdn64o_host_tunnels WHERE host_id = :h ORDER BY priority, tunnel_id", array('h' => $h['id'])), 'tunnel_id');
+	$tr = q1("SELECT COALESCE(SUM(bytes_in), 0) i, COALESCE(SUM(bytes_out), 0) o FROM cdn64o_traffic WHERE host_id = :h AND day >= :d", array('h' => $h['id'], 'd' => date('Y-m-01')));
+	return array('id' => (int)$h['id'], 'fqdn' => $h['fqdn'], 'mode' => (int)$h['mode'], 'wildcard' => (int)$h['wildcard'] === 1, 'status' => $h['status'],
+		'blocked_reason' => $h['blocked_reason'] ?: null, 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
+		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o']),
+		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']));
+}
+
+function c64o_find_host(string $ref): array {
+	$h = ctype_digit($ref)
+		? q1("SELECT * FROM cdn64o_hosts WHERE id = :i AND userid = :u", array('i' => (int)$ref, 'u' => uid()))
+		: q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f AND userid = :u", array('f' => strtolower(rtrim($ref, '.')), 'u' => uid()));
+	if($h === null) { fail(404, 'cdn64o_host_not_found', 'CDN64 online host not found.'); }
+	return $h;
+}
+
+function c64o_find_tunnel(string $id): array {
+	$t = q1("SELECT * FROM cdn64o_tunnels WHERE id = :i AND userid = :u", array('i' => $id, 'u' => uid()));
+	if($t === null) { fail(404, 'cdn64o_tunnel_not_found', 'Tunnel not found.'); }
+	return $t;
+}
+
+/** Domain des Accounts, zu der der Name gehoert (laengster passender Name), und das Praefix davor. */
+function c64o_domain_for(string $fqdn): array {
+	$best = null;
+	foreach(qa("SELECT * FROM subdomains WHERE userid = :u AND deactivated = 0", array('u' => uid())) as $d) {
+		$n = strtolower(domain_name($d));
+		if($fqdn === $n OR str_ends_with($fqdn, '.' . $n)) {
+			if($best === null OR strlen($n) > strlen(domain_name($best))) { $best = $d; }
+		}
+	}
+	if($best === null) { fail(422, 'domain_not_in_account', "The name is not part of a domain in your ipv64 account.", array('field' => 'fqdn')); }
+	$n = strtolower(domain_name($best));
+	$p = $fqdn === $n ? '' : substr($fqdn, 0, -strlen($n) - 1);
+	return array($best, $p);
+}
+
+/** DNS umstellen: Originale A/AAAA deaktivieren, Server eintragen, an PowerDNS. false = PowerDNS-Fehler. */
+function c64o_dns_on(array $h, array $d): bool {
+	$u = (int)$h['userid']; $sid = (int)$d['id']; $p = $h['praefix']; $dn = domain_name($d);
+	foreach(qa("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND type IN ('A','AAAA') AND deactivated = 0 AND cdn_tmp = 0", array('s' => $sid, 'p' => $p)) as $r) {
+		q("UPDATE subdomain_records set deactivated = 1 WHERE id = :i", array('i' => $r['id']));
+		q("INSERT INTO cdn64o_records (host_id, record_id, role) VALUES (:h, :r, 'original')", array('h' => $h['id'], 'r' => $r['id']));
+	}
+	foreach(c64o_edges() as $e) {
+		foreach(array('A' => $e['ipv4'], 'AAAA' => $e['ipv6']) as $type => $ip) {
+			if($ip === '') { continue; }
+			q("INSERT INTO subdomain_records (subdomain_id, userid, domainname, praefix, content, ttl, type, record_key, cdn_tmp) VALUES (:s, :u, :dn, :p, :c, :t, :ty, :k, :m)",
+				array('s' => $sid, 'u' => $u, 'dn' => $dn, 'p' => $p, 'c' => $ip, 't' => C64O_TTL, 'ty' => $type, 'k' => token32(), 'm' => C64O_CDN_TMP));
+			q("INSERT INTO cdn64o_records (host_id, record_id, role) VALUES (:h, :r, 'edge')", array('h' => $h['id'], 'r' => $GLOBALS['pdo']->lastInsertId()));
+		}
+	}
+	$ok = true;
+	foreach(array('A', 'AAAA') as $t) { if(!quiet(fn() => do_zone_update($GLOBALS['pdo'], $u, $sid, $t, (string)C64O_TTL, $p))) { $ok = false; } }
+	return $ok;
+}
+
+/** DNS zurueck: Server-Eintraege loeschen, Originale wieder aktivieren, an PowerDNS. */
+function c64o_dns_off(array $h): bool {
+	$u = (int)$h['userid']; $sid = (int)$h['subdomain_id']; $p = $h['praefix'];
+	foreach(qa("SELECT record_id, role FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id'])) as $r) {
+		if($r['role'] === 'edge') {
+			q("DELETE FROM subdomain_records WHERE id = :i AND cdn_tmp = :m", array('i' => $r['record_id'], 'm' => C64O_CDN_TMP));
+		} else {
+			q("UPDATE subdomain_records set deactivated = 0 WHERE id = :i", array('i' => $r['record_id']));
+		}
+	}
+	q("DELETE FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id']));
+	$ok = true;
+	foreach(array('A', 'AAAA') as $t) { if(!quiet(fn() => do_zone_update($GLOBALS['pdo'], $u, $sid, $t, (string)C64O_TTL, $p))) { $ok = false; } }
+	return $ok;
+}
+
+// ---------------------------------------------------------------- Nodes (API-Key)
+
+route('GET', '/cdn64o', function() {
+	global $CLASS;
+	$u = uid();
+	ok(array(
+		'quota' => c64o_quota($u, $CLASS),
+		'edges' => array_map('c64o_edge_out', c64o_edges()),
+		'tunnels' => array_map('c64o_tunnel_out', qa("SELECT * FROM cdn64o_tunnels WHERE userid = :u ORDER BY created_at", array('u' => $u))),
+		'hosts' => array_map('c64o_host_out', qa("SELECT * FROM cdn64o_hosts WHERE userid = :u ORDER BY fqdn", array('u' => $u))),
+	));
+});
+
+/** POST /cdn64o/tunnels {name, node_id}: Node anmelden. Antwort mit Token (nur hier sichtbar) und Server-Liste. */
+route('POST', '/cdn64o/tunnels', function() {
+	global $CLASS, $pdo;
+	$u = uid();
+	if((int)($CLASS['cdn_domains'] ?? 0) <= 0) { fail(403, 'plan_not_allowed', 'CDN64 online is not part of your plan.'); }
+	if((int)q1("SELECT count(id) c FROM cdn64o_tunnels WHERE userid = :u", array('u' => $u))['c'] >= C64O_MAX_TUNNELS) { fail(403, 'limit_reached', 'Tunnel limit reached.'); }
+	$name = in_str('name', false, 100, '');
+	$node = in_str('node_id', false, 64, '');
+	$id = 'tn_' . strtolower(substr(token32(), 0, 16));
+	$tok = token32() . token32();
+	q("INSERT INTO cdn64o_tunnels (id, userid, node_id, name, token_hash) VALUES (:i, :u, :n, :na, :h)", array('i' => $id, 'u' => $u, 'n' => $node, 'na' => $name, 'h' => hash('sha256', $tok)));
+	add_log($pdo, $u, "0", "CDN64 online", "Tunnel $id angelegt ($name).");
+	$o = c64o_tunnel_out(c64o_find_tunnel($id));
+	$o['token'] = $tok;
+	$o['edges'] = array_map('c64o_edge_out', c64o_edges());
+	ok($o, 201);
+});
+
+/** POST /cdn64o/tunnels/{id}/token: neuen Token ausstellen (alter wird ungueltig). */
+route('POST', '/cdn64o/tunnels/{id}/token', function($p) {
+	$t = c64o_find_tunnel($p['id']);
+	$tok = token32() . token32();
+	q("UPDATE cdn64o_tunnels set token_hash = :h WHERE id = :i", array('h' => hash('sha256', $tok), 'i' => $t['id']));
+	$o = c64o_tunnel_out(c64o_find_tunnel($t['id']));
+	$o['token'] = $tok;
+	$o['edges'] = array_map('c64o_edge_out', c64o_edges());
+	ok($o);
+});
+
+route('DELETE', '/cdn64o/tunnels/{id}', function($p) {
+	global $pdo;
+	$t = c64o_find_tunnel($p['id']);
+	foreach(qa("SELECT h.* FROM cdn64o_hosts h JOIN cdn64o_host_tunnels ht ON ht.host_id = h.id WHERE ht.tunnel_id = :t", array('t' => $t['id'])) as $h) {
+		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h AND tunnel_id = :t", array('h' => $h['id'], 't' => $t['id']));
+		if(q1("SELECT host_id FROM cdn64o_host_tunnels WHERE host_id = :h LIMIT 1", array('h' => $h['id'])) === null) { // letzter Tunnel: Host aus
+			c64o_dns_off($h);
+			q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+		}
+	}
+	q("DELETE FROM cdn64o_tunnels WHERE id = :i AND userid = :u", array('i' => $t['id'], 'u' => uid()));
+	add_log($pdo, uid(), "0", "CDN64 online", "Tunnel " . $t['id'] . " entfernt.");
+	no_content();
+});
+
+/** POST /cdn64o/hosts {fqdn, mode, tunnel_id}: Namen einschalten (Kontingent, Besitz, Konflikte, DNS). */
+route('POST', '/cdn64o/hosts', function() {
+	global $CLASS, $pdo;
+	$u = uid();
+	$fqdn = strtolower(rtrim(in_str('fqdn', true, 253), '.'));
+	if(!preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $fqdn)) { fail(422, 'invalid_field', "Field 'fqdn' is not a valid name.", array('field' => 'fqdn')); }
+	$mode = in_int('mode', false, 1, 3, 1);
+	if(!in_array($mode, C64O_MODES, true)) { fail(422, 'mode_not_available', "Mode $mode is not available yet.", array('field' => 'mode')); }
+	$t = c64o_find_tunnel(in_str('tunnel_id', true, 24));
+	if($t['status'] !== 'active') { fail(409, 'tunnel_blocked', 'This tunnel is blocked.'); }
+	$q = c64o_quota($u, $CLASS);
+	if($q['domains']['used'] >= $q['domains']['limit']) { fail(403, 'limit_reached', 'CDN domain limit of your plan is reached (old and new CDN together).'); }
+	if(c64o_over_traffic($q)) { fail(403, 'traffic_limit_reached', 'Your monthly CDN traffic is used up.'); }
+	[$d, $p] = c64o_domain_for($fqdn);
+	if(q1("SELECT id FROM cdn64o_hosts WHERE fqdn = :f", array('f' => $fqdn)) !== null) { fail(409, 'cdn64o_exists', 'This name is already in CDN64 online.'); }
+	if(q1("SELECT id FROM cdn_domains WHERE domainid = :d", array('d' => $d['id'])) !== null) { fail(409, 'old_cdn_active', 'This domain is in the old CDN. Remove it there first.'); }
+	if(q1("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND type = 'CNAME' AND deactivated = 0", array('s' => $d['id'], 'p' => $p)) !== null) { fail(409, 'cname_exists', 'The name has a CNAME record. Remove it first.'); }
+	if(q1("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND (failover = 1 OR (failover_policy != '0' AND deactivated = 1)) LIMIT 1", array('s' => $d['id'], 'p' => $p)) !== null) { fail(409, 'failover_active', 'DNS failover is active for this name.'); }
+	q("INSERT INTO cdn64o_hosts (userid, fqdn, subdomain_id, praefix, wildcard, mode, status, created_via) VALUES (:u, :f, :s, :p, :w, :m, 'pending', :v)",
+		array('u' => $u, 'f' => $fqdn, 's' => $d['id'], 'p' => $p, 'w' => (int)$d['wildcard'], 'm' => $mode, 'v' => in_str('via', false, 8, 'node') === 'web' ? 'web' : 'node'));
+	$h = q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f", array('f' => $fqdn));
+	q("INSERT INTO cdn64o_host_tunnels (host_id, tunnel_id) VALUES (:h, :t)", array('h' => $h['id'], 't' => $t['id']));
+	if(!c64o_dns_on($h, $d)) {
+		c64o_dns_off($h);
+		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
+		q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+		fail(502, 'dns_update_failed', 'The DNS update failed. Nothing was changed, try again later.');
+	}
+	q("UPDATE cdn64o_hosts set status = 'active' WHERE id = :h", array('h' => $h['id']));
+	c64o_event((int)$h['id'], $u, 'enabled', "mode $mode, tunnel " . $t['id']);
+	add_log($pdo, $u, $d['id'], "CDN64 online", "CDN64 online fuer $fqdn eingeschaltet.");
+	ok(c64o_host_out(c64o_find_host((string)$h['id'])), 201);
+});
+
+route('GET', '/cdn64o/hosts/{id}', function($p) { ok(c64o_host_out(c64o_find_host($p['id']))); });
+
+route('GET', '/cdn64o/hosts/{id}/events', function($p) {
+	$h = c64o_find_host($p['id']);
+	ok(array_map(fn($e) => array('time' => iso($e['time']), 'kind' => $e['kind'], 'message' => $e['message']),
+		qa("SELECT * FROM cdn64o_events WHERE host_id = :h ORDER BY id DESC LIMIT 100", array('h' => $h['id']))));
+});
+
+/** PATCH /cdn64o/hosts/{id} {mode, tunnels: [ids]} */
+route('PATCH', '/cdn64o/hosts/{id}', function($p) {
+	$h = c64o_find_host($p['id']);
+	if(($m = in_int('mode', false, 1, 3)) !== null) {
+		if(!in_array($m, C64O_MODES, true)) { fail(422, 'mode_not_available', "Mode $m is not available yet.", array('field' => 'mode')); }
+		q("UPDATE cdn64o_hosts set mode = :m WHERE id = :h", array('m' => $m, 'h' => $h['id']));
+	}
+	if(($list = in_list('tunnels')) !== null) {
+		if(empty($list)) { fail(422, 'invalid_field', "Field 'tunnels' must not be empty.", array('field' => 'tunnels')); }
+		$ids = array();
+		foreach($list as $tid) { $ids[] = c64o_find_tunnel((string)$tid)['id']; }
+		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
+		foreach(array_values(array_unique($ids)) as $i => $tid) { q("INSERT INTO cdn64o_host_tunnels (host_id, tunnel_id, priority) VALUES (:h, :t, :p)", array('h' => $h['id'], 't' => $tid, 'p' => $i)); }
+	}
+	c64o_event((int)$h['id'], uid(), 'changed');
+	ok(c64o_host_out(c64o_find_host((string)$h['id'])));
+});
+
+/** DELETE /cdn64o/hosts/{id}: ausschalten, DNS zurueck. */
+route('DELETE', '/cdn64o/hosts/{id}', function($p) {
+	global $pdo;
+	$h = c64o_find_host($p['id']);
+	if(!c64o_dns_off($h)) { fail(502, 'dns_update_failed', 'The DNS update failed. Try again later.'); }
+	q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
+	q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+	c64o_event((int)$h['id'], uid(), 'disabled');
+	add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . " ausgeschaltet.");
+	no_content();
+});
+
+// ---------------------------------------------------------------- Server (srv07/srv08, Server-Geheimnis)
+
+function c64o_edge_auth(): array {
+	$tok = bearer();
+	$fail = function() {
+		rl_enforce('fail:' . client_ip(), RL_FAIL_CAPACITY, RL_FAIL_REFILL, 'failed authentication');
+		fail(401, 'invalid_token', 'Unknown edge.');
+	};
+	if($tok === null OR strlen($tok) < 32) { $fail(); }
+	$h = hash('sha256', $tok);
+	foreach(c64o_edges(true) as $e) {
+		if(hash_equals((string)$e['secret_hash'], $h)) {
+			if((int)$e['disabled'] === 1) { fail(403, 'edge_disabled', 'This edge is disabled.'); }
+			return $e;
+		}
+	}
+	$fail();
+	return array();
+}
+
+/** GET /cdn64o/edge/config: alles, was die Server brauchen (ETag; unveraendert = 304). */
+route('GET', '/cdn64o/edge/config', function() {
+	c64o_edge_auth();
+	$tunnels = array();
+	foreach(qa("SELECT id, userid, token_hash, status FROM cdn64o_tunnels ORDER BY id") as $t) {
+		$tunnels[] = array('id' => $t['id'], 'token_sha256' => $t['token_hash'], 'userid' => (int)$t['userid'], 'blocked' => $t['status'] !== 'active');
+	}
+	$ht = array();
+	foreach(qa("SELECT host_id, tunnel_id FROM cdn64o_host_tunnels ORDER BY host_id, priority, tunnel_id") as $r) { $ht[(int)$r['host_id']][] = $r['tunnel_id']; }
+	$hosts = array(); $users = array();
+	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
+		$hosts[] = array('id' => (int)$h['id'], 'name' => $h['fqdn'], 'wildcard' => (int)$h['wildcard'] === 1, 'mode' => (int)$h['mode'], 'userid' => (int)$h['userid'],
+			'tunnels' => $ht[(int)$h['id']] ?? array(), 'blocked' => $h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '');
+		$users[(int)$h['userid']] = true;
+	}
+	$bw = array();
+	foreach(array_keys($users) as $u) {
+		$c = q1("SELECT c.cdn_bandwidth FROM users u JOIN user_class c ON c.id = u.user_class WHERE u.id = :u", array('u' => $u));
+		$bw[(string)$u] = (int)($c['cdn_bandwidth'] ?? 0);
+	}
+	$cfg = array('edges' => array_map('c64o_edge_out', c64o_edges()), 'tunnels' => $tunnels, 'hosts' => $hosts, 'bandwidth_mbit' => (object)$bw);
+	$etag = '"' . sha1(json_encode($cfg)) . '"';
+	header('ETag: ' . $etag);
+	header('Cache-Control: no-store');
+	if(trim($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) { // unveraendert: 304 ohne Inhalt
+		while(ob_get_level() > 0) { ob_end_clean(); }
+		http_response_code(304);
+		exit;
+	}
+	$cfg['version'] = trim($etag, '"');
+	ok($cfg);
+}, true);
+
+/**
+ * POST /cdn64o/edge/report: {version, tunnels: [{id, node, node_version, transport, since}],
+ * traffic: [{host_id, bytes_in, bytes_out, conns, rejected}]} – Zaehler seit der letzten Meldung. Danach wird das
+ * Traffic-Kontingent der betroffenen Accounts geprueft (hartes Limit: Hosts auf blocked, neuer Monat: wieder frei).
+ */
+route('POST', '/cdn64o/edge/report', function() {
+	$e = c64o_edge_auth();
+	$b = body();
+	q("UPDATE cdn64o_edges set last_seen = NOW(), version = :v WHERE id = :i", array('v' => mb_substr((string)($b['version'] ?? ''), 0, 32), 'i' => $e['id']));
+	foreach((array)($b['tunnels'] ?? array()) as $t) {
+		if(!is_array($t) OR !isset($t['id'])) { continue; }
+		q("UPDATE cdn64o_tunnels set last_seen = NOW(), last_edge = :e, node_version = :v WHERE id = :i",
+			array('e' => $e['name'], 'v' => mb_substr((string)($t['node_version'] ?? ''), 0, 32), 'i' => (string)$t['id']));
+	}
+	$users = array();
+	$day = date('Y-m-d');
+	foreach((array)($b['traffic'] ?? array()) as $t) {
+		if(!is_array($t) OR !isset($t['host_id'])) { continue; }
+		$h = q1("SELECT id, userid FROM cdn64o_hosts WHERE id = :i", array('i' => (int)$t['host_id']));
+		if($h === null) { continue; }
+		$in = max(0, (int)($t['bytes_in'] ?? 0)); $out = max(0, (int)($t['bytes_out'] ?? 0));
+		$conns = max(0, (int)($t['conns'] ?? 0)); $rej = max(0, (int)($t['rejected'] ?? 0));
+		q("INSERT INTO cdn64o_traffic (host_id, userid, day, bytes_in, bytes_out, conns, rejected) VALUES (:h, :u, :d, :i, :o, :c, :r)
+			ON DUPLICATE KEY UPDATE bytes_in = bytes_in + VALUES(bytes_in), bytes_out = bytes_out + VALUES(bytes_out), conns = conns + VALUES(conns), rejected = rejected + VALUES(rejected)",
+			array('h' => $h['id'], 'u' => $h['userid'], 'd' => $day, 'i' => $in, 'o' => $out, 'c' => $conns, 'r' => $rej));
+		$users[(int)$h['userid']] = true;
+	}
+	// Kontingent: auch Accounts mit wegen Traffic gesperrten Hosts pruefen (neuer Monat, hoehere Klasse)
+	foreach(qa("SELECT DISTINCT userid FROM cdn64o_hosts WHERE status = 'blocked' AND blocked_reason = 'traffic'") as $r) { $users[(int)$r['userid']] = true; }
+	$changed = 0;
+	foreach(array_keys($users) as $u) {
+		$class = q1("SELECT c.* FROM users u JOIN user_class c ON c.id = u.user_class WHERE u.id = :u", array('u' => $u)) ?? array();
+		$over = c64o_over_traffic(c64o_quota($u, $class));
+		if($over) {
+			foreach(qa("SELECT id FROM cdn64o_hosts WHERE userid = :u AND status = 'active'", array('u' => $u)) as $h) {
+				q("UPDATE cdn64o_hosts set status = 'blocked', blocked_reason = 'traffic' WHERE id = :h", array('h' => $h['id']));
+				c64o_event((int)$h['id'], $u, 'blocked', 'traffic limit reached');
+				$changed++;
+			}
+		} else {
+			foreach(qa("SELECT id FROM cdn64o_hosts WHERE userid = :u AND status = 'blocked' AND blocked_reason = 'traffic'", array('u' => $u)) as $h) {
+				q("UPDATE cdn64o_hosts set status = 'active', blocked_reason = '' WHERE id = :h", array('h' => $h['id']));
+				c64o_event((int)$h['id'], $u, 'unblocked', 'traffic available again');
+				$changed++;
+			}
+		}
+	}
+	ok(array('changed' => $changed));
+}, true);
