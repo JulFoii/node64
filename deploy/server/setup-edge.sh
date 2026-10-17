@@ -1,10 +1,10 @@
 #!/bin/bash
 # Grundeinrichtung eines CDN64-Servers (srv07/srv08.cdn64.de, Debian 13). Idempotent, mehrfach ausfuehrbar.
-# Aufruf: bash setup-edge.sh <name: srv07|srv08> <location: nbg|fsn> <oeffentlicher Hostname>
+# Aufruf: bash setup-edge.sh <name: srv07|srv08> <location: nbg|fsn> <oeffentlicher Hostname> [Nachbar-IPv4] [Nachbar-IPv6]
 # Aendert sshd nicht und startet den Dienst erst, wenn das Binary liegt (edge-deploy.sh).
 # Planung: docs/CDN64-ONLINE.md (Abschnitt 10, Phase T0).
 set -euo pipefail
-NAME=${1:?name}; LOCATION=${2:?location}; HOST=${3:?hostname}
+NAME=${1:?name}; LOCATION=${2:?location}; HOST=${3:?hostname}; PEER4=${4:-}; PEER6=${5:-}
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -99,8 +99,13 @@ systemctl daemon-reload
 systemctl enable cdn64-edge >/dev/null 2>&1 || true
 
 # Firewall: 22 (neue Verbindungen gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
-# ICMP; alles andere zu. Der Nachbar-Port kommt in T2 dazu.
-cat > /etc/nftables.conf <<'EOF'
+# 7845 TCP nur vom Nachbarserver, ICMP; alles andere zu.
+PEERRULES=""
+[ -n "$PEER4" ] && PEERRULES="${PEERRULES}    ip saddr ${PEER4} tcp dport 7845 accept
+"
+[ -n "$PEER6" ] && PEERRULES="${PEERRULES}    ip6 saddr ${PEER6} tcp dport 7845 accept
+"
+cat > /etc/nftables.conf <<EOF
 #!/usr/sbin/nft -f
 flush ruleset
 table inet filter {
@@ -114,7 +119,7 @@ table inet filter {
     tcp dport 22 ct state new limit rate 20/minute burst 40 packets accept
     tcp dport { 80, 443, 7844 } accept
     udp dport { 443, 7844 } accept
-  }
+${PEERRULES}  }
   chain forward { type filter hook forward priority 0; policy drop; }
   chain output  { type filter hook output priority 0; policy accept; }
 }
