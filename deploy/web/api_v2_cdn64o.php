@@ -13,7 +13,7 @@
 const C64O_TTL          = 10;   // TTL der Server-Eintraege
 const C64O_CDN_TMP      = 3;    // Markierung in subdomain_records (1/2 = altes CDN)
 const C64O_MAX_TUNNELS  = 10;   // Tunnels je Account
-const C64O_MODES        = array(1);  // T3: nur durchreichen; 2 (terminieren) ab T5, 3 (direkt) ab T7
+const C64O_MODES        = array(1, 2);  // 1 durchreichen, 2 terminieren (T5); 3 (direkt) ab T7
 
 // ---------------------------------------------------------------- Hilfen
 
@@ -176,6 +176,7 @@ route('DELETE', '/cdn64o/tunnels/{id}', function($p) {
 		if(q1("SELECT host_id FROM cdn64o_host_tunnels WHERE host_id = :h LIMIT 1", array('h' => $h['id'])) === null) { // letzter Tunnel: Host aus
 			c64o_dns_off($h);
 			q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+			q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
 		}
 	}
 	q("DELETE FROM cdn64o_tunnels WHERE id = :i AND userid = :u", array('i' => $t['id'], 'u' => uid()));
@@ -250,6 +251,7 @@ route('DELETE', '/cdn64o/hosts/{id}', function($p) {
 	if(!c64o_dns_off($h)) { fail(502, 'dns_update_failed', 'The DNS update failed. Try again later.'); }
 	q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
 	q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+	q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
 	c64o_event((int)$h['id'], uid(), 'disabled');
 	add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . " ausgeschaltet.");
 	no_content();
@@ -356,4 +358,54 @@ route('POST', '/cdn64o/edge/report', function() {
 		}
 	}
 	ok(array('changed' => $changed));
+}, true);
+
+/**
+ * POST /cdn64o/edge/acme-txt {fqdn, value, delete}: TXT fuer DNS-01 setzen bzw. loeschen. Nur fuer
+ * _acme-challenge.<Name eines Modus-2-Hosts>; der Eintrag liegt im Account des Hosts (add_record/del_record_name wie
+ * fuer ACME-Clients der API). Auf den Servern liegt dafuer kein PowerDNS- und kein API-Key eines Nutzers.
+ */
+route('POST', '/cdn64o/edge/acme-txt', function() {
+	global $pdo;
+	$e = c64o_edge_auth();
+	$fqdn = strtolower(rtrim(in_str('fqdn', true, 253), '.'));
+	$val = in_str('value', true, 255);
+	if(!preg_match('/^[A-Za-z0-9_-]{20,128}$/', $val)) { fail(422, 'invalid_field', "Field 'value' is not a DNS-01 value.", array('field' => 'value')); }
+	if(!str_starts_with($fqdn, '_acme-challenge.')) { fail(422, 'invalid_field', "Field 'fqdn' must start with _acme-challenge.", array('field' => 'fqdn')); }
+	$h = q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f AND mode = 2", array('f' => substr($fqdn, strlen('_acme-challenge.'))));
+	if($h === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 with this name.'); }
+	$d = q1("SELECT * FROM subdomains WHERE id = :i", array('i' => $h['subdomain_id']));
+	if($d === null) { fail(404, 'domain_not_found', 'Domain not found.'); }
+	$p = '_acme-challenge' . ($h['praefix'] !== '' ? '.' . $h['praefix'] : '');
+	if(in_bool('delete', false)) {
+		$r = quiet(fn() => del_record_name($pdo, (int)$h['userid'], domain_name($d), $p, 'TXT', $val));
+		ok(array('deleted' => (string)$r === '1'));
+	}
+	$info = (string)quiet(fn() => add_record($pdo, (int)$h['userid'], (int)$d['id'], $p, 'TXT', "60", $val));
+	if($info !== '1' AND $info !== '2') { fail(502, 'dns_update_failed', 'The TXT record could not be set (' . $info . ').'); }
+	c64o_event((int)$h['id'], (int)$h['userid'], 'acme', 'TXT set by ' . $e['name']);
+	ok(array('fqdn' => $fqdn), 201);
+}, true);
+
+/** GET /cdn64o/edge/certs?fqdn=...: abgelegtes Zertifikat (verschluesselt) eines Modus-2-Namens. */
+route('GET', '/cdn64o/edge/certs', function() {
+	c64o_edge_auth();
+	$c = q1("SELECT * FROM cdn64o_certs WHERE fqdn = :f", array('f' => strtolower(rtrim(qp('fqdn') ?? '', '.'))));
+	if($c === null) { fail(404, 'not_found', 'No certificate stored for this name.'); }
+	ok(array('fqdn' => $c['fqdn'], 'blob' => $c['blob'], 'not_after' => iso($c['not_after']), 'edge' => $c['edge'], 'updated_at' => iso($c['updated_at'])));
+}, true);
+
+/** PUT /cdn64o/edge/certs {fqdn, blob, not_after}: Zertifikat ablegen (ein aelteres ersetzt nie ein neueres). */
+route('PUT', '/cdn64o/edge/certs', function() {
+	$e = c64o_edge_auth();
+	$f = strtolower(rtrim(in_str('fqdn', true, 253), '.'));
+	$blob = in_str('blob', true, 262144);
+	$na = strtotime(in_str('not_after', true, 40) ?? '');
+	if($na === false) { fail(422, 'invalid_field', "Field 'not_after' is not a date.", array('field' => 'not_after')); }
+	if(q1("SELECT id FROM cdn64o_hosts WHERE fqdn = :f AND mode = 2", array('f' => $f)) === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 with this name.'); }
+	q("INSERT INTO cdn64o_certs (fqdn, `blob`, not_after, edge) VALUES (:f, :b, :n, :e)
+		ON DUPLICATE KEY UPDATE `blob` = IF(VALUES(not_after) >= not_after, VALUES(`blob`), `blob`), edge = IF(VALUES(not_after) >= not_after, VALUES(edge), edge),
+		not_after = GREATEST(not_after, VALUES(not_after))",
+		array('f' => $f, 'b' => $blob, 'n' => date('Y-m-d H:i:s', $na), 'e' => $e['name']));
+	no_content();
 }, true);

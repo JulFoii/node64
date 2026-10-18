@@ -107,3 +107,13 @@ INSERT INTO `cdn64o_edges` (`name`, `hostname`, `ipv4`, `ipv6`, `secret_hash`) V
   ('srv07', 'srv07.cdn64.de', '91.99.98.96', '2a01:4f8:1c18:5887::1', 'b179930abfcbe583cb403d76587d361f828b1217385a6d652c2c87c00c7d6a69'),
   ('srv08', 'srv08.cdn64.de', '2.28.6.30', '2a01:4f8:c015:bca8::1', 'd1161cfa69ef92a03d9a4c47bd9d01c8b31c13dcb402ea23aec6ea6ff32de877')
   ON DUPLICATE KEY UPDATE `hostname` = VALUES(`hostname`), `ipv4` = VALUES(`ipv4`), `ipv6` = VALUES(`ipv6`), `secret_hash` = VALUES(`secret_hash`);
+
+-- T5 (Modus 2): Zertifikate der Server je Name, verschluesselt (AES-256-GCM, Schluessel nur auf den Servern).
+CREATE TABLE IF NOT EXISTS `cdn64o_certs` (
+  `fqdn` varchar(253) NOT NULL,
+  `blob` mediumtext NOT NULL,
+  `not_after` datetime NOT NULL,
+  `edge` varchar(32) NOT NULL DEFAULT '',
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`fqdn`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
