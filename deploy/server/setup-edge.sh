@@ -98,6 +98,13 @@ EOF
 systemctl daemon-reload
 systemctl enable cdn64-edge >/dev/null 2>&1 || true
 
+# Systemprotokolle (enthalten IPs verbundener Nodes, keine Besucher-IPs) nach 14 Tagen loeschen (Datenschutzerklaerung)
+mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]
+MaxRetentionSec=14day
+' > /etc/systemd/journald.conf.d/cdn64-retention.conf
+systemctl restart systemd-journald
+
 # Firewall: 22 (neue Verbindungen je Absender gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
 # 7845 TCP nur vom Nachbarserver, 50000-62000 TCP/UDP (Portmapper, Modus 3), ICMP; alles andere zu.
 PEERRULES=""
