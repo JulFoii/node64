@@ -98,7 +98,7 @@ EOF
 systemctl daemon-reload
 systemctl enable cdn64-edge >/dev/null 2>&1 || true
 
-# Firewall: 22 (neue Verbindungen gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
+# Firewall: 22 (neue Verbindungen je Absender gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
 # 7845 TCP nur vom Nachbarserver, ICMP; alles andere zu.
 PEERRULES=""
 [ -n "$PEER4" ] && PEERRULES="${PEERRULES}    ip saddr ${PEER4} tcp dport 7845 accept
@@ -109,6 +109,9 @@ cat > /etc/nftables.conf <<EOF
 #!/usr/sbin/nft -f
 flush ruleset
 table inet filter {
+  # SSH: neue Verbindungen je Absender begrenzt (Scanner aus dem Internet sperren so nicht den Admin aus)
+  set ssh4 { type ipv4_addr; flags dynamic, timeout; timeout 10m; size 65536; }
+  set ssh6 { type ipv6_addr; flags dynamic, timeout; timeout 10m; size 65536; }
   chain input {
     type filter hook input priority 0; policy drop;
     iif lo accept
@@ -116,7 +119,8 @@ table inet filter {
     ct state invalid drop
     ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } limit rate 50/second accept
     ip6 nexthdr icmpv6 accept
-    tcp dport 22 ct state new limit rate 20/minute burst 40 packets accept
+    tcp dport 22 ct state new add @ssh4 { ip saddr limit rate 10/minute burst 20 packets } accept
+    tcp dport 22 ct state new add @ssh6 { ip6 saddr limit rate 10/minute burst 20 packets } accept
     tcp dport { 80, 443, 7844 } accept
     udp dport { 443, 7844 } accept
 ${PEERRULES}  }
