@@ -127,21 +127,19 @@ echo $info;
 // ---------------------------------------------------------------- Bearbeiten (Modus 3: Ziel; alle: Liste)
 $cur = null;
 foreach($ov['hosts'] as $h) { if((int)$h['id'] === $edit) { $cur = $h; } }
-if($cur !== null) {
+if($cur !== null AND (int)$cur['mode'] === 3) { // Modus 1/2 verwaltet die Node
 	$t = $cur['target'];
 	?>
 	<div class="col-12 col-lg-6 pb-3">
 		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-pen text-primary"></i> <?php echo c64w_h($cur['fqdn']); ?> <span class="badge badge-light"><?php echo c64w_h($modeName[$cur['mode']] ?? ''); ?></span>
 			<a class="float-right small" href="cdn64">back</a></div>
 		<div class="card-body p-3 small">
-		<?php if((int)$cur['mode'] === 3 AND $t !== null) { ?>
+		<?php if($t !== null) { ?>
 			<form method="post">
 				<input type="hidden" name="csrf" value="<?php echo $csrf; ?>"><input type="hidden" name="action" value="target"><input type="hidden" name="id" value="<?php echo (int)$cur['id']; ?>">
 				<?php c64w_target_fields($t); ?>
 				<button class="btn btn-sm btn-primary" type="submit">Save target</button>
 			</form>
-		<?php } else { ?>
-			<p class="mb-0">This name runs through the tunnel of a Node64 (<?php echo c64w_h(implode(', ', $cur['tunnels'])); ?>). Target, mode and certificate are managed in Node64.</p>
 		<?php } ?>
 		</div></div>
 	</div>
@@ -159,7 +157,6 @@ if($cur !== null) {
 				<div class="form-group mb-2"><label class="mb-1">IP addresses or networks (one per line, IPv4/IPv6)</label>
 					<textarea name="list" rows="5" class="form-control form-control-sm text-monospace" placeholder="177.43.6.1&#10;2001:db8:1234::/48"><?php echo c64w_h(implode("\n", $cur['acl']['list'])); ?></textarea></div>
 				<button class="btn btn-sm btn-primary" type="submit">Save list</button>
-				<?php if((int)$cur['mode'] === 1) { echo '<p class="text-muted mt-2 mb-0">Mode 1: the servers decide by IP before the connection reaches your node.</p>'; } ?>
 			</form>
 		</div></div>
 	</div>
@@ -215,6 +212,7 @@ function c64w_target_fields(?array $t): void {
 					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
 					echo '<tr><td class="text-monospace">' . c64w_h($h['fqdn']) . '</td><td>' . c64w_h($modeName[$h['mode']] ?? $h['mode']) . '</td><td class="text-monospace text-break">' . c64w_h($tgt) . '</td><td>' . $st . '</td>';
 					echo '<td class="text-right text-nowrap">' . c64w_bytes($tm['bytes_in'] + $tm['bytes_out']) . ($tm['requests'] ? ' · ' . number_format($tm['requests'], 0, ',', '.') . ' req.' : '') . ($tm['rejected'] ? ' · <span class="text-danger">' . (int)$tm['rejected'] . ' rejected</span>' : '') . '</td>';
+					if((int)$h['mode'] !== 3) { echo '<td class="text-right text-nowrap text-muted" title="Target, mode, certificate and access lists are managed in Node64."><i class="fa-solid fa-lock"></i> Node64</td></tr>'; continue; }
 					echo '<td class="text-right text-nowrap"><a class="btn btn-sm btn-outline-primary py-0" href="cdn64?edit=' . (int)$h['id'] . '" title="Edit"><i class="fa-solid fa-pen"></i></a> ';
 					echo '<form method="post" class="d-inline" onsubmit="return confirm(\'Switch off CDN64 for ' . c64w_h($h['fqdn']) . '? DNS points to the previous address again.\')"><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="off"><input type="hidden" name="id" value="' . (int)$h['id'] . '"><button class="btn btn-sm btn-outline-danger py-0" title="Switch off"><i class="fa-solid fa-power-off"></i></button></form></td></tr>';
 				} ?>
