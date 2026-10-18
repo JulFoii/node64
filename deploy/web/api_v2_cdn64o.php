@@ -54,10 +54,11 @@ function c64o_tunnel_out(array $t): array {
 
 function c64o_host_out(array $h): array {
 	$tun = array_column(qa("SELECT tunnel_id FROM cdn64o_host_tunnels WHERE host_id = :h ORDER BY priority, tunnel_id", array('h' => $h['id'])), 'tunnel_id');
-	$tr = q1("SELECT COALESCE(SUM(bytes_in), 0) i, COALESCE(SUM(bytes_out), 0) o FROM cdn64o_traffic WHERE host_id = :h AND day >= :d", array('h' => $h['id'], 'd' => date('Y-m-01')));
+	$tr = q1("SELECT COALESCE(SUM(bytes_in), 0) i, COALESCE(SUM(bytes_out), 0) o, COALESCE(SUM(conns), 0) c, COALESCE(SUM(requests), 0) r, COALESCE(SUM(rejected), 0) x
+		FROM cdn64o_traffic WHERE host_id = :h AND day >= :d", array('h' => $h['id'], 'd' => date('Y-m-01')));
 	return array('id' => (int)$h['id'], 'fqdn' => $h['fqdn'], 'mode' => (int)$h['mode'], 'wildcard' => (int)$h['wildcard'] === 1, 'status' => $h['status'],
 		'blocked_reason' => $h['blocked_reason'] ?: null, 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
-		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o']),
+		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o'], 'conns' => (int)$tr['c'], 'requests' => (int)$tr['r'], 'rejected' => (int)$tr['x']),
 		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']));
 }
 
@@ -220,6 +221,15 @@ route('POST', '/cdn64o/hosts', function() {
 
 route('GET', '/cdn64o/hosts/{id}', function($p) { ok(c64o_host_out(c64o_find_host($p['id']))); });
 
+/** GET /cdn64o/stats?days=30: Zahlen der Server je Name und Tag (Traffic, Verbindungen, Anfragen, Abweisungen). */
+route('GET', '/cdn64o/stats', function() {
+	$days = qp_int('days', 30, 1, 400);
+	ok(array_map(fn($r) => array('host_id' => (int)$r['host_id'], 'fqdn' => $r['fqdn'], 'day' => $r['day'], 'bytes_in' => (int)$r['bytes_in'],
+			'bytes_out' => (int)$r['bytes_out'], 'conns' => (int)$r['conns'], 'requests' => (int)$r['requests'], 'rejected' => (int)$r['rejected']),
+		qa("SELECT t.*, h.fqdn FROM cdn64o_traffic t JOIN cdn64o_hosts h ON h.id = t.host_id WHERE t.userid = :u AND t.day >= :d ORDER BY t.day, h.fqdn",
+			array('u' => uid(), 'd' => date('Y-m-d', strtotime('-' . ($days - 1) . ' days'))))));
+});
+
 route('GET', '/cdn64o/hosts/{id}/events', function($p) {
 	$h = c64o_find_host($p['id']);
 	ok(array_map(fn($e) => array('time' => iso($e['time']), 'kind' => $e['kind'], 'message' => $e['message']),
@@ -331,10 +341,11 @@ route('POST', '/cdn64o/edge/report', function() {
 		$h = q1("SELECT id, userid FROM cdn64o_hosts WHERE id = :i", array('i' => (int)$t['host_id']));
 		if($h === null) { continue; }
 		$in = max(0, (int)($t['bytes_in'] ?? 0)); $out = max(0, (int)($t['bytes_out'] ?? 0));
-		$conns = max(0, (int)($t['conns'] ?? 0)); $rej = max(0, (int)($t['rejected'] ?? 0));
-		q("INSERT INTO cdn64o_traffic (host_id, userid, day, bytes_in, bytes_out, conns, rejected) VALUES (:h, :u, :d, :i, :o, :c, :r)
-			ON DUPLICATE KEY UPDATE bytes_in = bytes_in + VALUES(bytes_in), bytes_out = bytes_out + VALUES(bytes_out), conns = conns + VALUES(conns), rejected = rejected + VALUES(rejected)",
-			array('h' => $h['id'], 'u' => $h['userid'], 'd' => $day, 'i' => $in, 'o' => $out, 'c' => $conns, 'r' => $rej));
+		$conns = max(0, (int)($t['conns'] ?? 0)); $rej = max(0, (int)($t['rejected'] ?? 0)); $req = max(0, (int)($t['requests'] ?? 0));
+		q("INSERT INTO cdn64o_traffic (host_id, userid, day, bytes_in, bytes_out, conns, requests, rejected) VALUES (:h, :u, :d, :i, :o, :c, :q, :r)
+			ON DUPLICATE KEY UPDATE bytes_in = bytes_in + VALUES(bytes_in), bytes_out = bytes_out + VALUES(bytes_out), conns = conns + VALUES(conns),
+			requests = requests + VALUES(requests), rejected = rejected + VALUES(rejected)",
+			array('h' => $h['id'], 'u' => $h['userid'], 'd' => $day, 'i' => $in, 'o' => $out, 'c' => $conns, 'q' => $req, 'r' => $rej));
 		$users[(int)$h['userid']] = true;
 	}
 	// Kontingent: auch Accounts mit wegen Traffic gesperrten Hosts pruefen (neuer Monat, hoehere Klasse)

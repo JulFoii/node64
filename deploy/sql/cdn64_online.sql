@@ -117,3 +117,6 @@ CREATE TABLE IF NOT EXISTS `cdn64o_certs` (
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`fqdn`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- T6: Anfragen je Host und Tag (Modus 2; in Modus 1 sieht der Server nur Verbindungen).
+ALTER TABLE `cdn64o_traffic` ADD COLUMN IF NOT EXISTS `requests` bigint(20) NOT NULL DEFAULT 0 AFTER `conns`;
