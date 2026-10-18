@@ -1,0 +1,250 @@
+<?php
+/**
+ * IPv64.net – CDN64 (srv07/srv08.cdn64.de): Uebersicht aller Namen, Modus 3 (direkt zum Ziel) anlegen und
+ * verwalten, Modus 1/2 (Tunnel, eingerichtet in Node64) anzeigen und ausschalten. Die Seite ruft serverseitig die
+ * API v2 (/cdn64o) mit dem Account-Key des angemeldeten Nutzers auf - Webseite, API und Node nutzen so dieselben
+ * Pruefungen. Planung: docs/CDN64-ONLINE.md (Abschnitt 8.6) im Node64-Repo.
+ */
+include("header.php");
+
+const C64W_API = 'https://ipv64.net/api/v2';
+
+/** API v2 aufrufen (als der angemeldete Nutzer). Rueckgabe: [HTTP-Code, data|Fehler]. */
+function c64w_api(string $method, string $path, ?array $body = null): array {
+	global $account;
+	$ctx = stream_context_create(array('http' => array('method' => $method, 'timeout' => 30, 'ignore_errors' => true,
+		'header' => "Authorization: Bearer " . $account['apikey'] . "\r\nContent-Type: application/json\r\nAccept: application/json\r\nUser-Agent: ipv64-web-cdn64\r\n",
+		'content' => $body !== null ? json_encode($body) : '')));
+	$raw = @file_get_contents(C64W_API . $path, false, $ctx);
+	$code = 0;
+	if(isset($http_response_header[0]) AND preg_match('#\s(\d{3})#', $http_response_header[0], $m)) { $code = (int)$m[1]; }
+	$j = json_decode((string)$raw, true);
+	if($code >= 200 AND $code < 300) { return array($code, $j['data'] ?? null); }
+	return array($code, is_array($j) ? $j : array('detail' => 'ipv64 API not reachable'));
+}
+
+function c64w_h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES); }
+
+function c64w_bytes(int $b): string {
+	foreach(array('B', 'KB', 'MB', 'GB', 'TB') as $i => $u) { if($b < 1024 ** ($i + 1) OR $u === 'TB') { return round($b / 1024 ** $i, $i ? 1 : 0) . ' ' . $u; } }
+	return $b . ' B';
+}
+
+function c64w_alert(string $type, string $text): string { return '<div class="alert alert-' . $type . '" role="alert">' . c64w_h($text) . '</div>'; }
+
+/** Fehlertext der API (detail) bzw. eigener Text. */
+function c64w_err(array $e): string { return (string)($e['detail'] ?? 'Unknown error'); }
+?>
+<p></p>
+<div class="container">
+<?php
+if($userid == "") {
+	echo c64w_alert('info', 'Please log in to manage CDN64.');
+	include("footer.php");
+	exit;
+}
+if(empty($_SESSION['c64w_csrf'])) { $_SESSION['c64w_csrf'] = bin2hex(random_bytes(16)); }
+$csrf = $_SESSION['c64w_csrf'];
+$info = '';
+
+// ---------------------------------------------------------------- Aktionen (POST mit Token)
+if($_SERVER['REQUEST_METHOD'] === 'POST') {
+	if(!hash_equals($csrf, (string)($_POST['csrf'] ?? ''))) {
+		$info = c64w_alert('danger', 'Session expired, please try again.');
+	} else {
+		$act = (string)($_POST['action'] ?? '');
+		$id = (int)($_POST['id'] ?? 0);
+		$target = function(): array {
+			$t = array('source' => ($_POST['source'] ?? 'records') === 'fixed' ? 'fixed' : 'records', 'scheme' => ($_POST['scheme'] ?? 'https') === 'http' ? 'http' : 'https',
+				'verify_tls' => !empty($_POST['verify_tls']), 'prefer_ipv6' => !empty($_POST['prefer_ipv6']), 'frontend' => max(1, min(3, (int)($_POST['frontend'] ?? 2))),
+				'cache_mb' => max(0, (int)($_POST['cache_mb'] ?? 0)), 'cache_minutes' => max(1, (int)($_POST['cache_minutes'] ?? 10)));
+			if($t['source'] === 'fixed') { $t['target'] = trim((string)($_POST['target'] ?? '')); }
+			if(($p = (int)($_POST['port'] ?? 0)) > 0) { $t['port'] = $p; }
+			return $t;
+		};
+		switch($act) {
+			case 'add':
+				[$code, $r] = c64w_api('POST', '/cdn64o/hosts', array_merge(array('fqdn' => strtolower(trim((string)($_POST['fqdn'] ?? ''))), 'mode' => 3, 'via' => 'web'), $target()));
+				$info = $code === 201 ? c64w_alert('success', 'CDN64 is active for ' . $r['fqdn'] . '. The servers fetch a certificate (about a minute), then the name is reachable via HTTPS.')
+					: c64w_alert('danger', c64w_err($r));
+				break;
+			case 'target':
+				[$code, $r] = c64w_api('PUT', "/cdn64o/hosts/$id/target", $target());
+				$info = $code === 200 ? c64w_alert('success', 'Target saved. The servers use it within seconds.') : c64w_alert('danger', c64w_err($r));
+				break;
+			case 'acl':
+				$list = array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string)($_POST['list'] ?? '')))));
+				$def = in_array($_POST['default'] ?? 'off', array('off', 'allow', 'deny'), true) ? $_POST['default'] : 'off';
+				[$code, $r] = c64w_api('PUT', "/cdn64o/hosts/$id/acl", array('default' => $def, 'list' => $list));
+				$info = $code === 200 ? c64w_alert('success', 'Allow/block list saved.') : c64w_alert('danger', c64w_err($r));
+				break;
+			case 'off':
+				[$code, $r] = c64w_api('DELETE', "/cdn64o/hosts/$id");
+				$info = $code === 204 ? c64w_alert('success', 'CDN64 switched off. DNS points to your previous address again.') : c64w_alert('danger', c64w_err($r));
+				break;
+		}
+	}
+}
+
+[$code, $ov] = c64w_api('GET', '/cdn64o');
+if($code !== 200) {
+	echo c64w_alert('danger', 'CDN64 is not available right now: ' . c64w_err($ov ?? array()));
+	include("footer.php");
+	exit;
+}
+$q = $ov['quota'];
+$edit = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
+$modeName = array(1 => 'Mode 1 · pass-through', 2 => 'Mode 2 · TLS on the servers', 3 => 'Mode 3 · direct to target');
+$domains = array();
+$st = $pdo->prepare("SELECT * FROM subdomains WHERE userid = :u AND deactivated = 0 ORDER BY id");
+$st->execute(array('u' => $userid));
+foreach($st->fetchAll() as $d) { $domains[] = $d['owndomain'] == 1 ? $d['maindomain'] : $d['subdomainname'] . '.' . $d['maindomain']; }
+echo $info;
+?>
+<div class="row">
+	<div class="col-12 pb-3">
+		<div class="card">
+			<div class="card-header p-2"><i class="fa-solid fa-cloud-arrow-up text-primary"></i> CDN64 <small class="text-muted">srv07.cdn64.de (Nuremberg) · srv08.cdn64.de (Falkenstein)</small></div>
+			<div class="card-body p-3 small">
+				<p class="mb-2">CDN64 makes your service reachable from the internet over IPv4 and IPv6 – also behind DS-Lite or without open ports. If one server fails, the other one takes over.</p>
+				<ul class="mb-2">
+					<li><b>Mode 1 / Mode 2 (recommended):</b> <a href="https://github.com/ipv64net/node64" target="_blank" rel="noopener">Node64</a> opens an encrypted tunnel from your network to both servers – no open ports, your IP stays hidden. Mode 1 keeps TLS end-to-end, mode 2 terminates TLS on the servers (protection and HTTP/3 there). Set it up with one click in Node64 (<i>CDN64 › Proxy-Hosts › CDN64 online</i>).</li>
+					<li><b>Mode 3 (here):</b> without Node64 – the servers connect to your target directly (your DynDNS address or a fixed target). The target has to be reachable from the internet.</li>
+				</ul>
+				<p class="mb-0 text-muted">Install Node64: <code>docker run -d --name node64 -p 8080:8080 -v node64-data:/data --restart unless-stopped ghcr.io/ipv64net/node64:latest</code></p>
+			</div>
+		</div>
+	</div>
+	<div class="col-12 pb-3">
+		<div class="card"><div class="card-body p-2 small">
+			<b>Quota:</b> <?php echo (int)$q['domains']['used']; ?> of <?php echo (int)$q['domains']['limit']; ?> CDN domains (old CDN included) ·
+			traffic this month <?php echo c64w_bytes((int)($q['traffic_mb']['used'] * 1048576)); ?> of <?php echo c64w_bytes((int)$q['traffic_mb']['limit'] * 1048576); ?>
+			<?php if((int)$q['bandwidth_mbit'] > 0) { echo ' · bandwidth up to ' . (int)$q['bandwidth_mbit'] . ' Mbit/s'; } ?>
+			· cache up to <?php echo (int)($accountclass['cdn_cache_size'] ?? 0); ?> MB per name
+		</div></div>
+	</div>
+<?php
+// ---------------------------------------------------------------- Bearbeiten (Modus 3: Ziel; alle: Liste)
+$cur = null;
+foreach($ov['hosts'] as $h) { if((int)$h['id'] === $edit) { $cur = $h; } }
+if($cur !== null) {
+	$t = $cur['target'];
+	?>
+	<div class="col-12 col-lg-6 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-pen text-primary"></i> <?php echo c64w_h($cur['fqdn']); ?> <span class="badge badge-light"><?php echo c64w_h($modeName[$cur['mode']] ?? ''); ?></span>
+			<a class="float-right small" href="cdn64">back</a></div>
+		<div class="card-body p-3 small">
+		<?php if((int)$cur['mode'] === 3 AND $t !== null) { ?>
+			<form method="post">
+				<input type="hidden" name="csrf" value="<?php echo $csrf; ?>"><input type="hidden" name="action" value="target"><input type="hidden" name="id" value="<?php echo (int)$cur['id']; ?>">
+				<?php c64w_target_fields($t); ?>
+				<button class="btn btn-sm btn-primary" type="submit">Save target</button>
+			</form>
+		<?php } else { ?>
+			<p class="mb-0">This name runs through the tunnel of a Node64 (<?php echo c64w_h(implode(', ', $cur['tunnels'])); ?>). Target, mode and certificate are managed in Node64.</p>
+		<?php } ?>
+		</div></div>
+	</div>
+	<div class="col-12 col-lg-6 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-shield-halved text-warning"></i> Allow / block list</div>
+		<div class="card-body p-3 small">
+			<form method="post">
+				<input type="hidden" name="csrf" value="<?php echo $csrf; ?>"><input type="hidden" name="action" value="acl"><input type="hidden" name="id" value="<?php echo (int)$cur['id']; ?>">
+				<div class="form-group mb-2"><label class="mb-1">Default</label>
+					<select name="default" class="form-control form-control-sm">
+						<option value="off" <?php echo $cur['acl']['default'] === 'off' ? 'selected' : ''; ?>>Off – everyone</option>
+						<option value="allow" <?php echo $cur['acl']['default'] === 'allow' ? 'selected' : ''; ?>>Allow all – block the addresses below</option>
+						<option value="deny" <?php echo $cur['acl']['default'] === 'deny' ? 'selected' : ''; ?>>Deny all – allow only the addresses below</option>
+					</select></div>
+				<div class="form-group mb-2"><label class="mb-1">IP addresses or networks (one per line, IPv4/IPv6)</label>
+					<textarea name="list" rows="5" class="form-control form-control-sm text-monospace" placeholder="177.43.6.1&#10;2001:db8:1234::/48"><?php echo c64w_h(implode("\n", $cur['acl']['list'])); ?></textarea></div>
+				<button class="btn btn-sm btn-primary" type="submit">Save list</button>
+				<?php if((int)$cur['mode'] === 1) { echo '<p class="text-muted mt-2 mb-0">Mode 1: the servers decide by IP before the connection reaches your node.</p>'; } ?>
+			</form>
+		</div></div>
+	</div>
+<?php
+}
+
+/** Felder fuer das Ziel (Modus 3). */
+function c64w_target_fields(?array $t): void {
+	$t = $t ?? array('source' => 'records', 'target' => '', 'port' => 443, 'scheme' => 'https', 'verify_tls' => false, 'prefer_ipv6' => true, 'frontend' => 2, 'cache_mb' => 0, 'cache_minutes' => 10);
+	?>
+	<div class="form-group mb-2"><label class="mb-1">Target</label>
+		<div class="custom-control custom-radio"><input type="radio" id="src_r" name="source" value="records" class="custom-control-input" <?php echo $t['source'] === 'records' ? 'checked' : ''; ?>>
+			<label class="custom-control-label" for="src_r">The current A/AAAA records of the name (DynDNS keeps them up to date)</label></div>
+		<div class="custom-control custom-radio"><input type="radio" id="src_f" name="source" value="fixed" class="custom-control-input" <?php echo $t['source'] === 'fixed' ? 'checked' : ''; ?>>
+			<label class="custom-control-label" for="src_f">Fixed: public IP address or host name</label></div>
+		<input type="text" name="target" class="form-control form-control-sm mt-1" placeholder="2001:db8::10 or server.example.org" value="<?php echo c64w_h($t['target'] ?? ''); ?>">
+		<?php if(!empty($t['addrs'])) { echo '<small class="text-muted">Currently: ' . c64w_h(implode(', ', $t['addrs'])) . '</small>'; } ?>
+	</div>
+	<div class="form-row">
+		<div class="form-group col-6 mb-2"><label class="mb-1">Backend</label>
+			<select name="scheme" class="form-control form-control-sm"><option value="https" <?php echo $t['scheme'] === 'https' ? 'selected' : ''; ?>>HTTPS</option><option value="http" <?php echo $t['scheme'] === 'http' ? 'selected' : ''; ?>>HTTP</option></select></div>
+		<div class="form-group col-6 mb-2"><label class="mb-1">Port</label><input type="number" min="1" max="65535" name="port" class="form-control form-control-sm" value="<?php echo (int)$t['port']; ?>"></div>
+	</div>
+	<div class="form-group mb-2"><label class="mb-1">Frontend</label>
+		<select name="frontend" class="form-control form-control-sm">
+			<option value="1" <?php echo (int)$t['frontend'] === 1 ? 'selected' : ''; ?>>Level 1: HTTP (port 80) only</option>
+			<option value="2" <?php echo (int)$t['frontend'] === 2 ? 'selected' : ''; ?>>Level 2: HTTPS, port 80 redirects to HTTPS</option>
+			<option value="3" <?php echo (int)$t['frontend'] === 3 ? 'selected' : ''; ?>>Level 3: HTTPS (port 443) only</option>
+		</select></div>
+	<div class="form-row">
+		<div class="form-group col-6 mb-2"><label class="mb-1">Cache (MB, 0 = off)</label><input type="number" min="0" name="cache_mb" class="form-control form-control-sm" value="<?php echo (int)$t['cache_mb']; ?>"></div>
+		<div class="form-group col-6 mb-2"><label class="mb-1">Keep unused (minutes)</label><input type="number" min="1" max="1440" name="cache_minutes" class="form-control form-control-sm" value="<?php echo (int)$t['cache_minutes']; ?>"></div>
+	</div>
+	<div class="custom-control custom-checkbox mb-1"><input type="checkbox" class="custom-control-input" id="vt" name="verify_tls" value="1" <?php echo !empty($t['verify_tls']) ? 'checked' : ''; ?>><label class="custom-control-label" for="vt">Verify the target's certificate</label></div>
+	<div class="custom-control custom-checkbox mb-2"><input type="checkbox" class="custom-control-input" id="p6" name="prefer_ipv6" value="1" <?php echo !isset($t['prefer_ipv6']) || $t['prefer_ipv6'] ? 'checked' : ''; ?>><label class="custom-control-label" for="p6">Prefer IPv6</label></div>
+	<p class="text-muted mb-2">WebSockets work automatically. Visitors' IP arrives in <code>X-Forwarded-For</code> / <code>X-Real-IP</code>.</p>
+	<?php
+}
+?>
+	<div class="col-12 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-list text-primary"></i> Names in CDN64</div>
+		<div class="card-body p-0">
+			<table class="table table-sm mb-0 small">
+				<thead><tr><th>Name</th><th>Mode</th><th>Target / tunnel</th><th>Status</th><th class="text-right">This month</th><th></th></tr></thead>
+				<tbody>
+				<?php if(empty($ov['hosts'])) { echo '<tr><td colspan="6" class="text-muted p-3">No names yet. Add one with mode 3 below or switch one on in Node64.</td></tr>'; }
+				foreach($ov['hosts'] as $h) {
+					$tm = $h['traffic_month'];
+					$tgt = (int)$h['mode'] === 3 && $h['target'] ? ($h['target']['scheme'] . '://' . ($h['target']['target'] ?: implode(', ', (array)$h['target']['addrs'])) . ':' . $h['target']['port'])
+						: 'Node64 tunnel ' . implode(', ', $h['tunnels']);
+					$st = $h['status'] === 'active' ? '<span class="badge badge-success">active</span>' : ($h['status'] === 'blocked' ? '<span class="badge badge-danger">blocked: ' . c64w_h($h['blocked_reason']) . '</span>' : '<span class="badge badge-warning">' . c64w_h($h['status']) . '</span>');
+					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
+					echo '<tr><td class="text-monospace">' . c64w_h($h['fqdn']) . '</td><td>' . c64w_h($modeName[$h['mode']] ?? $h['mode']) . '</td><td class="text-monospace text-break">' . c64w_h($tgt) . '</td><td>' . $st . '</td>';
+					echo '<td class="text-right text-nowrap">' . c64w_bytes($tm['bytes_in'] + $tm['bytes_out']) . ($tm['requests'] ? ' · ' . number_format($tm['requests'], 0, ',', '.') . ' req.' : '') . ($tm['rejected'] ? ' · <span class="text-danger">' . (int)$tm['rejected'] . ' rejected</span>' : '') . '</td>';
+					echo '<td class="text-right text-nowrap"><a class="btn btn-sm btn-outline-primary py-0" href="cdn64?edit=' . (int)$h['id'] . '" title="Edit"><i class="fa-solid fa-pen"></i></a> ';
+					echo '<form method="post" class="d-inline" onsubmit="return confirm(\'Switch off CDN64 for ' . c64w_h($h['fqdn']) . '? DNS points to the previous address again.\')"><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="off"><input type="hidden" name="id" value="' . (int)$h['id'] . '"><button class="btn btn-sm btn-outline-danger py-0" title="Switch off"><i class="fa-solid fa-power-off"></i></button></form></td></tr>';
+				} ?>
+				</tbody>
+			</table>
+		</div></div>
+	</div>
+	<div class="col-12 col-lg-6 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-plus text-success"></i> Add a name (mode 3, direct to target)</div>
+		<div class="card-body p-3 small">
+			<form method="post">
+				<input type="hidden" name="csrf" value="<?php echo $csrf; ?>"><input type="hidden" name="action" value="add">
+				<div class="form-group mb-2"><label class="mb-1">Name (a domain of your account or a name below it)</label>
+					<input type="text" name="fqdn" list="c64w_domains" class="form-control form-control-sm" placeholder="www.example.any64.de" required>
+					<datalist id="c64w_domains"><?php foreach($domains as $d) { echo '<option value="' . c64w_h($d) . '">'; } ?></datalist></div>
+				<?php c64w_target_fields(null); ?>
+				<button class="btn btn-sm btn-success" type="submit">Switch on</button>
+			</form>
+		</div></div>
+	</div>
+	<div class="col-12 col-lg-6 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-network-wired text-primary"></i> Node64 tunnels</div>
+		<div class="card-body p-0">
+			<table class="table table-sm mb-0 small"><thead><tr><th>Node</th><th>Last seen</th><th>Server</th></tr></thead><tbody>
+			<?php if(empty($ov['tunnels'])) { echo '<tr><td colspan="3" class="text-muted p-3">No Node64 connected yet.</td></tr>'; }
+			foreach($ov['tunnels'] as $tn) {
+				echo '<tr><td>' . c64w_h($tn['name'] ?: $tn['id']) . ($tn['node_version'] ? ' <small class="text-muted">' . c64w_h($tn['node_version']) . '</small>' : '') . '</td><td>' . c64w_h($tn['last_seen'] ?? '–') . '</td><td>' . c64w_h($tn['last_edge'] ?? '–') . '</td></tr>';
+			} ?>
+			</tbody></table>
+		</div></div>
+	</div>
+</div>
+</div>
+<?php include("footer.php"); ?>
