@@ -133,7 +133,9 @@ function c64o_dns_off(array $h): bool {
 /**
  * G6: Ein Server, der sich laenger als C64O_EDGE_STALE Sekunden nicht gemeldet hat (Abruf alle 10 s), verschwindet aus
  * dem DNS aller CDN64-Namen, solange ein anderer da ist; ist er wieder C64O_EDGE_BACK Sekunden da, kommt er zurueck.
- * Laeuft bei jedem Abruf eines Servers (der gesunde Server bemerkt den Ausfall des anderen).
+ * Laeuft bei jedem Abruf eines Servers (der gesunde Server bemerkt den Ausfall des anderen), aber nur, wenn der
+ * rufende Server selbst ohne Pause da war (sonst war eher ipv64 weg). Vor dem Austragen fragt ipv64 /health des
+ * Servers direkt: antwortet er, fehlt ihm nur der Weg zu ipv64 und er bleibt im DNS.
  */
 function c64o_edge_watch(): void {
 	$edges = c64o_edges();
@@ -141,7 +143,7 @@ function c64o_edge_watch(): void {
 	$alive = count(array_filter($edges, $fresh));
 	foreach($edges as $e) {
 		if(!$fresh($e)) {
-			if((int)$e['withdrawn'] === 0 && $alive > 0) { c64o_edge_dns($e, false); }
+			if((int)$e['withdrawn'] === 0 && $alive > 0 && !c64o_edge_answers($e)) { c64o_edge_dns($e, false); }
 			elseif($e['back_since'] !== null) { q("UPDATE cdn64o_edges set back_since = NULL WHERE id = :i", array('i' => $e['id'])); }
 			continue;
 		}
@@ -150,6 +152,20 @@ function c64o_edge_watch(): void {
 			elseif(strtotime($e['back_since']) <= time() - C64O_EDGE_BACK) { c64o_edge_dns($e, true); }
 		}
 	}
+}
+
+/** Antwortet der Server auf /health? Hoechstens ein Versuch je Minute und Server (Ergebnis in sys_get_temp_dir()). */
+function c64o_edge_answers(array $e): bool {
+	$f = sys_get_temp_dir() . '/c64o_probe_' . (int)$e['id'];
+	if(is_file($f) AND filemtime($f) > time() - 60) { return trim((string)@file_get_contents($f)) === '1'; }
+	$ctx = stream_context_create(array('http' => array('timeout' => 3, 'ignore_errors' => true, 'header' => "Host: " . $e['hostname'] . "\r\n")));
+	$ok = false;
+	foreach(array_filter(array($e['ipv4'], $e['ipv6'] !== '' ? '[' . $e['ipv6'] . ']' : '')) as $a) {
+		$r = @file_get_contents('http://' . $a . '/health', false, $ctx);
+		if($r !== false AND ($j = json_decode($r, true)) AND ($j['status'] ?? '') === 'ok') { $ok = true; break; }
+	}
+	@file_put_contents($f, $ok ? '1' : '0');
+	return $ok;
 }
 
 /** Adressen eines Servers aus allen CDN64-Namen nehmen (false) bzw. wieder eintragen (true), an PowerDNS. */
@@ -346,8 +362,9 @@ function c64o_edge_auth(): array {
 /** GET /cdn64o/edge/config: alles, was die Server brauchen (ETag; unveraendert = 304). */
 route('GET', '/cdn64o/edge/config', function() {
 	$self = c64o_edge_auth();
+	$steady = $self['last_seen'] !== null && strtotime($self['last_seen']) >= time() - C64O_EDGE_STALE; // selbst ohne Pause da?
 	q("UPDATE cdn64o_edges set last_seen = NOW() WHERE id = :i", array('i' => $self['id'])); // Lebenszeichen alle 10 s (G6)
-	c64o_edge_watch();
+	if($steady) { c64o_edge_watch(); }
 	$tunnels = array();
 	foreach(qa("SELECT id, userid, token_hash, status FROM cdn64o_tunnels ORDER BY id") as $t) {
 		$tunnels[] = array('id' => $t['id'], 'token_sha256' => $t['token_hash'], 'userid' => (int)$t['userid'], 'blocked' => $t['status'] !== 'active');
