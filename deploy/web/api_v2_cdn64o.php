@@ -13,6 +13,8 @@
 const C64O_TTL          = 10;   // TTL der Server-Eintraege
 const C64O_CDN_TMP      = 3;    // Markierung in subdomain_records (1/2 = altes CDN)
 const C64O_MAX_TUNNELS  = 10;   // Tunnels je Account
+const C64O_EDGE_STALE   = 45;   // Sekunden ohne Abruf: Server gilt als ausgefallen (G6)
+const C64O_EDGE_BACK    = 30;   // Sekunden wieder da: Adressen wieder eintragen
 const C64O_MODES        = array(1, 2);  // 1 durchreichen, 2 terminieren (T5); 3 (direkt) ab T7
 
 // ---------------------------------------------------------------- Hilfen
@@ -99,6 +101,7 @@ function c64o_dns_on(array $h, array $d): bool {
 		q("INSERT INTO cdn64o_records (host_id, record_id, role) VALUES (:h, :r, 'original')", array('h' => $h['id'], 'r' => $r['id']));
 	}
 	foreach(c64o_edges() as $e) {
+		if((int)($e['withdrawn'] ?? 0) === 1) { continue; } // ausgefallen (G6): kommt beim Wiedereintrag dazu
 		foreach(array('A' => $e['ipv4'], 'AAAA' => $e['ipv6']) as $type => $ip) {
 			if($ip === '') { continue; }
 			q("INSERT INTO subdomain_records (subdomain_id, userid, domainname, praefix, content, ttl, type, record_key, cdn_tmp) VALUES (:s, :u, :dn, :p, :c, :t, :ty, :k, :m)",
@@ -125,6 +128,59 @@ function c64o_dns_off(array $h): bool {
 	$ok = true;
 	foreach(array('A', 'AAAA') as $t) { if(!quiet(fn() => do_zone_update($GLOBALS['pdo'], $u, $sid, $t, (string)C64O_TTL, $p))) { $ok = false; } }
 	return $ok;
+}
+
+/**
+ * G6: Ein Server, der sich laenger als C64O_EDGE_STALE Sekunden nicht gemeldet hat (Abruf alle 10 s), verschwindet aus
+ * dem DNS aller CDN64-Namen, solange ein anderer da ist; ist er wieder C64O_EDGE_BACK Sekunden da, kommt er zurueck.
+ * Laeuft bei jedem Abruf eines Servers (der gesunde Server bemerkt den Ausfall des anderen).
+ */
+function c64o_edge_watch(): void {
+	$edges = c64o_edges();
+	$fresh = fn($e) => $e['last_seen'] !== null && strtotime($e['last_seen']) >= time() - C64O_EDGE_STALE;
+	$alive = count(array_filter($edges, $fresh));
+	foreach($edges as $e) {
+		if(!$fresh($e)) {
+			if((int)$e['withdrawn'] === 0 && $alive > 0) { c64o_edge_dns($e, false); }
+			elseif($e['back_since'] !== null) { q("UPDATE cdn64o_edges set back_since = NULL WHERE id = :i", array('i' => $e['id'])); }
+			continue;
+		}
+		if((int)$e['withdrawn'] === 1) {
+			if($e['back_since'] === null) { q("UPDATE cdn64o_edges set back_since = NOW() WHERE id = :i", array('i' => $e['id'])); }
+			elseif(strtotime($e['back_since']) <= time() - C64O_EDGE_BACK) { c64o_edge_dns($e, true); }
+		}
+	}
+}
+
+/** Adressen eines Servers aus allen CDN64-Namen nehmen (false) bzw. wieder eintragen (true), an PowerDNS. */
+function c64o_edge_dns(array $e, bool $on): void {
+	$ips = array_values(array_filter(array($e['ipv4'], $e['ipv6'])));
+	if(empty($ips)) { return; }
+	q("UPDATE cdn64o_edges set withdrawn = :w, back_since = NULL WHERE id = :i", array('w' => $on ? 0 : 1, 'i' => $e['id']));
+	$in = implode(',', array_map(fn($i) => $GLOBALS['pdo']->quote($i), $ips));
+	foreach(qa("SELECT * FROM cdn64o_hosts WHERE status IN ('active', 'blocked')") as $h) {
+		$sid = (int)$h['subdomain_id']; $u = (int)$h['userid']; $p = $h['praefix'];
+		if($on) {
+			$d = q1("SELECT * FROM subdomains WHERE id = :i", array('i' => $sid));
+			if($d === null) { continue; }
+			foreach(array('A' => $e['ipv4'], 'AAAA' => $e['ipv6']) as $type => $ip) {
+				if($ip === '' OR q1("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND type = :t AND content = :c AND cdn_tmp = :m",
+					array('s' => $sid, 'p' => $p, 't' => $type, 'c' => $ip, 'm' => C64O_CDN_TMP)) !== null) { continue; }
+				q("INSERT INTO subdomain_records (subdomain_id, userid, domainname, praefix, content, ttl, type, record_key, cdn_tmp) VALUES (:s, :u, :dn, :p, :c, :t, :ty, :k, :m)",
+					array('s' => $sid, 'u' => $u, 'dn' => domain_name($d), 'p' => $p, 'c' => $ip, 't' => C64O_TTL, 'ty' => $type, 'k' => token32(), 'm' => C64O_CDN_TMP));
+				q("INSERT INTO cdn64o_records (host_id, record_id, role) VALUES (:h, :r, 'edge')", array('h' => $h['id'], 'r' => $GLOBALS['pdo']->lastInsertId()));
+			}
+		} else {
+			foreach(qa("SELECT r.record_id FROM cdn64o_records r JOIN subdomain_records s ON s.id = r.record_id
+				WHERE r.host_id = :h AND r.role = 'edge' AND s.cdn_tmp = :m AND s.content IN ($in)", array('h' => $h['id'], 'm' => C64O_CDN_TMP)) as $r) {
+				q("DELETE FROM subdomain_records WHERE id = :i AND cdn_tmp = :m", array('i' => $r['record_id'], 'm' => C64O_CDN_TMP));
+				q("DELETE FROM cdn64o_records WHERE host_id = :h AND record_id = :r", array('h' => $h['id'], 'r' => $r['record_id']));
+			}
+		}
+		foreach(array('A', 'AAAA') as $t) { quiet(fn() => do_zone_update($GLOBALS['pdo'], $u, $sid, $t, (string)C64O_TTL, $p)); }
+		c64o_event((int)$h['id'], $u, $on ? 'edge_back' : 'edge_down', $e['name']);
+	}
+	error_log("cdn64o: edge " . $e['name'] . ($on ? " back in DNS" : " withdrawn from DNS"));
 }
 
 // ---------------------------------------------------------------- Nodes (API-Key)
@@ -289,7 +345,9 @@ function c64o_edge_auth(): array {
 
 /** GET /cdn64o/edge/config: alles, was die Server brauchen (ETag; unveraendert = 304). */
 route('GET', '/cdn64o/edge/config', function() {
-	c64o_edge_auth();
+	$self = c64o_edge_auth();
+	q("UPDATE cdn64o_edges set last_seen = NOW() WHERE id = :i", array('i' => $self['id'])); // Lebenszeichen alle 10 s (G6)
+	c64o_edge_watch();
 	$tunnels = array();
 	foreach(qa("SELECT id, userid, token_hash, status FROM cdn64o_tunnels ORDER BY id") as $t) {
 		$tunnels[] = array('id' => $t['id'], 'token_sha256' => $t['token_hash'], 'userid' => (int)$t['userid'], 'blocked' => $t['status'] !== 'active');

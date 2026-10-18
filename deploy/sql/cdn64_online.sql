@@ -120,3 +120,8 @@ CREATE TABLE IF NOT EXISTS `cdn64o_certs` (
 
 -- T6: Anfragen je Host und Tag (Modus 2; in Modus 1 sieht der Server nur Verbindungen).
 ALTER TABLE `cdn64o_traffic` ADD COLUMN IF NOT EXISTS `requests` bigint(20) NOT NULL DEFAULT 0 AFTER `conns`;
+
+-- T6 (G6): ausgefallenen Server aus dem DNS nehmen. withdrawn = seine A/AAAA sind gerade aus allen CDN64-Namen
+-- entfernt; back_since = seit wann er nach einem Ausfall wieder da ist (Wiedereintrag nach 30 s).
+ALTER TABLE `cdn64o_edges` ADD COLUMN IF NOT EXISTS `withdrawn` tinyint(1) NOT NULL DEFAULT 0 AFTER `disabled`;
+ALTER TABLE `cdn64o_edges` ADD COLUMN IF NOT EXISTS `back_since` datetime DEFAULT NULL AFTER `withdrawn`;
