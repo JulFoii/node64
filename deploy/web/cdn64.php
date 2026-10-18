@@ -54,10 +54,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} else {
 		$act = (string)($_POST['action'] ?? '');
 		$id = (int)($_POST['id'] ?? 0);
-		$target = function(): array {
+		$target = function() use ($accountclass): array {
 			$t = array('source' => ($_POST['source'] ?? 'records') === 'fixed' ? 'fixed' : 'records', 'scheme' => ($_POST['scheme'] ?? 'https') === 'http' ? 'http' : 'https',
 				'verify_tls' => !empty($_POST['verify_tls']), 'prefer_ipv6' => !empty($_POST['prefer_ipv6']), 'frontend' => max(1, min(3, (int)($_POST['frontend'] ?? 2))),
-				'cache_mb' => max(0, (int)($_POST['cache_mb'] ?? 0)), 'cache_minutes' => max(1, (int)($_POST['cache_minutes'] ?? 10)));
+				'cache_mb' => !empty($_POST['cache']) ? (int)($accountclass['cdn_cache_size'] ?? 0) : 0, 'cache_minutes' => 10); // Cache an = Groesse der Klasse
 			if($t['source'] === 'fixed') { $t['target'] = trim((string)($_POST['target'] ?? '')); }
 			if(($p = (int)($_POST['port'] ?? 0)) > 0) { $t['port'] = $p; }
 			return $t;
@@ -165,6 +165,8 @@ if($cur !== null AND (int)$cur['mode'] === 3) { // Modus 1/2 verwaltet die Node
 
 /** Felder fuer das Ziel (Modus 3). */
 function c64w_target_fields(?array $t): void {
+	global $accountclass;
+	$maxCache = (int)($accountclass['cdn_cache_size'] ?? 0);
 	$t = $t ?? array('source' => 'records', 'target' => '', 'port' => 443, 'scheme' => 'https', 'verify_tls' => false, 'prefer_ipv6' => true, 'frontend' => 2, 'cache_mb' => 0, 'cache_minutes' => 10);
 	?>
 	<div class="form-group mb-2"><label class="mb-1">Target</label>
@@ -186,10 +188,7 @@ function c64w_target_fields(?array $t): void {
 			<option value="2" <?php echo (int)$t['frontend'] === 2 ? 'selected' : ''; ?>>Level 2: HTTPS, port 80 redirects to HTTPS</option>
 			<option value="3" <?php echo (int)$t['frontend'] === 3 ? 'selected' : ''; ?>>Level 3: HTTPS (port 443) only</option>
 		</select></div>
-	<div class="form-row">
-		<div class="form-group col-6 mb-2"><label class="mb-1">Cache (MB, 0 = off)</label><input type="number" min="0" name="cache_mb" class="form-control form-control-sm" value="<?php echo (int)$t['cache_mb']; ?>"></div>
-		<div class="form-group col-6 mb-2"><label class="mb-1">Keep unused (minutes)</label><input type="number" min="1" max="1440" name="cache_minutes" class="form-control form-control-sm" value="<?php echo (int)$t['cache_minutes']; ?>"></div>
-	</div>
+	<div class="custom-control custom-checkbox mb-1"><input type="checkbox" class="custom-control-input" id="ca" name="cache" value="1" <?php echo (int)$t['cache_mb'] > 0 ? 'checked' : ''; ?> <?php echo $maxCache > 0 ? '' : 'disabled'; ?>><label class="custom-control-label" for="ca">Cache <span class="text-muted">(up to <?php echo $maxCache; ?> MB, follows the Cache-Control headers of the target)</span></label></div>
 	<div class="custom-control custom-checkbox mb-1"><input type="checkbox" class="custom-control-input" id="vt" name="verify_tls" value="1" <?php echo !empty($t['verify_tls']) ? 'checked' : ''; ?>><label class="custom-control-label" for="vt">Verify the target's certificate</label></div>
 	<div class="custom-control custom-checkbox mb-2"><input type="checkbox" class="custom-control-input" id="p6" name="prefer_ipv6" value="1" <?php echo !isset($t['prefer_ipv6']) || $t['prefer_ipv6'] ? 'checked' : ''; ?>><label class="custom-control-label" for="p6">Prefer IPv6</label></div>
 	<p class="text-muted mb-2">WebSockets work automatically. Visitors' IP arrives in <code>X-Forwarded-For</code> / <code>X-Real-IP</code>.</p>
@@ -212,8 +211,9 @@ function c64w_target_fields(?array $t): void {
 					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
 					echo '<tr><td class="text-monospace">' . c64w_h($h['fqdn']) . '</td><td>' . c64w_h($modeName[$h['mode']] ?? $h['mode']) . '</td><td class="text-monospace text-break">' . c64w_h($tgt) . '</td><td>' . $st . '</td>';
 					echo '<td class="text-right text-nowrap">' . c64w_bytes($tm['bytes_in'] + $tm['bytes_out']) . ($tm['requests'] ? ' · ' . number_format($tm['requests'], 0, ',', '.') . ' req.' : '') . ($tm['rejected'] ? ' · <span class="text-danger">' . (int)$tm['rejected'] . ' rejected</span>' : '') . '</td>';
-					if((int)$h['mode'] !== 3) { echo '<td class="text-right text-nowrap text-muted" title="Target, mode, certificate and access lists are managed in Node64."><i class="fa-solid fa-lock"></i> Node64</td></tr>'; continue; }
-					echo '<td class="text-right text-nowrap"><a class="btn btn-sm btn-outline-primary py-0" href="cdn64?edit=' . (int)$h['id'] . '" title="Edit"><i class="fa-solid fa-pen"></i></a> ';
+					// Modus 1/2: verwaltet in Node64, hier nur ausschalten (Notfall, ohne Zugriff auf die Node)
+					echo (int)$h['mode'] !== 3 ? '<td class="text-right text-nowrap"><span class="text-muted mr-1" title="Target, mode, certificate and access lists are managed in Node64. Switching off here also removes it there."><i class="fa-solid fa-lock"></i> Node64</span>'
+						: '<td class="text-right text-nowrap"><a class="btn btn-sm btn-outline-primary py-0" href="cdn64?edit=' . (int)$h['id'] . '" title="Edit"><i class="fa-solid fa-pen"></i></a> ';
 					echo '<form method="post" class="d-inline" onsubmit="return confirm(\'Switch off CDN64 for ' . c64w_h($h['fqdn']) . '? DNS points to the previous address again.\')"><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="off"><input type="hidden" name="id" value="' . (int)$h['id'] . '"><button class="btn btn-sm btn-outline-danger py-0" title="Switch off"><i class="fa-solid fa-power-off"></i></button></form></td></tr>';
 				} ?>
 				</tbody>
