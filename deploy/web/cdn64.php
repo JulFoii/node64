@@ -65,7 +65,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
 		switch($act) {
 			case 'add':
 				[$code, $r] = c64w_api('POST', '/cdn64o/hosts', array_merge(array('fqdn' => strtolower(trim((string)($_POST['fqdn'] ?? ''))), 'mode' => 3, 'via' => 'web'), $target()));
-				$info = $code === 201 ? c64w_alert('success', 'CDN64 is active for ' . $r['fqdn'] . '. The servers fetch a certificate (about a minute), then the name is reachable via HTTPS.')
+				$info = $code === 201 ? c64w_alert('success', 'CDN64 is active for ' . $r['fqdn'] . ((int)($r['target']['frontend'] ?? 2) === 0 ? '. Add port mappings in the edit view.' : '. The servers fetch a certificate (about a minute), then the name is reachable via HTTPS.'))
 					: c64w_alert('danger', c64w_err($r));
 				break;
 			case 'target':
