@@ -99,7 +99,7 @@ systemctl daemon-reload
 systemctl enable cdn64-edge >/dev/null 2>&1 || true
 
 # Firewall: 22 (neue Verbindungen je Absender gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
-# 7845 TCP nur vom Nachbarserver, ICMP; alles andere zu.
+# 7845 TCP nur vom Nachbarserver, 50000-62000 TCP/UDP (Portmapper, Modus 3), ICMP; alles andere zu.
 PEERRULES=""
 [ -n "$PEER4" ] && PEERRULES="${PEERRULES}    ip saddr ${PEER4} tcp dport 7845 accept
 "
@@ -123,6 +123,7 @@ table inet filter {
     tcp dport 22 ct state new add @ssh6 { ip6 saddr limit rate 10/minute burst 20 packets } accept
     tcp dport { 80, 443, 7844 } accept
     udp dport { 443, 7844 } accept
+    meta l4proto { tcp, udp } th dport 50000-62000 accept
 ${PEERRULES}  }
   chain forward { type filter hook forward priority 0; policy drop; }
   chain output  { type filter hook output priority 0; policy accept; }

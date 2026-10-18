@@ -56,7 +56,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$id = (int)($_POST['id'] ?? 0);
 		$target = function() use ($accountclass): array {
 			$t = array('source' => ($_POST['source'] ?? 'records') === 'fixed' ? 'fixed' : 'records', 'scheme' => ($_POST['scheme'] ?? 'https') === 'http' ? 'http' : 'https',
-				'verify_tls' => !empty($_POST['verify_tls']), 'prefer_ipv6' => !empty($_POST['prefer_ipv6']), 'frontend' => max(1, min(3, (int)($_POST['frontend'] ?? 2))),
+				'verify_tls' => !empty($_POST['verify_tls']), 'prefer_ipv6' => !empty($_POST['prefer_ipv6']), 'frontend' => max(0, min(3, (int)($_POST['frontend'] ?? 2))),
 				'cache_mb' => !empty($_POST['cache']) ? (int)($accountclass['cdn_cache_size'] ?? 0) : 0, 'cache_minutes' => 10); // Cache an = Groesse der Klasse
 			if($t['source'] === 'fixed') { $t['target'] = trim((string)($_POST['target'] ?? '')); }
 			if(($p = (int)($_POST['port'] ?? 0)) > 0) { $t['port'] = $p; }
@@ -77,6 +77,19 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$def = in_array($_POST['default'] ?? 'off', array('off', 'allow', 'deny'), true) ? $_POST['default'] : 'off';
 				[$code, $r] = c64w_api('PUT', "/cdn64o/hosts/$id/acl", array('default' => $def, 'list' => $list));
 				$info = $code === 200 ? c64w_alert('success', 'Allow/block list saved.') : c64w_alert('danger', c64w_err($r));
+				break;
+			case 'map':
+				$tr = ($_POST['transport'] ?? 'tcp') === 'udp' ? 'udp' : 'tcp';
+				$tp = (int)($_POST['target_port'] ?? 0);
+				[$code, $r] = c64w_api('POST', "/cdn64o/hosts/$id/mappings", array('name' => trim((string)($_POST['name'] ?? '')), 'transport' => $tr, 'target_port' => $tp));
+				$lp = 0;
+				foreach($code === 201 ? $r : array() as $m) { if($m['transport'] === $tr AND (int)$m['target_port'] === $tp) { $lp = (int)$m['listen_port']; } }
+				$info = $code === 201 ? c64w_alert('success', 'Port mapping added: port ' . $lp . ' (' . strtoupper($tr) . ') of the servers goes to port ' . $tp . ' of your target. The servers open it within seconds.')
+					: c64w_alert('danger', c64w_err($r));
+				break;
+			case 'unmap':
+				[$code, $r] = c64w_api('DELETE', "/cdn64o/hosts/$id/mappings/" . (int)($_POST['mid'] ?? 0));
+				$info = $code === 204 ? c64w_alert('success', 'Port mapping removed.') : c64w_alert('danger', c64w_err($r));
 				break;
 			case 'off':
 				[$code, $r] = c64w_api('DELETE', "/cdn64o/hosts/$id");
@@ -121,6 +134,7 @@ echo $info;
 			traffic this month <?php echo c64w_bytes((int)($q['traffic_mb']['used'] * 1048576)); ?> of <?php echo c64w_bytes((int)$q['traffic_mb']['limit'] * 1048576); ?>
 			<?php if((int)$q['bandwidth_mbit'] > 0) { echo ' · bandwidth up to ' . (int)$q['bandwidth_mbit'] . ' Mbit/s'; } ?>
 			· cache up to <?php echo (int)($accountclass['cdn_cache_size'] ?? 0); ?> MB per name
+			· port mappings <?php echo (int)($q['mappings']['used'] ?? 0); ?> of <?php echo (int)($q['mappings']['limit'] ?? 0); ?>
 		</div></div>
 	</div>
 <?php
@@ -160,6 +174,30 @@ if($cur !== null AND (int)$cur['mode'] === 3) { // Modus 1/2 verwaltet die Node
 			</form>
 		</div></div>
 	</div>
+	<div class="col-12 pb-3">
+		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-arrow-right-arrow-left text-info"></i> Port mappings (TCP/UDP)</div>
+		<div class="card-body p-0 small">
+			<form method="post" id="c64map"><input type="hidden" name="csrf" value="<?php echo $csrf; ?>"><input type="hidden" name="action" value="map"><input type="hidden" name="id" value="<?php echo (int)$cur['id']; ?>"></form>
+			<table class="table table-sm mb-0">
+				<thead><tr><th>Service</th><th>Reach it at</th><th>Port of your target</th><th></th></tr></thead>
+				<tbody>
+				<?php foreach($cur['mappings'] ?? array() as $m) {
+					echo '<tr><td>' . c64w_h($m['name']) . '</td><td class="text-monospace">' . c64w_h($cur['fqdn']) . ':' . (int)$m['listen_port'] . '</td>';
+					echo '<td><span class="badge badge-dark">' . (int)$m['target_port'] . '</span> <span class="badge ' . ($m['transport'] === 'udp' ? 'badge-primary' : 'badge-info') . '">' . strtoupper(c64w_h($m['transport'])) . '</span></td>';
+					echo '<td class="text-right"><form method="post" class="d-inline" onsubmit="return confirm(\'Remove this port mapping?\')"><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="unmap"><input type="hidden" name="id" value="' . (int)$cur['id'] . '"><input type="hidden" name="mid" value="' . (int)$m['id'] . '"><button class="btn btn-sm btn-outline-danger py-0" title="Remove"><i class="fa-solid fa-trash"></i></button></form></td></tr>';
+				} ?>
+				<tr>
+					<td><input type="text" name="name" form="c64map" maxlength="64" class="form-control form-control-sm" placeholder="e.g. WireGuard"></td>
+					<td class="text-muted align-middle">assigned automatically (50000–62000)</td>
+					<td><div class="input-group input-group-sm"><input type="number" min="1" max="65535" name="target_port" form="c64map" class="form-control" placeholder="51820" required>
+						<select name="transport" form="c64map" class="custom-select"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div></td>
+					<td class="text-right"><button class="btn btn-sm btn-primary" type="submit" form="c64map">Add</button></td>
+				</tr>
+				</tbody>
+			</table>
+			<p class="text-muted m-2">Raw TCP/UDP to the same target as the website (e.g. WireGuard, SSH, game servers). If the port of your target is free on the servers, you get the same one. The allow/block list applies here too; the target sees the address of the servers, not the visitor's.</p>
+		</div></div>
+	</div>
 <?php
 }
 
@@ -184,6 +222,7 @@ function c64w_target_fields(?array $t): void {
 	</div>
 	<div class="form-group mb-2"><label class="mb-1">Frontend</label>
 		<select name="frontend" class="form-control form-control-sm">
+			<option value="0" <?php echo (int)$t['frontend'] === 0 ? 'selected' : ''; ?>>Off: no website, port mappings only</option>
 			<option value="1" <?php echo (int)$t['frontend'] === 1 ? 'selected' : ''; ?>>Level 1: HTTP (port 80) only</option>
 			<option value="2" <?php echo (int)$t['frontend'] === 2 ? 'selected' : ''; ?>>Level 2: HTTPS, port 80 redirects to HTTPS</option>
 			<option value="3" <?php echo (int)$t['frontend'] === 3 ? 'selected' : ''; ?>>Level 3: HTTPS (port 443) only</option>
@@ -207,6 +246,7 @@ function c64w_target_fields(?array $t): void {
 					$br = fn($a) => str_contains($a, ':') ? '[' . $a . ']' : $a; // IPv6 in Klammern
 					$tgt = (int)$h['mode'] === 3 && $h['target'] ? ($h['target']['scheme'] . '://' . ($h['target']['target'] ? $br($h['target']['target']) : implode(', ', array_map($br, (array)$h['target']['addrs']))) . ':' . $h['target']['port'])
 						: 'Node64 tunnel ' . implode(', ', $h['tunnels']);
+					if(!empty($h['mappings'])) { $tgt .= ' · ' . count($h['mappings']) . ' port' . (count($h['mappings']) > 1 ? 's' : ''); }
 					$st = $h['status'] === 'active' ? '<span class="badge badge-success">active</span>' : ($h['status'] === 'blocked' ? '<span class="badge badge-danger">blocked: ' . c64w_h($h['blocked_reason']) . '</span>' : '<span class="badge badge-warning">' . c64w_h($h['status']) . '</span>');
 					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
 					echo '<tr><td class="text-monospace">' . c64w_h($h['fqdn']) . '</td><td>' . c64w_h($modeName[$h['mode']] ?? $h['mode']) . '</td><td class="text-monospace text-break">' . c64w_h($tgt) . '</td><td>' . $st . '</td>';

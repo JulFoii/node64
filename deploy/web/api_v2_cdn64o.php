@@ -17,6 +17,8 @@ const C64O_EDGE_STALE   = 45;   // Sekunden ohne Abruf: Server gilt als ausgefal
 const C64O_EDGE_BACK    = 30;   // Sekunden wieder da: Adressen wieder eintragen
 const C64O_MODES        = array(1, 2, 3);  // 1 durchreichen, 2 terminieren (T5), 3 direkt zum Ziel (T7)
 const C64O_ACL_MAX      = 200;  // Eintraege je Liste
+const C64O_PORT_MIN     = 50000; // Portmapper: Ports der Server (wie beim alten CDN)
+const C64O_PORT_MAX     = 62000;
 
 // ---------------------------------------------------------------- Hilfen
 
@@ -37,8 +39,11 @@ function c64o_quota(int $u, array $class): array {
 	$oldMB = (float)($me['cdn_traffic_input'] ?? 0) + (float)($me['cdn_traffic_output'] ?? 0);
 	$t = q1("SELECT COALESCE(SUM(bytes_in + bytes_out), 0) b FROM cdn64o_traffic WHERE userid = :u AND day >= :d", array('u' => $u, 'd' => date('Y-m-01')));
 	$newMB = (float)$t['b'] / 1048576;
+	$oldMap = (int)q1("SELECT count(id) c FROM cdn_mapping WHERE userid = :u", array('u' => $u))['c'];
+	$newMap = (int)q1("SELECT count(id) c FROM cdn64o_mappings WHERE userid = :u", array('u' => $u))['c'];
 	return array(
 		'domains' => array('used' => $old + $new, 'old_cdn' => $old, 'limit' => (int)($class['cdn_domains'] ?? 0)),
+		'mappings' => array('used' => $oldMap + $newMap, 'old_cdn' => $oldMap, 'limit' => (int)($class['cdn_mappings'] ?? 0)),
 		'traffic_mb' => array('used' => round($oldMB + $newMB, 1), 'old_cdn' => round($oldMB, 1), 'limit' => (int)($class['cdn_traffic'] ?? 0) * 1024),
 		'bandwidth_mbit' => (int)($class['cdn_bandwidth'] ?? 0),
 	);
@@ -63,7 +68,29 @@ function c64o_host_out(array $h): array {
 		'blocked_reason' => $h['blocked_reason'] ?: null, 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
 		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o'], 'conns' => (int)$tr['c'], 'requests' => (int)$tr['r'], 'rejected' => (int)$tr['x']),
 		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']),
-		'target' => (int)$h['mode'] === 3 ? c64o_target_out((int)$h['id']) : null, 'acl' => c64o_acl_out($h));
+		'target' => (int)$h['mode'] === 3 ? c64o_target_out((int)$h['id']) : null, 'acl' => c64o_acl_out($h),
+		'mappings' => (int)$h['mode'] === 3 ? c64o_mappings_out((int)$h['id']) : array());
+}
+
+/** Portmapper eines Namens (Modus 3). */
+function c64o_mappings_out(int $hostId): array {
+	return array_map(fn($m) => array('id' => (int)$m['id'], 'name' => $m['name'], 'listen_port' => (int)$m['listen_port'], 'transport' => $m['transport'],
+		'target_port' => (int)$m['target_port']), qa("SELECT * FROM cdn64o_mappings WHERE host_id = :h ORDER BY listen_port, transport", array('h' => $hostId)));
+}
+
+/** Freier Port der Server fuer ein Mapping: der gewuenschte, sonst wie beim alten CDN (derselbe wie ein anderes Mapping
+ * des Namens auf diesen Ziel-Port, derselbe wie am Ziel, sonst zufaellig). null = keiner frei. */
+function c64o_mapping_port(int $hostId, string $tr, int $targetPort, ?int $wish): ?int {
+	$free = fn(int $p): bool => $p >= C64O_PORT_MIN AND $p <= C64O_PORT_MAX AND q1("SELECT id FROM cdn64o_mappings WHERE transport = :t AND listen_port = :p", array('t' => $tr, 'p' => $p)) === null;
+	if($wish !== null) { return $free($wish) ? $wish : null; }
+	foreach(qa("SELECT listen_port FROM cdn64o_mappings WHERE host_id = :h AND target_port = :p", array('h' => $hostId, 'p' => $targetPort)) as $m) {
+		if($free((int)$m['listen_port'])) { return (int)$m['listen_port']; }
+	}
+	if($free($targetPort)) { return $targetPort; }
+	for($i = 0; $i < 50; $i++) { if($free($p = random_int(C64O_PORT_MIN, C64O_PORT_MAX))) { return $p; } }
+	$used = array_flip(array_column(qa("SELECT listen_port FROM cdn64o_mappings WHERE transport = :t", array('t' => $tr)), 'listen_port'));
+	for($p = C64O_PORT_MIN; $p <= C64O_PORT_MAX; $p++) { if(!isset($used[$p])) { return $p; } }
+	return null;
 }
 
 // ---------------------------------------------------------------- Modus 3: Ziel, Liste
@@ -109,7 +136,7 @@ function c64o_target_in(?array $old = null): array {
 	if(($v = in_int('port', false, 1, 65535)) !== null) { $t['port'] = $v; }
 	if(($v = in_bool('verify_tls')) !== null) { $t['verify_tls'] = $v ? 1 : 0; }
 	if(($v = in_bool('prefer_ipv6')) !== null) { $t['prefer_ipv6'] = $v ? 1 : 0; }
-	if(($v = in_int('frontend', false, 1, 3)) !== null) { $t['frontend'] = $v; }
+	if(($v = in_int('frontend', false, 0, 3)) !== null) { $t['frontend'] = $v; } // 0 = keine Webseite, nur Portmapper
 	$maxCache = (int)($CLASS['cdn_cache_size'] ?? 0);
 	if(($v = in_int('cache_mb', false, 0, 100000)) !== null) {
 		if($v > $maxCache) { fail(422, 'cache_limit', "The cache of your plan is at most $maxCache MB.", array('field' => 'cache_mb')); }
@@ -458,6 +485,40 @@ route('PUT', '/cdn64o/hosts/{id}/acl', function($p) {
 	ok(c64o_acl_out(c64o_find_host((string)$h['id'])));
 });
 
+/** GET|POST /cdn64o/hosts/{id}/mappings {name, transport: tcp|udp, target_port, listen_port?}: Portmapper (nur Modus 3). */
+route('GET', '/cdn64o/hosts/{id}/mappings', function($p) { ok(c64o_mappings_out((int)c64o_find_host($p['id'])['id'])); });
+route('POST', '/cdn64o/hosts/{id}/mappings', function($p) {
+	global $CLASS;
+	$h = c64o_find_host($p['id']);
+	if((int)$h['mode'] !== 3) { fail(409, 'not_mode_3', 'Port mappings are only available in mode 3.'); }
+	$tr = in_str('transport', false, 3, 'tcp');
+	if(!in_array($tr, array('tcp', 'udp'), true)) { fail(422, 'invalid_field', "Field 'transport' must be tcp or udp.", array('field' => 'transport')); }
+	$tp = in_int('target_port', true, 1, 65535);
+	$wish = in_int('listen_port', false, C64O_PORT_MIN, C64O_PORT_MAX);
+	$name = mb_substr(strip_tags(in_str('name', false, 64, '')), 0, 64);
+	$q = c64o_quota(uid(), $CLASS);
+	if($q['mappings']['used'] >= $q['mappings']['limit']) { fail(403, 'limit_reached', 'Port mapping limit of your plan is reached (old and new CDN together).'); }
+	if(q1("SELECT id FROM cdn64o_mappings WHERE host_id = :h AND transport = :t AND target_port = :p", array('h' => $h['id'], 't' => $tr, 'p' => $tp)) !== null) {
+		fail(409, 'mapping_exists', 'This port is already mapped for this name.', array('field' => 'target_port'));
+	}
+	$lp = c64o_mapping_port((int)$h['id'], $tr, $tp, $wish);
+	if($lp === null) { fail(409, 'port_in_use', $wish !== null ? "Port $wish is already in use." : 'No free port left.', array('field' => 'listen_port')); }
+	if(q("INSERT IGNORE INTO cdn64o_mappings (host_id, userid, name, listen_port, transport, target_port) VALUES (:h, :u, :n, :l, :t, :p)",
+		array('h' => $h['id'], 'u' => uid(), 'n' => $name, 'l' => $lp, 't' => $tr, 'p' => $tp))->rowCount() !== 1) {
+		fail(409, 'port_in_use', "Port $lp was just taken, try again.", array('field' => 'listen_port'));
+	}
+	c64o_event((int)$h['id'], uid(), 'mapping', "$tr $lp -> $tp" . ($name !== '' ? " ($name)" : ''));
+	ok(c64o_mappings_out((int)$h['id']), 201);
+});
+route('DELETE', '/cdn64o/hosts/{id}/mappings/{mid}', function($p) {
+	$h = c64o_find_host($p['id']);
+	$m = q1("SELECT * FROM cdn64o_mappings WHERE id = :m AND host_id = :h", array('m' => (int)$p['mid'], 'h' => $h['id']));
+	if($m === null) { fail(404, 'not_found', 'Port mapping not found.'); }
+	q("DELETE FROM cdn64o_mappings WHERE id = :m", array('m' => $m['id']));
+	c64o_event((int)$h['id'], uid(), 'mapping', 'removed ' . $m['transport'] . ' ' . $m['listen_port']);
+	no_content();
+});
+
 route('GET', '/cdn64o/hosts/{id}/events', function($p) {
 	$h = c64o_find_host($p['id']);
 	ok(array_map(fn($e) => array('time' => iso($e['time']), 'kind' => $e['kind'], 'message' => $e['message']),
@@ -493,6 +554,7 @@ route('DELETE', '/cdn64o/hosts/{id}', function($p) {
 	q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
 	q("DELETE FROM cdn64o_targets WHERE host_id = :h", array('h' => $h['id']));
 	q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
+	q("DELETE FROM cdn64o_mappings WHERE host_id = :h", array('h' => $h['id']));
 	c64o_event((int)$h['id'], uid(), 'disabled');
 	add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . " ausgeschaltet.");
 	no_content();
@@ -531,12 +593,16 @@ route('GET', '/cdn64o/edge/config', function() {
 	$ht = array();
 	foreach(qa("SELECT host_id, tunnel_id FROM cdn64o_host_tunnels ORDER BY host_id, priority, tunnel_id") as $r) { $ht[(int)$r['host_id']][] = $r['tunnel_id']; }
 	$hosts = array(); $users = array();
-	$acl = array();
+	$acl = array(); $maps = array();
 	foreach(qa("SELECT host_id, cidr FROM cdn64o_acl ORDER BY id") as $r) { $acl[(int)$r['host_id']][] = $r['cidr']; }
+	foreach(qa("SELECT host_id, listen_port, transport, target_port FROM cdn64o_mappings ORDER BY transport, listen_port") as $r) {
+		$maps[(int)$r['host_id']][] = array('listen_port' => (int)$r['listen_port'], 'transport' => $r['transport'], 'target_port' => (int)$r['target_port']);
+	}
 	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason, acl_default FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
 		$x = array('id' => (int)$h['id'], 'name' => $h['fqdn'], 'wildcard' => (int)$h['wildcard'] === 1, 'mode' => (int)$h['mode'], 'userid' => (int)$h['userid'],
 			'tunnels' => $ht[(int)$h['id']] ?? array(), 'blocked' => $h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '');
 		if((int)$h['mode'] === 3) { $x['target'] = c64o_target_edge((int)$h['id']); }
+		if((int)$h['mode'] === 3 AND isset($maps[(int)$h['id']])) { $x['mappings'] = $maps[(int)$h['id']]; }
 		if($h['acl_default'] !== '') { $x['acl'] = array('default' => $h['acl_default'], 'list' => $acl[(int)$h['id']] ?? array()); }
 		$hosts[] = $x;
 		$users[(int)$h['userid']] = true;

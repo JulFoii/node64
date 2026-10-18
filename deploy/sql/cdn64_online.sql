@@ -153,3 +153,21 @@ CREATE TABLE IF NOT EXISTS `cdn64o_acl` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `host_cidr` (`host_id`, `cidr`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- T8: Portmapper (Modus 3). Ein Port der Server (50000-62000, auf srv07 und srv08 derselbe) geht roh per TCP bzw. UDP
+-- an target_port des Ziels des Namens. Limit je Account: user_class.cdn_mappings (altes und neues CDN zusammen).
+-- frontend 0 bei cdn64o_targets = keine Webseite, nur Portmapper.
+CREATE TABLE IF NOT EXISTS `cdn64o_mappings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `host_id` int(11) NOT NULL,
+  `userid` int(11) NOT NULL,
+  `name` varchar(64) NOT NULL DEFAULT '',
+  `listen_port` int(5) NOT NULL,
+  `transport` varchar(3) NOT NULL,
+  `target_port` int(5) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `listen` (`transport`, `listen_port`),
+  KEY `host_id` (`host_id`),
+  KEY `userid` (`userid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
