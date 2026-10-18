@@ -622,8 +622,8 @@ route('POST', '/cdn64o/edge/acme-txt', function() {
 	$val = in_str('value', true, 255);
 	if(!preg_match('/^[A-Za-z0-9_-]{20,128}$/', $val)) { fail(422, 'invalid_field', "Field 'value' is not a DNS-01 value.", array('field' => 'value')); }
 	if(!str_starts_with($fqdn, '_acme-challenge.')) { fail(422, 'invalid_field', "Field 'fqdn' must start with _acme-challenge.", array('field' => 'fqdn')); }
-	$h = q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f AND mode = 2", array('f' => substr($fqdn, strlen('_acme-challenge.'))));
-	if($h === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 with this name.'); }
+	$h = q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f AND mode IN (2, 3)", array('f' => substr($fqdn, strlen('_acme-challenge.'))));
+	if($h === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 or 3 with this name.'); }
 	$d = q1("SELECT * FROM subdomains WHERE id = :i", array('i' => $h['subdomain_id']));
 	if($d === null) { fail(404, 'domain_not_found', 'Domain not found.'); }
 	$p = '_acme-challenge' . ($h['praefix'] !== '' ? '.' . $h['praefix'] : '');
@@ -652,7 +652,7 @@ route('PUT', '/cdn64o/edge/certs', function() {
 	$blob = in_str('blob', true, 262144);
 	$na = strtotime(in_str('not_after', true, 40) ?? '');
 	if($na === false) { fail(422, 'invalid_field', "Field 'not_after' is not a date.", array('field' => 'not_after')); }
-	if(q1("SELECT id FROM cdn64o_hosts WHERE fqdn = :f AND mode = 2", array('f' => $f)) === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 with this name.'); }
+	if(q1("SELECT id FROM cdn64o_hosts WHERE fqdn = :f AND mode IN (2, 3)", array('f' => $f)) === null) { fail(404, 'cdn64o_host_not_found', 'No CDN64 online host in mode 2 or 3 with this name.'); }
 	q("INSERT INTO cdn64o_certs (fqdn, `blob`, not_after, edge) VALUES (:f, :b, :n, :e)
 		ON DUPLICATE KEY UPDATE `blob` = IF(VALUES(not_after) >= not_after, VALUES(`blob`), `blob`), edge = IF(VALUES(not_after) >= not_after, VALUES(edge), edge),
 		not_after = GREATEST(not_after, VALUES(not_after))",

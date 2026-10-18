@@ -208,7 +208,8 @@ function c64w_target_fields(?array $t): void {
 				<?php if(empty($ov['hosts'])) { echo '<tr><td colspan="6" class="text-muted p-3">No names yet. Add one with mode 3 below or switch one on in Node64.</td></tr>'; }
 				foreach($ov['hosts'] as $h) {
 					$tm = $h['traffic_month'];
-					$tgt = (int)$h['mode'] === 3 && $h['target'] ? ($h['target']['scheme'] . '://' . ($h['target']['target'] ?: implode(', ', (array)$h['target']['addrs'])) . ':' . $h['target']['port'])
+					$br = fn($a) => str_contains($a, ':') ? '[' . $a . ']' : $a; // IPv6 in Klammern
+					$tgt = (int)$h['mode'] === 3 && $h['target'] ? ($h['target']['scheme'] . '://' . ($h['target']['target'] ? $br($h['target']['target']) : implode(', ', array_map($br, (array)$h['target']['addrs']))) . ':' . $h['target']['port'])
 						: 'Node64 tunnel ' . implode(', ', $h['tunnels']);
 					$st = $h['status'] === 'active' ? '<span class="badge badge-success">active</span>' : ($h['status'] === 'blocked' ? '<span class="badge badge-danger">blocked: ' . c64w_h($h['blocked_reason']) . '</span>' : '<span class="badge badge-warning">' . c64w_h($h['status']) . '</span>');
 					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
