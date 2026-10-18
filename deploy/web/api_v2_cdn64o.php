@@ -15,7 +15,8 @@ const C64O_CDN_TMP      = 3;    // Markierung in subdomain_records (1/2 = altes 
 const C64O_MAX_TUNNELS  = 10;   // Tunnels je Account
 const C64O_EDGE_STALE   = 45;   // Sekunden ohne Abruf: Server gilt als ausgefallen (G6)
 const C64O_EDGE_BACK    = 30;   // Sekunden wieder da: Adressen wieder eintragen
-const C64O_MODES        = array(1, 2);  // 1 durchreichen, 2 terminieren (T5); 3 (direkt) ab T7
+const C64O_MODES        = array(1, 2, 3);  // 1 durchreichen, 2 terminieren (T5), 3 direkt zum Ziel (T7)
+const C64O_ACL_MAX      = 200;  // Eintraege je Liste
 
 // ---------------------------------------------------------------- Hilfen
 
@@ -61,7 +62,115 @@ function c64o_host_out(array $h): array {
 	return array('id' => (int)$h['id'], 'fqdn' => $h['fqdn'], 'mode' => (int)$h['mode'], 'wildcard' => (int)$h['wildcard'] === 1, 'status' => $h['status'],
 		'blocked_reason' => $h['blocked_reason'] ?: null, 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
 		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o'], 'conns' => (int)$tr['c'], 'requests' => (int)$tr['r'], 'rejected' => (int)$tr['x']),
-		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']));
+		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']),
+		'target' => (int)$h['mode'] === 3 ? c64o_target_out((int)$h['id']) : null, 'acl' => c64o_acl_out($h));
+}
+
+// ---------------------------------------------------------------- Modus 3: Ziel, Liste
+
+/** Oeffentliche Unicast-Adresse (kein privates, reserviertes, CGNAT-, Dokumentations- oder Server-Netz). */
+function c64o_public_ip(string $ip): bool {
+	if(!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) { return false; }
+	$bin = inet_pton($ip);
+	$in = function(string $cidr) use ($bin): bool {
+		[$net, $len] = explode('/', $cidr); $n = inet_pton($net);
+		if($n === false OR strlen($n) !== strlen($bin)) { return false; }
+		$bytes = intdiv((int)$len, 8); $bits = (int)$len % 8;
+		if(substr($bin, 0, $bytes) !== substr($n, 0, $bytes)) { return false; }
+		return $bits === 0 OR ((ord($bin[$bytes]) ^ ord($n[$bytes])) & (0xff << (8 - $bits)) & 0xff) === 0;
+	};
+	foreach(array('100.64.0.0/10', '192.0.0.0/24', '192.0.2.0/24', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '2001:db8::/32', '64:ff9b::/96', '2002::/16', '2001::/32', 'fc00::/7', 'fe80::/10') as $c) { if($in($c)) { return false; } }
+	foreach(c64o_edges(true) as $e) { if($ip === $e['ipv4'] OR $ip === $e['ipv6']) { return false; } }
+	return true;
+}
+
+/** Ziel aus der Eingabe (POST /cdn64o/hosts bzw. PUT .../target); $old = bisheriges Ziel. */
+function c64o_target_in(?array $old = null): array {
+	global $CLASS;
+	$t = $old ?? array('source' => 'records', 'target' => '', 'port' => 443, 'scheme' => 'https', 'verify_tls' => 0, 'prefer_ipv6' => 1, 'frontend' => 2, 'cache_mb' => 0, 'cache_minutes' => 10);
+	if(($v = in_str('source', false, 8)) !== null) {
+		if(!in_array($v, array('records', 'fixed'), true)) { fail(422, 'invalid_field', "Field 'source' must be records or fixed.", array('field' => 'source')); }
+		$t['source'] = $v;
+	}
+	if(($v = in_str('target', false, 253)) !== null) { $t['target'] = strtolower(trim(rtrim($v, '.'), '[]')); }
+	if($t['source'] === 'fixed') {
+		$v = $t['target'];
+		if(filter_var($v, FILTER_VALIDATE_IP)) {
+			if(!c64o_public_ip($v)) { fail(422, 'target_not_public', 'The target must be a public IP address.', array('field' => 'target')); }
+		} elseif(!preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $v)) {
+			fail(422, 'invalid_field', "Field 'target' must be a public IP address or a host name.", array('field' => 'target'));
+		}
+	} else { $t['target'] = ''; }
+	if(($v = in_str('scheme', false, 5)) !== null) {
+		if(!in_array($v, array('http', 'https'), true)) { fail(422, 'invalid_field', "Field 'scheme' must be http or https.", array('field' => 'scheme')); }
+		if($old === null OR $v !== $t['scheme']) { $t['port'] = $v === 'https' ? 443 : 80; }
+		$t['scheme'] = $v;
+	}
+	if(($v = in_int('port', false, 1, 65535)) !== null) { $t['port'] = $v; }
+	if(($v = in_bool('verify_tls')) !== null) { $t['verify_tls'] = $v ? 1 : 0; }
+	if(($v = in_bool('prefer_ipv6')) !== null) { $t['prefer_ipv6'] = $v ? 1 : 0; }
+	if(($v = in_int('frontend', false, 1, 3)) !== null) { $t['frontend'] = $v; }
+	$maxCache = (int)($CLASS['cdn_cache_size'] ?? 0);
+	if(($v = in_int('cache_mb', false, 0, 100000)) !== null) {
+		if($v > $maxCache) { fail(422, 'cache_limit', "The cache of your plan is at most $maxCache MB.", array('field' => 'cache_mb')); }
+		$t['cache_mb'] = $v;
+	}
+	if(($v = in_int('cache_minutes', false, 1, 1440)) !== null) { $t['cache_minutes'] = $v; }
+	return $t;
+}
+
+/** Ziel speichern (Modus 3). */
+function c64o_target_save(int $hostId, array $t): void {
+	q("INSERT INTO cdn64o_targets (host_id, source, target, port, scheme, verify_tls, prefer_ipv6, frontend, cache_mb, cache_minutes)
+		VALUES (:h, :s, :t, :p, :sc, :v, :i6, :f, :cm, :ct) ON DUPLICATE KEY UPDATE source = VALUES(source), target = VALUES(target), port = VALUES(port),
+		scheme = VALUES(scheme), verify_tls = VALUES(verify_tls), prefer_ipv6 = VALUES(prefer_ipv6), frontend = VALUES(frontend),
+		cache_mb = VALUES(cache_mb), cache_minutes = VALUES(cache_minutes)",
+		array('h' => $hostId, 's' => $t['source'], 't' => $t['target'], 'p' => (int)$t['port'], 'sc' => $t['scheme'], 'v' => (int)$t['verify_tls'],
+			'i6' => (int)$t['prefer_ipv6'], 'f' => (int)$t['frontend'], 'cm' => (int)$t['cache_mb'], 'ct' => (int)$t['cache_minutes']));
+}
+
+/** Aktuelle Zieladressen aus den deaktivierten Originalen (DynDNS aktualisiert sie weiter). */
+function c64o_target_records(int $hostId): array {
+	return array_values(array_filter(array_column(qa("SELECT s.content FROM cdn64o_records r JOIN subdomain_records s ON s.id = r.record_id
+		WHERE r.host_id = :h AND r.role = 'original' AND s.type IN ('A','AAAA') ORDER BY s.type DESC, s.id", array('h' => $hostId)), 'content'), 'c64o_public_ip'));
+}
+
+function c64o_target_row(int $hostId): ?array { return q1("SELECT * FROM cdn64o_targets WHERE host_id = :h", array('h' => $hostId)); }
+
+function c64o_target_out(int $hostId): ?array {
+	$t = c64o_target_row($hostId);
+	if($t === null) { return null; }
+	return array('source' => $t['source'], 'target' => $t['target'] ?: null, 'addrs' => $t['source'] === 'records' ? c64o_target_records($hostId) : null,
+		'port' => (int)$t['port'], 'scheme' => $t['scheme'], 'verify_tls' => (int)$t['verify_tls'] === 1, 'prefer_ipv6' => (int)$t['prefer_ipv6'] === 1,
+		'frontend' => (int)$t['frontend'], 'websockets' => true, 'cache_mb' => (int)$t['cache_mb'], 'cache_minutes' => (int)$t['cache_minutes']);
+}
+
+/** Ziel fuer die Server (Adressen bzw. Name). */
+function c64o_target_edge(int $hostId): ?array {
+	$t = c64o_target_row($hostId);
+	if($t === null) { return null; }
+	$addrs = array(); $name = '';
+	if($t['source'] === 'records') { $addrs = c64o_target_records($hostId); }
+	elseif(filter_var($t['target'], FILTER_VALIDATE_IP)) { $addrs = c64o_public_ip($t['target']) ? array($t['target']) : array(); }
+	else { $name = $t['target']; }
+	return array('addrs' => $addrs, 'host' => $name, 'port' => (int)$t['port'], 'scheme' => $t['scheme'], 'verify_tls' => (int)$t['verify_tls'] === 1,
+		'prefer_ipv6' => (int)$t['prefer_ipv6'] === 1, 'frontend' => (int)$t['frontend'], 'cache_mb' => (int)$t['cache_mb'], 'cache_minutes' => (int)$t['cache_minutes']);
+}
+
+function c64o_acl_out(array $h): array {
+	return array('default' => $h['acl_default'] ?: 'off',
+		'list' => array_column(qa("SELECT cidr FROM cdn64o_acl WHERE host_id = :h ORDER BY id", array('h' => $h['id'])), 'cidr'));
+}
+
+/** IP oder Netz (IPv4/IPv6) wie im alten CDN. */
+function c64o_cidr(string $v): ?string {
+	$v = strtolower(trim($v));
+	if(filter_var($v, FILTER_VALIDATE_IP)) { return $v; }
+	if(preg_match('#^([0-9a-f:.]+)/(\d{1,3})$#', $v, $m) AND filter_var($m[1], FILTER_VALIDATE_IP)) {
+		$max = str_contains($m[1], ':') ? 128 : 32;
+		if((int)$m[2] <= $max) { return $m[1] . '/' . (int)$m[2]; }
+	}
+	return null;
 }
 
 function c64o_find_host(string $ref): array {
@@ -250,6 +359,7 @@ route('DELETE', '/cdn64o/tunnels/{id}', function($p) {
 			c64o_dns_off($h);
 			q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
 			q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
+			q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
 		}
 	}
 	q("DELETE FROM cdn64o_tunnels WHERE id = :i AND userid = :u", array('i' => $t['id'], 'u' => uid()));
@@ -265,8 +375,13 @@ route('POST', '/cdn64o/hosts', function() {
 	if(!preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $fqdn)) { fail(422, 'invalid_field', "Field 'fqdn' is not a valid name.", array('field' => 'fqdn')); }
 	$mode = in_int('mode', false, 1, 3, 1);
 	if(!in_array($mode, C64O_MODES, true)) { fail(422, 'mode_not_available', "Mode $mode is not available yet.", array('field' => 'mode')); }
-	$t = c64o_find_tunnel(in_str('tunnel_id', true, 24));
-	if($t['status'] !== 'active') { fail(409, 'tunnel_blocked', 'This tunnel is blocked.'); }
+	$t = null; $target = null;
+	if($mode === 3) {
+		$target = c64o_target_in();
+	} else {
+		$t = c64o_find_tunnel(in_str('tunnel_id', true, 24));
+		if($t['status'] !== 'active') { fail(409, 'tunnel_blocked', 'This tunnel is blocked.'); }
+	}
 	$q = c64o_quota($u, $CLASS);
 	if($q['domains']['used'] >= $q['domains']['limit']) { fail(403, 'limit_reached', 'CDN domain limit of your plan is reached (old and new CDN together).'); }
 	if(c64o_over_traffic($q)) { fail(403, 'traffic_limit_reached', 'Your monthly CDN traffic is used up.'); }
@@ -275,18 +390,27 @@ route('POST', '/cdn64o/hosts', function() {
 	if(q1("SELECT id FROM cdn_domains WHERE domainid = :d", array('d' => $d['id'])) !== null) { fail(409, 'old_cdn_active', 'This domain is in the old CDN. Remove it there first.'); }
 	if(q1("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND type = 'CNAME' AND deactivated = 0", array('s' => $d['id'], 'p' => $p)) !== null) { fail(409, 'cname_exists', 'The name has a CNAME record. Remove it first.'); }
 	if(q1("SELECT id FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND (failover = 1 OR (failover_policy != '0' AND deactivated = 1)) LIMIT 1", array('s' => $d['id'], 'p' => $p)) !== null) { fail(409, 'failover_active', 'DNS failover is active for this name.'); }
+	if($mode === 3 AND $target['source'] === 'records') { // Ziel = die bisherigen Eintraege des Namens: es muss einen oeffentlichen geben
+		$ok = false;
+		foreach(qa("SELECT content FROM subdomain_records WHERE subdomain_id = :s AND praefix = :p AND type IN ('A','AAAA') AND deactivated = 0 AND cdn_tmp = 0", array('s' => $d['id'], 'p' => $p)) as $r) {
+			if(c64o_public_ip($r['content'])) { $ok = true; }
+		}
+		if(!$ok) { fail(422, 'no_target_records', 'The name has no public A/AAAA record to use as target. Set a fixed target instead.', array('field' => 'source')); }
+	}
 	q("INSERT INTO cdn64o_hosts (userid, fqdn, subdomain_id, praefix, wildcard, mode, status, created_via) VALUES (:u, :f, :s, :p, :w, :m, 'pending', :v)",
 		array('u' => $u, 'f' => $fqdn, 's' => $d['id'], 'p' => $p, 'w' => (int)$d['wildcard'], 'm' => $mode, 'v' => in_str('via', false, 8, 'node') === 'web' ? 'web' : 'node'));
 	$h = q1("SELECT * FROM cdn64o_hosts WHERE fqdn = :f", array('f' => $fqdn));
-	q("INSERT INTO cdn64o_host_tunnels (host_id, tunnel_id) VALUES (:h, :t)", array('h' => $h['id'], 't' => $t['id']));
+	if($t !== null) { q("INSERT INTO cdn64o_host_tunnels (host_id, tunnel_id) VALUES (:h, :t)", array('h' => $h['id'], 't' => $t['id'])); }
+	if($target !== null) { c64o_target_save((int)$h['id'], $target); }
 	if(!c64o_dns_on($h, $d)) {
 		c64o_dns_off($h);
 		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
+		q("DELETE FROM cdn64o_targets WHERE host_id = :h", array('h' => $h['id']));
 		q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
 		fail(502, 'dns_update_failed', 'The DNS update failed. Nothing was changed, try again later.');
 	}
 	q("UPDATE cdn64o_hosts set status = 'active' WHERE id = :h", array('h' => $h['id']));
-	c64o_event((int)$h['id'], $u, 'enabled', "mode $mode, tunnel " . $t['id']);
+	c64o_event((int)$h['id'], $u, 'enabled', "mode $mode" . ($t !== null ? ", tunnel " . $t['id'] : ", target " . ($target['target'] ?: 'records')));
 	add_log($pdo, $u, $d['id'], "CDN64 online", "CDN64 online fuer $fqdn eingeschaltet.");
 	ok(c64o_host_out(c64o_find_host((string)$h['id'])), 201);
 });
@@ -302,6 +426,38 @@ route('GET', '/cdn64o/stats', function() {
 			array('u' => uid(), 'd' => date('Y-m-d', strtotime('-' . ($days - 1) . ' days'))))));
 });
 
+/** PUT /cdn64o/hosts/{id}/target {source, target, port, scheme, verify_tls, prefer_ipv6, frontend, cache_mb, cache_minutes}: nur Modus 3. */
+route('PUT', '/cdn64o/hosts/{id}/target', function($p) {
+	$h = c64o_find_host($p['id']);
+	if((int)$h['mode'] !== 3) { fail(409, 'not_mode_3', 'Only names in mode 3 have a target.'); }
+	$old = c64o_target_row((int)$h['id']);
+	$t = c64o_target_in($old);
+	if($t['source'] === 'records' AND empty(c64o_target_records((int)$h['id']))) { fail(422, 'no_target_records', 'The name has no public A/AAAA record to use as target. Set a fixed target instead.', array('field' => 'source')); }
+	c64o_target_save((int)$h['id'], $t);
+	c64o_event((int)$h['id'], uid(), 'target', $t['scheme'] . '://' . ($t['target'] ?: 'records') . ':' . $t['port']);
+	ok(c64o_host_out(c64o_find_host((string)$h['id'])));
+});
+
+/** GET|PUT /cdn64o/hosts/{id}/acl {default: off|allow|deny, list: [IP oder Netz]} (alle Modi; Modus 1 nur nach IP). */
+route('GET', '/cdn64o/hosts/{id}/acl', function($p) { ok(c64o_acl_out(c64o_find_host($p['id']))); });
+route('PUT', '/cdn64o/hosts/{id}/acl', function($p) {
+	$h = c64o_find_host($p['id']);
+	$def = in_str('default', true, 5);
+	if(!in_array($def, array('off', 'allow', 'deny'), true)) { fail(422, 'invalid_field', "Field 'default' must be off, allow or deny.", array('field' => 'default')); }
+	$list = in_list('list') ?? array();
+	if(count($list) > C64O_ACL_MAX) { fail(422, 'acl_too_long', 'At most ' . C64O_ACL_MAX . ' entries.', array('field' => 'list')); }
+	$clean = array();
+	foreach($list as $v) {
+		if(($c = c64o_cidr((string)$v)) === null) { fail(422, 'invalid_field', "Entry '$v' is not an IP address or network.", array('field' => 'list')); }
+		$clean[$c] = true;
+	}
+	q("UPDATE cdn64o_hosts set acl_default = :d WHERE id = :h", array('d' => $def === 'off' ? '' : $def, 'h' => $h['id']));
+	q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
+	foreach(array_keys($clean) as $c) { q("INSERT INTO cdn64o_acl (host_id, cidr) VALUES (:h, :c)", array('h' => $h['id'], 'c' => $c)); }
+	c64o_event((int)$h['id'], uid(), 'acl', $def . ', ' . count($clean) . ' entries');
+	ok(c64o_acl_out(c64o_find_host((string)$h['id'])));
+});
+
 route('GET', '/cdn64o/hosts/{id}/events', function($p) {
 	$h = c64o_find_host($p['id']);
 	ok(array_map(fn($e) => array('time' => iso($e['time']), 'kind' => $e['kind'], 'message' => $e['message']),
@@ -313,6 +469,7 @@ route('PATCH', '/cdn64o/hosts/{id}', function($p) {
 	$h = c64o_find_host($p['id']);
 	if(($m = in_int('mode', false, 1, 3)) !== null) {
 		if(!in_array($m, C64O_MODES, true)) { fail(422, 'mode_not_available', "Mode $m is not available yet.", array('field' => 'mode')); }
+		if(($m === 3) !== ((int)$h['mode'] === 3)) { fail(422, 'mode_change_not_possible', 'Mode 3 (direct) and modes 1/2 (tunnel) cannot be switched; switch the name off and on again.', array('field' => 'mode')); }
 		q("UPDATE cdn64o_hosts set mode = :m WHERE id = :h", array('m' => $m, 'h' => $h['id']));
 	}
 	if(($list = in_list('tunnels')) !== null) {
@@ -334,6 +491,8 @@ route('DELETE', '/cdn64o/hosts/{id}', function($p) {
 	q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
 	q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
 	q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
+	q("DELETE FROM cdn64o_targets WHERE host_id = :h", array('h' => $h['id']));
+	q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
 	c64o_event((int)$h['id'], uid(), 'disabled');
 	add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . " ausgeschaltet.");
 	no_content();
@@ -372,9 +531,14 @@ route('GET', '/cdn64o/edge/config', function() {
 	$ht = array();
 	foreach(qa("SELECT host_id, tunnel_id FROM cdn64o_host_tunnels ORDER BY host_id, priority, tunnel_id") as $r) { $ht[(int)$r['host_id']][] = $r['tunnel_id']; }
 	$hosts = array(); $users = array();
-	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
-		$hosts[] = array('id' => (int)$h['id'], 'name' => $h['fqdn'], 'wildcard' => (int)$h['wildcard'] === 1, 'mode' => (int)$h['mode'], 'userid' => (int)$h['userid'],
+	$acl = array();
+	foreach(qa("SELECT host_id, cidr FROM cdn64o_acl ORDER BY id") as $r) { $acl[(int)$r['host_id']][] = $r['cidr']; }
+	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason, acl_default FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
+		$x = array('id' => (int)$h['id'], 'name' => $h['fqdn'], 'wildcard' => (int)$h['wildcard'] === 1, 'mode' => (int)$h['mode'], 'userid' => (int)$h['userid'],
 			'tunnels' => $ht[(int)$h['id']] ?? array(), 'blocked' => $h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '');
+		if((int)$h['mode'] === 3) { $x['target'] = c64o_target_edge((int)$h['id']); }
+		if($h['acl_default'] !== '') { $x['acl'] = array('default' => $h['acl_default'], 'list' => $acl[(int)$h['id']] ?? array()); }
+		$hosts[] = $x;
 		$users[(int)$h['userid']] = true;
 	}
 	$bw = array();

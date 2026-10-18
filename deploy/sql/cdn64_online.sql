@@ -125,3 +125,31 @@ ALTER TABLE `cdn64o_traffic` ADD COLUMN IF NOT EXISTS `requests` bigint(20) NOT 
 -- entfernt; back_since = seit wann er nach einem Ausfall wieder da ist (Wiedereintrag nach 30 s).
 ALTER TABLE `cdn64o_edges` ADD COLUMN IF NOT EXISTS `withdrawn` tinyint(1) NOT NULL DEFAULT 0 AFTER `disabled`;
 ALTER TABLE `cdn64o_edges` ADD COLUMN IF NOT EXISTS `back_since` datetime DEFAULT NULL AFTER `withdrawn`;
+
+-- T7 (Modus 3, direkt zum Ziel): Ziel je Name. source = records (die deaktivierten A/AAAA des Namens, DynDNS
+-- aktualisiert sie weiter) oder fixed (target = IP oder Name). frontend: 1 nur HTTP, 2 HTTPS mit Umleitung, 3 nur HTTPS.
+CREATE TABLE IF NOT EXISTS `cdn64o_targets` (
+  `host_id` int(11) NOT NULL,
+  `source` varchar(8) NOT NULL DEFAULT 'records',
+  `target` varchar(253) NOT NULL DEFAULT '',
+  `port` int(5) NOT NULL DEFAULT 443,
+  `scheme` varchar(5) NOT NULL DEFAULT 'https',
+  `verify_tls` tinyint(1) NOT NULL DEFAULT 0,
+  `prefer_ipv6` tinyint(1) NOT NULL DEFAULT 1,
+  `frontend` tinyint(1) NOT NULL DEFAULT 2,
+  `cache_mb` int(11) NOT NULL DEFAULT 0,
+  `cache_minutes` int(11) NOT NULL DEFAULT 10,
+  PRIMARY KEY (`host_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- T7: Erlauben-/Sperrliste je Name (alle Modi auf den Servern). acl_default: '' aus, allow = alle ausser der Liste,
+-- deny = nur die Liste.
+ALTER TABLE `cdn64o_hosts` ADD COLUMN IF NOT EXISTS `acl_default` varchar(5) NOT NULL DEFAULT '' AFTER `blocked_reason`;
+CREATE TABLE IF NOT EXISTS `cdn64o_acl` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `host_id` int(11) NOT NULL,
+  `cidr` varchar(64) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `host_cidr` (`host_id`, `cidr`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
