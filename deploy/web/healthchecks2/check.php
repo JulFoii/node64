@@ -52,7 +52,7 @@ if ($c['execution'] === 'both') {
 		<h4 class="mb-0"><?php echo hc2_h($c['name']); ?></h4>
 		<?php echo hc2_state_badge($state); echo hc2_exec_badge($c, $nodes); ?>
 		<span class="badge badge-light"><?php echo hc2_h(hc2_types()[$c['type']] ?? $c['type']); ?></span>
-		<?php if (in_array($c['type'], array('http', 'keyword'), true)) { echo hc2_cert_badge(hc2_cert_until(array_merge(array($c['last_message']), array_column($sources, 'last_message')))); } ?>
+		<?php if (in_array($c['type'], array('http', 'keyword', 'json'), true)) { echo hc2_cert_badge(hc2_cert_until(array_merge(array($c['last_message']), array_column($sources, 'last_message')))); } ?>
 		<?php if ((int)$c['critical']) { echo '<span class="badge badge-danger">kritisch</span>'; } foreach (explode(',', $c['tags']) as $t) { if ($t !== '') { echo '<span class="badge badge-pill badge-secondary">' . hc2_h($t) . '</span>'; } } ?>
 		<form method="post" class="ml-auto d-inline"><?php echo hc2_csrf_field(); ?>
 			<a class="btn btn-sm btn-outline-secondary" href="<?php echo HC2_BASE; ?>/edit.php?token=<?php echo hc2_h($T); ?>"><i class="fa-solid fa-pen"></i> Bearbeiten</a>
@@ -77,7 +77,7 @@ if ($c['execution'] === 'both') {
 			<div class="card shadow-sm mb-3">
 				<div class="card-header p-2"><i class="fa-solid fa-list"></i> Ereignisse</div>
 				<div class="table-responsive"><table class="table table-sm mb-0">
-					<?php $httpCol = in_array($c['type'], array('http', 'keyword'), true); ?>
+					<?php $httpCol = in_array($c['type'], array('http', 'keyword', 'json'), true); ?>
 					<thead><tr><th>Zeit</th><th>Messstelle</th><th>Ereignis</th><th>Grund</th><?php echo $httpCol ? '<th>HTTP</th>' : ''; ?><th>Details</th><th>Dauer</th></tr></thead><tbody>
 					<?php if (!$events) { echo '<tr><td colspan="' . ($httpCol ? 7 : 6) . '" class="text-muted">Noch keine Ereignisse.</td></tr>'; } ?>
 					<?php foreach ($events as $e) { $kinds = array('down' => array('Gestört', 'danger'), 'up' => array('Wieder OK', 'success'), 'degraded' => array('Teilweise gestört', 'warning'), 'degraded_end' => array('Wieder vollständig OK', 'success'), 'flapping_start' => array('Instabil', 'warning'), 'flapping_end' => array('Stabil', 'success'), 'reminder' => array('Erinnerung', 'secondary')); $k = $kinds[$e['kind']] ?? array($e['kind'], 'secondary'); ?>

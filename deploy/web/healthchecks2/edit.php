@@ -17,7 +17,8 @@ $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60,
 	'tags' => '', 'group_name' => '', 'description' => '', 'parent_token' => '', 'channels' => array(), 'repeat_minutes' => 0, 'notify_down' => 1, 'notify_up' => 1, 'notify_degraded' => 0, 'critical' => 0, 'invert' => 0, 'paused' => 0,
 	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'nodes' => isset($_GET['node']) ? array((string)$_GET['node']) : array_slice(array_keys($nodes), 0, 1), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
 	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0, 'cert_min_days' => 14,
-	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '');
+	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '',
+	'json_rules' => '', 'json_any' => 0, 'dns_record_type' => 'A', 'dns_resolver' => 'system', 'dns_server' => '', 'dns_expect' => 'any', 'dns_values' => '', 'dns_dnssec' => 0, 'dns_min_ttl' => 0);
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
 $src = $old ?: $cloneOf;
 if ($src) {
@@ -31,13 +32,15 @@ if ($src) {
 		elseif ($k === 'follow_redirects') { $f['follow_redirects'] = $v ? 1 : 0; }
 		elseif ($k === 'expect' && $src['type'] === 'port') { $f['expect'] = $v; }
 		elseif ($k === 'host' && $src['type'] === 'docker') { $f['docker_host'] = $v; }
+		elseif ($k === 'json_rules' && is_array($v)) { $f['json_rules'] = hc2_json_rules_text($v); }
+		elseif ($src['type'] === 'dns' && in_array($k, array('record_type', 'resolver', 'server', 'expect', 'values', 'dnssec', 'min_ttl'), true)) { $f['dns_' . ($k === 'min_ttl' ? 'min_ttl' : $k)] = $k === 'values' ? implode("\n", (array)$v) : (is_bool($v) ? ($v ? 1 : 0) : $v); }
 		else { $f[$k] = is_bool($v) ? ($v ? 1 : 0) : $v; }
 	}
 	if ($cloneOf && !$old) { $f['name'] .= ' (Kopie)'; }
 }
 if (hc2_is_post()) {
 	if (!hc2_csrf_ok()) { $errors[] = 'Ungültige Anfrage, bitte Seite neu laden.'; }
-	foreach ($f as $k => $v) { if (array_key_exists($k, $_POST)) { $f[$k] = $_POST[$k]; } elseif (in_array($k, array('notify_down','notify_up','notify_degraded','critical','invert','paused','follow_redirects','keyword_absent','insecure_tls','tls','skip_chain','skip_hostname'), true)) { $f[$k] = 0; } }
+	foreach ($f as $k => $v) { if (array_key_exists($k, $_POST)) { $f[$k] = $_POST[$k]; } elseif (in_array($k, array('notify_down','notify_up','notify_degraded','critical','invert','paused','follow_redirects','keyword_absent','insecure_tls','tls','skip_chain','skip_hostname','json_any','dns_dnssec'), true)) { $f[$k] = 0; } }
 	$f['channels'] = (array)($_POST['channels'] ?? array()); $f['locations'] = (array)($_POST['locations'] ?? array()); $f['nodes'] = (array)($_POST['nodes'] ?? array());
 	if (!$errors) {
 		$v = hc2_validate_check(array_merge($f, array('follow_redirects_present' => 1)), $uid, $old);
@@ -85,8 +88,8 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 						</div>
 						<div class="form-group" data-not-type="push"><label>Ziel</label><input class="form-control" name="target" id="target" value="<?php echo $val('target'); ?>" maxlength="500" placeholder="https://example.com/  ·  host"><small class="form-text text-muted" id="target_hint"></small></div>
 						<div class="alert alert-info small" data-type="push">Ein Push-Check wartet auf regelmäßige Meldungen deines Systems (Cronjob, Backup, Skript). Die Push-URL steht nach dem Anlegen auf der Detailseite.</div>
-						<!-- HTTP / Keyword -->
-						<div data-type="http keyword">
+						<!-- HTTP / Keyword / JSON -->
+						<div data-type="http keyword json">
 							<div class="form-row">
 								<div class="form-group col-md-3"><label>Methode</label><select class="custom-select" name="method"><?php foreach (array('GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS') as $m) { echo '<option' . $sel('method', $m) . '>' . $m . '</option>'; } ?></select></div>
 								<div class="form-group col-md-4"><label>Erlaubte Statuscodes</label><input class="form-control" name="accept_status" value="<?php echo $val('accept_status'); ?>" placeholder="200-299,301"></div>
@@ -95,6 +98,11 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="form-row" data-type="keyword">
 								<div class="form-group col-md-8"><label>Schlüsselwort</label><input class="form-control" name="keyword" value="<?php echo $val('keyword'); ?>"></div>
 								<div class="form-group col-md-4"><label>&nbsp;</label><div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="keyword_absent" name="keyword_absent" value="1"<?php echo $chk('keyword_absent'); ?>><label class="custom-control-label" for="keyword_absent">darf NICHT vorkommen</label></div></div>
+							</div>
+							<div class="form-row" data-type="json">
+								<div class="form-group col-12"><label>JSON-Bedingungen (eine je Zeile)</label><textarea class="form-control text-monospace" name="json_rules" rows="4" placeholder="status == ok&#10;queue &lt; 100&#10;version exists"><?php echo $val('json_rules'); ?></textarea>
+									<small class="form-text text-muted">Pfad Vergleich Wert, z. B. <code>status == ok</code>, <code>queue &lt; 100</code>, <code>items[0].up == true</code>, <code>tags contains web</code>, <code>version exists</code>, <code>name ~ ^web-[0-9]+$</code>. Vergleiche: == != &lt; &lt;= &gt; &gt;= contains !contains ~ (Regex) exists !exists. Der Wert der ersten Bedingung steht in der Meldung.</small>
+									<div class="custom-control custom-checkbox mt-1"><input class="custom-control-input" type="checkbox" id="json_any" name="json_any" value="1"<?php echo $chk('json_any'); ?>><label class="custom-control-label" for="json_any">Eine erfüllte Bedingung genügt (sonst müssen alle erfüllt sein)</label></div></div>
 							</div>
 							<a class="small" data-toggle="collapse" href="#httpmore">Erweitert: Auth, Header, Body, TLS</a>
 							<div class="collapse<?php echo ($f['basic_user'] || $f['headers'] || $f['body'] || $f['insecure_tls']) ? ' show' : ''; ?> mt-2" id="httpmore">
@@ -107,6 +115,21 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 								<div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="insecure_tls" name="insecure_tls" value="1"<?php echo $chk('insecure_tls'); ?>><label class="custom-control-label" for="insecure_tls">Zertifikatsfehler ignorieren</label></div>
 							</div>
 							<div class="form-row mt-2"><div class="form-group col-md-6"><label><i class="fa-solid fa-lock text-success"></i> Zertifikat: warnen unter</label><div class="input-group"><input class="form-control" type="number" name="cert_min_days" min="0" max="3650" value="<?php echo $val('cert_min_days'); ?>"><div class="input-group-append"><span class="input-group-text">Tagen</span></div></div><small class="form-text text-muted">HTTPS: gestört melden, wenn das Zertifikat in weniger Tagen abläuft (0 = aus). Das Ablaufdatum wird immer mitgelesen.</small></div></div>
+						</div>
+						<!-- DNS -->
+						<div data-type="dns">
+							<div class="form-row">
+								<div class="form-group col-md-3"><label>Eintragstyp</label><select class="custom-select" name="dns_record_type"><?php foreach (hc2_dns_types() as $t) { echo '<option' . $sel('dns_record_type', $t) . '>' . $t . '</option>'; } ?></select></div>
+								<div class="form-group col-md-5"><label>Fragen über</label><select class="custom-select" name="dns_resolver" id="dns_resolver"><?php foreach (hc2_dns_resolvers() as $k => $v) { echo '<option value="' . $k . '"' . $sel('dns_resolver', $k) . '>' . hc2_h($v) . '</option>'; } ?></select></div>
+								<div class="form-group col-md-4" id="dns_server_box"><label>DNS-Server</label><input class="form-control text-monospace" name="dns_server" value="<?php echo $val('dns_server'); ?>" placeholder="1.1.1.1"></div>
+							</div>
+							<div class="form-row">
+								<div class="form-group col-md-6"><label>Erwartung</label><select class="custom-select" name="dns_expect"><?php foreach (hc2_dns_expects() as $k => $v) { echo '<option value="' . $k . '"' . $sel('dns_expect', $k) . '>' . hc2_h($v) . '</option>'; } ?></select></div>
+								<div class="form-group col-md-6"><label>Mindest-TTL (s, 0 = egal)</label><input class="form-control" type="number" name="dns_min_ttl" value="<?php echo $val('dns_min_ttl'); ?>" min="0" max="604800"></div>
+								<div class="form-group col-12"><label>Werte (einer je Zeile)</label><textarea class="form-control text-monospace" name="dns_values" rows="2" placeholder="203.0.113.10"><?php echo $val('dns_values'); ?></textarea>
+									<small class="form-text text-muted">So wie im Eintrag: IP, Name, „10 mail.example.org“ (MX), Text (TXT). Bei Regex nur das Muster. Groß-/Kleinschreibung und Punkt am Ende spielen keine Rolle. Zuständige Nameserver umgehen Caches und zeigen Änderungen sofort.</small></div>
+								<div class="form-group col-12"><div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="dns_dnssec" name="dns_dnssec" value="1"<?php echo $chk('dns_dnssec'); ?>><label class="custom-control-label" for="dns_dnssec">Antwort muss per DNSSEC validiert sein</label></div></div>
+							</div>
 						</div>
 						<!-- ICMP -->
 						<div class="form-row" data-type="icmp">
@@ -219,15 +242,16 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 <?php include("../footer.php"); ?>
 <script>
 (function(){
-	var hints = {http:'Vollständige URL, z. B. https://example.com/status', keyword:'URL, deren Antwort das Schlüsselwort enthalten (oder nicht enthalten) soll', icmp:'Hostname oder IP-Adresse', tcp:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', port:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', cert:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', push:''};
+	var hints = {http:'Vollständige URL, z. B. https://example.com/status', keyword:'URL, deren Antwort das Schlüsselwort enthalten (oder nicht enthalten) soll', json:'URL, die JSON liefert, z. B. https://example.com/api/health', dns:'Abzufragender Name, z. B. home.example.org (bei PTR auch eine IP-Adresse)', icmp:'Hostname oder IP-Adresse', tcp:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', port:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', cert:'Hostname oder IP-Adresse, ohne Port (Port unten eintragen)', push:''};
 	function sync(){
 		var t = $('#type').val(), ex = $('#execution').val();
 		$('[data-type]').each(function(){ var ok = $(this).data('type').split(' ').indexOf(t) >= 0; $(this).toggle(ok); });
 		$('[data-not-type]').each(function(){ $(this).toggle($(this).data('not-type').split(' ').indexOf(t) < 0); });
 		$('#target_hint').text(hints[t] || '');
+		$('#dns_server_box').toggle($('#dns_resolver').val() === 'server');
 		$('#nodebox').toggle(ex !== 'online'); $('#locbox').toggle(ex !== 'local'); $('#policybox').toggle(ex === 'both');
 	}
-	$('#type, #execution').on('change', sync); sync();
+	$('#type, #execution, #dns_resolver').on('change', sync); sync();
 	// Tageskontingent: Verbrauch dieses Checks und des Accounts pro Tag hochrechnen (wie der hub zaehlt, ohne Pushes)
 	var $p = $('#hc2-proj');
 	function proj(){

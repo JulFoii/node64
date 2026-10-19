@@ -183,7 +183,7 @@ function hc2_locations(): array {
 // ---------------------------------------------------------------- Checks: Definitionen
 
 function hc2_types(): array {
-	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat', 'docker' => 'Docker-Container');
+	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'json' => 'JSON (API)', 'dns' => 'DNS', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat', 'docker' => 'Docker-Container');
 }
 function hc2_states(): array {
 	return array('up' => array('OK', 'success'), 'down' => array('Gestört', 'danger'), 'degraded' => array('Teilweise gestört', 'warning'), 'flapping' => array('Instabil', 'warning'),
@@ -204,7 +204,8 @@ function hc2_reason_text(?string $r): string {
 		'too_many_redirects' => 'Zu viele Weiterleitungen', 'banner_mismatch' => 'Banner passt nicht', 'latency_high' => 'Latenz zu hoch', 'no_address_for_family' => 'Keine Adresse für IP-Version',
 		'cert_hostname_mismatch' => 'Zertifikat passt nicht zum Namen', 'push_reported_down' => 'Push meldet Störung', 'container_missing' => 'Container fehlt',
 		'container_stopped' => 'Container gestoppt', 'container_paused' => 'Container pausiert', 'container_restarting' => 'Container startet neu',
-		'container_unhealthy' => 'Container ungesund', 'docker_unavailable' => 'Docker nicht erreichbar', 'dependency_down' => 'Abhängigkeit gestört', 'internal_error' => 'Interner Fehler');
+		'container_unhealthy' => 'Container ungesund', 'docker_unavailable' => 'Docker nicht erreichbar', 'dependency_down' => 'Abhängigkeit gestört', 'internal_error' => 'Interner Fehler',
+		'json_invalid' => 'Keine gültige JSON-Antwort', 'json_mismatch' => 'JSON-Bedingung nicht erfüllt', 'dns_mismatch' => 'DNS-Antwort passt nicht', 'dns_nxdomain' => 'Name existiert nicht', 'dnssec_failed' => 'DNSSEC nicht validiert');
 	return $m[$r ?? ''] ?? (string)$r;
 }
 
@@ -224,9 +225,10 @@ function hc2_target_badge(array $c): string {
 	$t = hc2_target_display($c);
 	$style = 'display:inline-flex;align-items:center;max-width:100%;padding:.2rem .55rem;border:1px solid #dee2e6;border-radius:50rem;background:#f8f9fa;font-weight:normal;font-size:.8rem';
 	if ($t === '') { return '<span class="badge" style="' . $style . '"><i class="fa-solid fa-circle-down text-muted mr-1"></i> Push / Heartbeat</span>'; }
-	$icon = array('tcp' => 'fa-plug', 'port' => 'fa-plug', 'icmp' => 'fa-tower-broadcast', 'cert' => 'fa-shield-halved', 'docker' => 'fa-box')[$c['type']] ?? 'fa-bullseye';
+	$icon = array('tcp' => 'fa-plug', 'port' => 'fa-plug', 'icmp' => 'fa-tower-broadcast', 'cert' => 'fa-shield-halved', 'docker' => 'fa-box', 'dns' => 'fa-signs-post')[$c['type']] ?? 'fa-bullseye';
 	$cls = 'text-muted'; $short = $t;
-	if (in_array($c['type'], array('http', 'keyword'), true)) {
+	if ($c['type'] === 'dns') { $short = strtoupper((string)(hc2_check_params($c)['record_type'] ?? 'A')) . ' ' . rtrim($t, '.'); }
+	if (in_array($c['type'], array('http', 'keyword', 'json'), true)) {
 		$secure = stripos($t, 'http://') !== 0;
 		$icon = $secure ? 'fa-lock' : 'fa-lock-open'; $cls = $secure ? 'text-success' : 'text-warning';
 		$short = rtrim(preg_replace('#^[a-z]+://#i', '', $t), '/');
@@ -303,7 +305,8 @@ function hc2_private_target(string $type, string $target): bool {
 	$t = trim($target);
 	if ($t === '' || $type === 'push') { return false; }
 	$host = $t;
-	if (in_array($type, array('http', 'keyword'), true)) { $host = (string)parse_url($t, PHP_URL_HOST); }
+	if (in_array($type, array('http', 'keyword', 'json'), true)) { $host = (string)parse_url($t, PHP_URL_HOST); }
+	elseif ($type === 'dns') { $host = rtrim($t, '.'); }
 	elseif (preg_match('/^\[([^\]]+)\](?::\d+)?$/', $t, $m)) { $host = $m[1]; }
 	elseif (substr_count($t, ':') === 1) { $host = explode(':', $t)[0]; }
 	$host = strtolower(trim($host, '[]'));
@@ -314,6 +317,73 @@ function hc2_private_target(string $type, string $target): bool {
 	}
 	if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
 		return $host === '::1' || preg_match('/^f[cd][0-9a-f]{2}:/', $host) || preg_match('/^fe[89ab][0-9a-f]:/', $host);
+	}
+	return false;
+}
+
+/** JSON-Check: Vergleiche (wie checks.JSONOps in der Node) und Textform "Pfad Vergleich Wert" je Zeile. */
+function hc2_json_ops(): array {
+	return array('==' => 'eq', '=' => 'eq', '!=' => 'ne', '<' => 'lt', '<=' => 'le', '>' => 'gt', '>=' => 'ge', 'contains' => 'contains', '!contains' => 'not_contains', '~' => 'regex', 'exists' => 'exists', '!exists' => 'not_exists');
+}
+/** Bedingungen aus Text (Formular) oder Liste (API) lesen und pruefen; liefert array(rules, errors). */
+function hc2_json_rules($in): array {
+	$rules = array(); $err = array(); $ops = hc2_json_ops(); $valid = array_unique(array_values($ops));
+	if (is_array($in)) {
+		foreach ($in as $r) { if (is_array($r)) { $rules[] = array('path' => trim((string)($r['path'] ?? '')), 'op' => (string)($r['op'] ?? ''), 'value' => (string)($r['value'] ?? '')); } }
+	} else {
+		foreach (preg_split('/\r?\n/', (string)$in) as $n => $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#') { continue; }
+			$w = preg_split('/\s+/', $line);
+			if (count($w) < 2 || !isset($ops[$w[1]])) { $err[] = 'JSON-Bedingung Zeile ' . ($n + 1) . ': erwartet „Pfad Vergleich Wert“, z. B. status == ok.'; continue; }
+			$op = $ops[$w[1]]; $val = '';
+			if ($op !== 'exists' && $op !== 'not_exists') {
+				$val = trim(substr($line, strpos($line, $w[1], strlen($w[0])) + strlen($w[1])));
+				if (strlen($val) >= 2 && $val[0] === '"' && substr($val, -1) === '"') { $val = substr($val, 1, -1); }
+			} elseif (count($w) > 2) { $err[] = 'JSON-Bedingung Zeile ' . ($n + 1) . ': ' . $w[1] . ' hat keinen Wert.'; continue; }
+			$rules[] = array('path' => $w[0], 'op' => $op, 'value' => $val);
+		}
+	}
+	if (!$rules && !$err) { $err[] = 'Mindestens eine JSON-Bedingung angeben, z. B. status == ok.'; }
+	if (count($rules) > 10) { $err[] = 'Höchstens 10 JSON-Bedingungen.'; }
+	foreach ($rules as $i => $r) {
+		$p = preg_replace('/^\$\.?/', '', $r['path']);
+		if ($p !== '' && !preg_match('/^[^.\[\]\s]+(\[\d+\])*(\.[^.\[\]\s]+(\[\d+\])*)*$/', $p)) { $err[] = 'JSON-Bedingung ' . ($i + 1) . ': Pfad ungültig (z. B. data.items[0].status).'; }
+		if (!in_array($r['op'], $valid, true)) { $err[] = 'JSON-Bedingung ' . ($i + 1) . ': unbekannter Vergleich.'; }
+		if (in_array($r['op'], array('lt', 'le', 'gt', 'ge'), true) && !is_numeric(trim($r['value']))) { $err[] = 'JSON-Bedingung ' . ($i + 1) . ': < und > brauchen eine Zahl.'; }
+		if ($r['op'] === 'regex' && @preg_match('~' . str_replace('~', '\~', $r['value']) . '~', '') === false) { $err[] = 'JSON-Bedingung ' . ($i + 1) . ': regulärer Ausdruck ungültig.'; }
+		if ($r['op'] === 'exists' || $r['op'] === 'not_exists') { unset($rules[$i]['value']); }
+	}
+	return array(array_values($rules), $err);
+}
+/** Textform der Bedingungen fuer das Formular. */
+function hc2_json_rules_text(array $rules): string {
+	$sym = array('eq' => '==', 'ne' => '!=', 'lt' => '<', 'le' => '<=', 'gt' => '>', 'ge' => '>=', 'contains' => 'contains', 'not_contains' => '!contains', 'regex' => '~', 'exists' => 'exists', 'not_exists' => '!exists');
+	$l = array();
+	foreach ($rules as $r) { if (!is_array($r)) { continue; } $op = (string)($r['op'] ?? ''); $l[] = trim(($r['path'] ?? '') . ' ' . ($sym[$op] ?? $op) . (in_array($op, array('exists', 'not_exists'), true) ? '' : ' ' . ($r['value'] ?? ''))); }
+	return implode("\n", $l);
+}
+/** DNS-Check: Eintragstypen, Resolver-Arten und Erwartungen (wie in der Node). */
+function hc2_dns_types(): array { return array('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'PTR', 'SOA'); }
+function hc2_dns_resolvers(): array { return array('system' => 'Standard-Resolver', 'server' => 'Bestimmter Server', 'authoritative' => 'Zuständige Nameserver der Zone'); }
+function hc2_dns_expects(): array {
+	return array('any' => 'Irgendeine Antwort', 'contains' => 'Antwort enthält die Werte', 'equals' => 'Antwort ist genau die Werte', 'regex' => 'Ein Eintrag passt zum Muster (Regex)',
+		'nxdomain' => 'Name existiert nicht (NXDOMAIN)', 'public_ip' => 'Zeigt auf die öffentliche IP der Node (nur lokal)');
+}
+/** DNS-Server als host:port; '' bei ungueltiger Angabe. */
+function hc2_dns_server(string $s): string {
+	$s = trim($s);
+	if (preg_match('/^\[([0-9a-fA-F:.]+)\]:(\d+)$/', $s, $m) && filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && (int)$m[2] >= 1 && (int)$m[2] <= 65535) { return '[' . $m[1] . ']:' . $m[2]; }
+	if (preg_match('/^([0-9.]+):(\d+)$/', $s, $m) && filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && (int)$m[2] >= 1 && (int)$m[2] <= 65535) { return $m[1] . ':' . $m[2]; }
+	if (filter_var(trim($s, '[]'), FILTER_VALIDATE_IP)) { return trim($s, '[]'); }
+	return '';
+}
+/** DNS-Check, der nur auf der Node laufen kann (DNS-Server im Heimnetz, oeffentliche IP der Node). */
+function hc2_dns_needs_node(array $p): bool {
+	if (($p['expect'] ?? '') === 'public_ip') { return true; }
+	if (($p['resolver'] ?? '') === 'server') {
+		$ip = trim(preg_replace('/:\d+$/', '', preg_replace('/^\[(.*)\](:\d+)?$/', '$1', (string)($p['server'] ?? ''))), '[]');
+		return $ip !== '' && hc2_private_target('icmp', $ip);
 	}
 	return false;
 }
@@ -333,7 +403,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	$num = function($k, $def, $min, $max) use ($in) { $v = $in[$k] ?? ''; if ($v === '' || $v === null) { return $def; } $v = (int)$v; return max($min, min($max, $v)); };
 	$flag = function($k) use ($in) { return !empty($in[$k]) && $in[$k] !== '0'; };
 	switch ($type) {
-		case 'http': case 'keyword':
+		case 'http': case 'keyword': case 'json':
 			if (!preg_match('#^https?://[^\s/]+#i', $target) || parse_url($target, PHP_URL_HOST) === null) { $err[] = 'Ziel muss eine http(s)-URL sein.'; }
 			$m = strtoupper((string)($in['method'] ?? 'GET')); if (!in_array($m, array('GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'), true)) { $m = 'GET'; }
 			if ($m !== 'GET') { $p['method'] = $m; }
@@ -349,6 +419,33 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if (($b = (string)($in['body'] ?? '')) !== '') { $p['body'] = $b; }
 			if ($flag('insecure_tls')) { $p['insecure_tls'] = true; }
 			if (($cd = $num('cert_min_days', 0, 0, 3650)) > 0) { $p['cert_min_days'] = $cd; }
+			if ($type === 'json') {
+				[$rules, $jerr] = hc2_json_rules($in['json_rules'] ?? '');
+				$err = array_merge($err, $jerr); $p['json_rules'] = $rules;
+				if ($flag('json_any')) { $p['json_any'] = true; }
+			}
+			break;
+		case 'dns':
+			$target = rtrim(strtolower($target), '.');
+			$rt = strtoupper(trim((string)($in['dns_record_type'] ?? 'A'))); if (!in_array($rt, hc2_dns_types(), true)) { $err[] = 'Eintragstyp ungültig.'; $rt = 'A'; }
+			$nameOk = preg_match('/^(\*\.)?([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$/', $target) || ($rt === 'PTR' && filter_var($target, FILTER_VALIDATE_IP));
+			if ($target === '' || !$nameOk) { $err[] = 'Ziel muss ein Domainname sein (bei PTR auch eine IP-Adresse).'; }
+			$p['record_type'] = $rt;
+			$res = (string)($in['dns_resolver'] ?? 'system'); if (!isset(hc2_dns_resolvers()[$res])) { $res = 'system'; }
+			$p['resolver'] = $res;
+			if ($res === 'server') { $sv = hc2_dns_server((string)($in['dns_server'] ?? '')); if ($sv === '') { $err[] = 'DNS-Server muss eine IP-Adresse sein (optional mit Port).'; } $p['server'] = $sv; }
+			$ex = (string)($in['dns_expect'] ?? 'any'); if (!isset(hc2_dns_expects()[$ex])) { $ex = 'any'; }
+			$p['expect'] = $ex;
+			$vals = $in['dns_values'] ?? array(); if (!is_array($vals)) { $vals = preg_split('/\r?\n/', (string)$vals); }
+			$vals = array_values(array_filter(array_map(function($v) { return trim((string)$v); }, $vals), 'strlen'));
+			if (in_array($ex, array('contains', 'equals', 'regex'), true)) {
+				if (!$vals) { $err[] = 'Für diese Erwartung mindestens einen Wert angeben.'; }
+				if ($ex === 'regex' && $vals && @preg_match('~' . str_replace('~', '\~', $vals[0]) . '~', '') === false) { $err[] = 'Regulärer Ausdruck ungültig.'; }
+				$p['values'] = $ex === 'regex' ? array_slice($vals, 0, 1) : array_slice($vals, 0, 50);
+			}
+			if ($ex === 'public_ip' && $rt !== 'A' && $rt !== 'AAAA') { $err[] = '„Öffentliche IP“ geht nur mit A oder AAAA.'; }
+			if ($flag('dns_dnssec')) { $p['dnssec'] = true; }
+			if (($mt = $num('dns_min_ttl', 0, 0, 604800)) > 0) { $p['min_ttl'] = $mt; }
 			break;
 		case 'icmp':
 			if ($target === '') { $err[] = 'Ziel (Host oder IP) fehlt.'; }
@@ -425,6 +522,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	if ($type === 'docker' && $execution !== 'local') { $err[] = 'Docker-Checks laufen nur lokal auf einer Node und sind nicht umhängbar.'; }
 	if ($execution !== 'local' && $type !== 'docker') {
 		if (hc2_private_target($type, $target)) { $err[] = 'Online-Checks können keine privaten Ziele prüfen (Heimnetz, localhost, .local). Dafür eine Node nutzen.'; }
+		if ($type === 'dns' && hc2_dns_needs_node($p)) { $err[] = 'Ein DNS-Server im Heimnetz und „zeigt auf die öffentliche IP“ gehen nur lokal auf einer Node.'; }
 		$used = hc2_online_used($userid, $old['token'] ?? '');
 		if ($acc['healthcheck_limit'] > 0 && $used + count($sel) > $acc['healthcheck_limit']) {
 			$err[] = 'Online-Limit erreicht: ' . $used . ' von ' . $acc['healthcheck_limit'] . ' Messstellen belegt, benötigt werden ' . count($sel) . ' weitere. Standorte reduzieren oder lokal auf einer Node messen.';

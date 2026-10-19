@@ -15645,6 +15645,8 @@
             "enum": [
               "http",
               "keyword",
+              "json",
+              "dns",
               "icmp",
               "tcp",
               "port",
@@ -15655,7 +15657,7 @@
           },
           "target": {
             "type": "string",
-            "description": "Ziel: URL (http/keyword), Host/IP (icmp), host oder host:port (tcp/port/cert); leer bei push",
+            "description": "Ziel: URL (http/keyword/json), Name (dns, bei PTR auch IP), Host/IP (icmp), host oder host:port (tcp/port/cert); leer bei push",
             "example": "https://example.com/"
           },
           "params": {
@@ -15735,7 +15737,7 @@
               },
               "expect": {
                 "type": "string",
-                "description": "tcp: erwarteter Antwortanfang; port: open|closed"
+                "description": "tcp: erwarteter Antwortanfang; port: open|closed; dns: any, contains, equals, regex, nxdomain, public_ip (nur lokal)"
               },
               "tls": {
                 "type": "boolean",
@@ -15764,6 +15766,89 @@
               "grace_seconds": {
                 "type": "integer",
                 "description": "push: Kulanz"
+              },
+              "json_rules": {
+                "type": "array",
+                "description": "json: Bedingungen auf die JSON-Antwort (höchstens 10). Pfad z. B. data.items[0].status; op: eq, ne, lt, le, gt, ge, contains, not_contains, regex, exists, not_exists",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "ne",
+                        "lt",
+                        "le",
+                        "gt",
+                        "ge",
+                        "contains",
+                        "not_contains",
+                        "regex",
+                        "exists",
+                        "not_exists"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "op"
+                  ]
+                }
+              },
+              "json_any": {
+                "type": "boolean",
+                "description": "json: eine erfüllte Bedingung genügt (sonst alle)"
+              },
+              "record_type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "TXT",
+                  "NS",
+                  "SRV",
+                  "CAA",
+                  "PTR",
+                  "SOA"
+                ],
+                "description": "dns: Eintragstyp (Standard A)"
+              },
+              "resolver": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "server",
+                  "authoritative"
+                ],
+                "description": "dns: Standard-Resolver, bestimmter Server (server) oder zuständige Nameserver der Zone"
+              },
+              "server": {
+                "type": "string",
+                "description": "dns bei resolver=server: IP, optional mit Port (1.1.1.1, [2606:4700::1111]:53)"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "dns: erwartete Werte (contains/equals) bzw. ein Muster (regex)"
+              },
+              "dnssec": {
+                "type": "boolean",
+                "description": "dns: Antwort muss DNSSEC-validiert sein"
+              },
+              "min_ttl": {
+                "type": "integer",
+                "description": "dns: Mindest-TTL in Sekunden (0 = egal)"
               }
             },
             "description": "Typabhängige Parameter (Schlüssel wie in der Node)"
@@ -16103,6 +16188,8 @@
             "enum": [
               "http",
               "keyword",
+              "json",
+              "dns",
               "icmp",
               "tcp",
               "port",
@@ -16113,7 +16200,7 @@
           },
           "target": {
             "type": "string",
-            "description": "Ziel: URL (http/keyword), Host/IP (icmp), host oder host:port (tcp/port/cert); leer bei push",
+            "description": "Ziel: URL (http/keyword/json), Name (dns, bei PTR auch IP), Host/IP (icmp), host oder host:port (tcp/port/cert); leer bei push",
             "example": "https://example.com/"
           },
           "params": {
@@ -16193,7 +16280,7 @@
               },
               "expect": {
                 "type": "string",
-                "description": "tcp: erwarteter Antwortanfang; port: open|closed"
+                "description": "tcp: erwarteter Antwortanfang; port: open|closed; dns: any, contains, equals, regex, nxdomain, public_ip (nur lokal)"
               },
               "tls": {
                 "type": "boolean",
@@ -16222,6 +16309,89 @@
               "grace_seconds": {
                 "type": "integer",
                 "description": "push: Kulanz"
+              },
+              "json_rules": {
+                "type": "array",
+                "description": "json: Bedingungen auf die JSON-Antwort (höchstens 10). Pfad z. B. data.items[0].status; op: eq, ne, lt, le, gt, ge, contains, not_contains, regex, exists, not_exists",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "ne",
+                        "lt",
+                        "le",
+                        "gt",
+                        "ge",
+                        "contains",
+                        "not_contains",
+                        "regex",
+                        "exists",
+                        "not_exists"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "op"
+                  ]
+                }
+              },
+              "json_any": {
+                "type": "boolean",
+                "description": "json: eine erfüllte Bedingung genügt (sonst alle)"
+              },
+              "record_type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "TXT",
+                  "NS",
+                  "SRV",
+                  "CAA",
+                  "PTR",
+                  "SOA"
+                ],
+                "description": "dns: Eintragstyp (Standard A)"
+              },
+              "resolver": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "server",
+                  "authoritative"
+                ],
+                "description": "dns: Standard-Resolver, bestimmter Server (server) oder zuständige Nameserver der Zone"
+              },
+              "server": {
+                "type": "string",
+                "description": "dns bei resolver=server: IP, optional mit Port (1.1.1.1, [2606:4700::1111]:53)"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "dns: erwartete Werte (contains/equals) bzw. ein Muster (regex)"
+              },
+              "dnssec": {
+                "type": "boolean",
+                "description": "dns: Antwort muss DNSSEC-validiert sein"
+              },
+              "min_ttl": {
+                "type": "integer",
+                "description": "dns: Mindest-TTL in Sekunden (0 = egal)"
               }
             },
             "description": "Typabhängige Parameter (Schlüssel wie in der Node)"
