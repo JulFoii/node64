@@ -160,7 +160,7 @@ function split46(array $nets): array
 // ---------------------------------------------------------------
 // 1. Einzelne Quelllisten
 // ---------------------------------------------------------------
-$alle = [];
+$alle = []; $alle_notor = []; // Gesamtliste mit und ohne Tor
 $statement = $pdo->prepare("SELECT * FROM blocklisten WHERE disabled = 0");
 $statement->execute();
 foreach($statement->fetchAll(PDO::FETCH_ASSOC) as $bl)
@@ -171,14 +171,15 @@ foreach($statement->fetchAll(PDO::FETCH_ASSOC) as $bl)
 	[$nets, $bad, $bog] = net_clean($rows);
 	[$v4, $v6] = split46($nets);
 	foreach($nets as $n) { $alle[] = $n; }
+	if(!str_starts_with($bl["file_name"], "tor_")) { foreach($nets as $n) { $alle_notor[] = $n; } }
 	printf("%-22s Quelle %6d -> %6d Netze (v4 %6d, v6 %4d) | ungueltig %d, nicht routbar %d\n", $bl["name"], count($rows), count($nets), count($v4), count($v6), $bad, $bog);
 
 	$f = $bl["file_name"];
 	write_raw("$OUT/ipv64_blocklist_$f.txt", $nets);
 	write_raw("$OUT/ipv64_blocklist_v4_$f.txt", $v4);
 	write_raw("$OUT/ipv64_blocklist_v6_$f.txt", $v6);
-	write_mikrotik("$OUT/v64_mikrotik_v4_$f.rsc", $v4, 4);
-	write_mikrotik("$OUT/v64_mikrotik_v6_$f.rsc", $v6, 6);
+	write_mikrotik("$OUT/v64_mikrotik_v4_$f.rsc", $v4, 4, "IPv64-$f");
+	write_mikrotik("$OUT/v64_mikrotik_v6_$f.rsc", $v6, 6, "IPv64-$f");
 	if(!$dry AND !$extern) {
 		$st = $pdo->prepare("UPDATE blocklisten set ips = :ips WHERE id = :id");
 		$st->execute(['ips' => count($nets), 'id' => $bl["id"]]);
@@ -194,8 +195,18 @@ printf("%-22s %6d Netze (v4 %6d, v6 %4d)\n", "ALL", count($alle), count($v4), co
 write_raw("$OUT/ipv64_blocklist_all.txt", $alle);
 write_raw("$OUT/ipv64_blocklist_v4_all.txt", $v4);
 write_raw("$OUT/ipv64_blocklist_v6_all.txt", $v6);
-write_mikrotik("$OUT/v64_mikrotik_v4_all.rsc", $v4, 4);
-write_mikrotik("$OUT/v64_mikrotik_v6_all.rsc", $v6, 6);
+write_mikrotik("$OUT/v64_mikrotik_v4_all.rsc", $v4, 4, "IPv64-all");
+write_mikrotik("$OUT/v64_mikrotik_v6_all.rsc", $v6, 6, "IPv64-all");
+
+// Gesamtliste ohne Tor (wer nur Angreifer sperren will, nicht alle Tor-Nutzer)
+$alle_notor = net_merge($alle_notor);
+[$v4, $v6] = split46($alle_notor);
+printf("%-22s %6d Netze (v4 %6d, v6 %4d)\n", "ALL ohne Tor", count($alle_notor), count($v4), count($v6));
+write_raw("$OUT/ipv64_blocklist_all_notor.txt", $alle_notor);
+write_raw("$OUT/ipv64_blocklist_v4_all_notor.txt", $v4);
+write_raw("$OUT/ipv64_blocklist_v6_all_notor.txt", $v6);
+write_mikrotik("$OUT/v64_mikrotik_v4_all_notor.rsc", $v4, 4, "IPv64-all_notor");
+write_mikrotik("$OUT/v64_mikrotik_v6_all_notor.rsc", $v6, 6, "IPv64-all_notor");
 
 // ---------------------------------------------------------------
 // 3. Laender und Regionen
@@ -205,6 +216,8 @@ $regionen = [
 	"africa"        => ['DZ','AO','BJ','BW','BF','BI','CM','CV','CF','TD','KM','CG','CD','DJ','EG','GQ','ER','ET','GA','GM','GH','GN','GW','CI','KE','LS','LR','LY','MG','MW','ML','MR','MU','MA','MZ','NA','NE','NG','RW','ST','SN','SC','SL','SO','ZA','SS','SD','SZ','TZ','TG','TN','UG','ZM','ZW'],
 	"asia"          => ['AF','AM','AZ','BH','BD','BT','BN','KH','CN','GE','IN','ID','IR','IQ','IL','JP','JO','KZ','KW','KG','LA','LB','MY','MV','MN','MM','NP','KP','OM','PK','PS','PH','QA','SA','SG','KR','LK','SY','TW','TJ','TH','TL','TR','TM','AE','UZ','VN','YE','HK','MO'],
 	"north_america" => ['AG','BS','BB','BZ','CA','CR','CU','DM','DO','SV','GD','GT','HT','HN','JM','MX','NI','PA','KN','LC','VC','TT','US'],
+	"south_america" => ['AR','BO','BR','CL','CO','EC','GY','PY','PE','SR','UY','VE','GF','FK'],
+	"oceania"       => ['AU','FJ','KI','MH','FM','NR','NZ','PW','PG','WS','SB','TO','TV','VU','NC','PF','GU','AS','MP','CK','NU','TK','WF'],
 ];
 $region_nets = array_fill_keys(array_keys($regionen), []);
 

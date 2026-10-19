@@ -1,6 +1,9 @@
 <?php 
 include("header.php");
-
+// Anzahl und Stand einer Datei unter blocklists/ (Zeilen = Netze; Stand = letzte Aenderung der Datei)
+function bl_file_info(string $rel): array { $p = __DIR__ . '/blocklists/' . $rel; if(!is_file($p)) { return array(0, ''); } return array(count(file($p, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)), date('Y-m-d H:i:s', filemtime($p))); }
+// Status nach Alter: aelter als 2 Tage = veraltet
+function bl_status(string $updated): string { $old = $updated === '' || (time() - strtotime($updated)) > 2 * 86400; return '<span class="badge badge-' . ($old ? 'warning">Outdated' : 'success">Ok') . '</span>'; }
 ?>
 
  <div class="jumbotron jumbotron-fluid d-none d-xl-block p-3">
@@ -37,22 +40,22 @@ include("header.php");
 					<tr class="table-info">
 					<td><i class="fa-solid fa-crown text-warning"></i>
 					<td>v64 Blocker Blocklist
-					<td><span class="badge badge-warning">Comming Soon</span>
-					<td><span class="badge badge-dark">Comming Soon</span>
-					<td><span class="badge badge-dark">Comming Soon</span>
+					<td><span class="badge badge-warning">Coming soon</span>
+					<td><span class="badge badge-dark">Coming soon</span>
+					<td><span class="badge badge-dark">Coming soon</span>
 					</tr>
 					<?php 
 					$statement = $pdo->prepare("SELECT * FROM blocklisten");
 					$result = $statement->execute();
 					$blocklisten = $statement->fetchAll();
 					foreach($blocklisten as $blockliste)
-					{	$all_ips += $blockliste["ips"];
+					{
 					?>
 					<tr>
 						<td><i class="fa-solid fa-check-double"></i>
 						<td><?php echo $blockliste["name"];?>
 						<td><span class="badge badge-dark" title="<?php echo $blockliste["ips"];?>"><?php echo formatLargeNumber($blockliste["ips"]);?></span>
-						<td><span class="badge badge-success">Ok</span>
+						<td><?php echo bl_status((string)$blockliste["last_updated"]); ?>
 						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
 						<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_<?php echo $blockliste["file_name"];?>.txt" target="_blank" title="<?php echo $blockliste["name"];?> RAW Format">
 						<span class="badge badge-success">All</span></a>
@@ -66,20 +69,33 @@ include("header.php");
 					<?php
 					}
 					?>
+					<?php [$cnt, $upd] = bl_file_info('ipv64_blocklist_all.txt'); ?>
 					<tr class="table-info">
 						<td><i class="fa-solid fa-crown text-warning"></i>
-						<td>All IPs from all Lists
-						<td><span class="badge badge-dark" title="<?php echo $all_ips;?>"><?php echo formatLargeNumber($all_ips);?></span>
-						<td><span class="badge badge-success">Ok</span>
-						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
-						<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_all.txt" target="_blank" title="IPv64.net All Blocklist RAW Format">
+						<td>All lists combined <small>(includes Tor)</small>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
+						<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_all.txt" target="_blank" title="IPv64.net All lists combined (includes Tor) RAW Format">
 						<span class="badge badge-success">All</span></a>
-						<?php if($blockliste["db_name"] != "bl_sh_drop_v4" AND $blockliste["db_name"] != "bl_sh_drop_v6") { ?>
-						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v4_all.txt" target="_blank" title="IPv64.net All Blocklist only IPv4 RAW Format">
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v4_all.txt" target="_blank" title="IPv64.net All lists combined (includes Tor) only IPv4 RAW Format">
 						<span class="badge badge-dark">Only v4</span></a>
-						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v6_all.txt" target="_blank" title="IPv64.net All Blocklist only IPv6 RAW Format">
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v6_all.txt" target="_blank" title="IPv64.net All lists combined (includes Tor) only IPv6 RAW Format">
 						<span class="badge badge-secondary">Only v6</span></a>
-						<?php } ?>
+					</tr>
+					<?php [$cnt, $upd] = bl_file_info('ipv64_blocklist_all_notor.txt'); ?>
+					<tr class="table-info">
+						<td><i class="fa-solid fa-crown text-warning"></i>
+						<td>All lists without Tor
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
+						<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_all_notor.txt" target="_blank" title="IPv64.net All lists without Tor RAW Format">
+						<span class="badge badge-success">All</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v4_all_notor.txt" target="_blank" title="IPv64.net All lists without Tor only IPv4 RAW Format">
+						<span class="badge badge-dark">Only v4</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v6_all_notor.txt" target="_blank" title="IPv64.net All lists without Tor only IPv6 RAW Format">
+						<span class="badge badge-secondary">Only v6</span></a>
 					</tr>
 					<tr class="table-secondary">
 					<td><i class="fa-solid fa-globe"></i>
@@ -91,9 +107,10 @@ include("header.php");
 					<tr>
 						<td><i class="fa-solid fa-earth-europe"></i>
 						<td>Europe
-						<td><span class="badge badge-dark" title="">-/-</span>
-						<td><span class="badge badge-success">Ok</span>
-						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_europe.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
 						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_europe.txt" target="_blank" title="Europe Blocklist RAW Format">
 						<span class="badge badge-success">All</span></a>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_europe.txt" target="_blank" title="Europe Blocklist only IPv4 RAW Format">
@@ -104,9 +121,10 @@ include("header.php");
 					<tr>
 						<td><i class="fa-solid fa-earth-asia"></i>
 						<td>Asia
-						<td><span class="badge badge-dark" title="">-/-</span>
-						<td><span class="badge badge-success">Ok</span>
-						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_asia.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
 						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_asia.txt" target="_blank" title="Asia Blocklist RAW Format">
 						<span class="badge badge-success">All</span></a>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_asia.txt" target="_blank" title="Asia Blocklist only v4 RAW Format">
@@ -117,9 +135,10 @@ include("header.php");
 					<tr>
 						<td><i class="fa-solid fa-earth-africa"></i>
 						<td>Africa
-						<td><span class="badge badge-dark" title="">-/-</span>
-						<td><span class="badge badge-success">Ok</span>
-						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_africa.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
 						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_africa.txt" target="_blank" title="Africa Blocklist RAW Format">
 						<span class="badge badge-success">All</span></a>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_africa.txt" target="_blank" title="Africa Blocklist only IPv4 RAW Format">
@@ -130,14 +149,43 @@ include("header.php");
 					<tr>
 						<td><i class="fa-solid fa-earth-americas"></i>
 						<td>North America
-						<td><span class="badge badge-dark" title="">-/-</span>
-						<td><span class="badge badge-success">Ok</span>
-						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_north_america.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
 						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_north_america.txt" target="_blank" title="North America Blocklist RAW Format">
 						<span class="badge badge-success">All</span></a>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_north_america.txt" target="_blank" title="North America Blocklist only IPv4 RAW Format">
 						<span class="badge badge-dark">Only v4</span></a>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v6_north_america.txt" target="_blank" title="North America Blocklist only IPv6 RAW Format">
+						<span class="badge badge-secondary">Only v6</span></a>
+					</tr>
+					<tr>
+						<td><i class="fa-solid fa-earth-americas"></i>
+						<td>South America
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_south_america.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
+						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_south_america.txt" target="_blank" title="South America Blocklist RAW Format">
+						<span class="badge badge-success">All</span></a>
+						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_south_america.txt" target="_blank" title="South America Blocklist only IPv4 RAW Format">
+						<span class="badge badge-dark">Only v4</span></a>
+						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v6_south_america.txt" target="_blank" title="South America Blocklist only IPv6 RAW Format">
+						<span class="badge badge-secondary">Only v6</span></a>
+					</tr>
+					<tr>
+						<td><i class="fa-solid fa-earth-oceania"></i>
+						<td>Oceania
+						<?php [$cnt, $upd] = bl_file_info('countries/ipv64_blocklist_oceania.txt'); ?>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
+						<td><a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_oceania.txt" target="_blank" title="Oceania Blocklist RAW Format">
+						<span class="badge badge-success">All</span></a>
+						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v4_oceania.txt" target="_blank" title="Oceania Blocklist only IPv4 RAW Format">
+						<span class="badge badge-dark">Only v4</span></a>
+						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_v6_oceania.txt" target="_blank" title="Oceania Blocklist only IPv6 RAW Format">
 						<span class="badge badge-secondary">Only v6</span></a>
 					</tr>
 					<tr class="table-secondary">
@@ -158,7 +206,7 @@ include("header.php");
 						<td><!-- <img src="/img/country/<?php echo strtolower($blockliste["country"]);?>.svg" width="20"> -->
 						<td><?php echo $blockliste["country_name"];?>
 						<td><span class="badge badge-dark" title="<?php echo $blockliste["ips"];?>"><?php echo formatLargeNumber($blockliste["ips"]);?></span>
-						<td><span class="badge badge-success">Ok</span>
+						<td><?php echo bl_status((string)$blockliste["last_updated"]); ?>
 						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
 						<td>
 						<a href="https://ipv64.net/blocklists/countries/ipv64_blocklist_<?php echo $blockliste["file_name"];?>.txt" target="_blank" title="IP/Network List for <?php echo $blockliste["country_name"];?>">
@@ -183,7 +231,7 @@ include("header.php");
 	      <div class="card shadow-sm">
 			<div class="card-header">
 			<i class="fa-solid fa-info text-info"></i>
-				Futher Information about IPv64.net Blocklists</strong>
+				Further information about the IPv64.net blocklists</strong>
 			  </div>
 			  <div class="card-body">
 				<p>
@@ -192,8 +240,9 @@ include("header.php");
 				</p>
 				<p>
 				The advantage of these processed blocklists is that they do not contain any comments, notes or other entries, but really 
-				only IP addresses and entire subnets. Duplicate and false positive entries have been removed. The automation behind IPv64.net 
-				always keeps these lists up to date.
+				only IP addresses and entire subnets. Duplicates, networks contained in larger ones and reserved ranges have been removed. 
+				The entries come from the source projects; if an address is listed by mistake, ask the source project to remove it. 
+				The lists are regenerated several times a day, country lists daily from the regional Internet registries (RIR).
 				</p>
 				<p>
 					<ul><li><a href="v64_blocklist_integration_guide">Read the IPv64 Blocklist integration Guide <i class="fa-solid fa-book"></i></a></li></ul>

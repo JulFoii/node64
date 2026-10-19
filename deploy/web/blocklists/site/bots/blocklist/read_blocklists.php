@@ -1,6 +1,16 @@
 <?php 
 include("/var/www/clients/client1/web58/web/dbconnect.php");
 
+/** IPv4- und IPv6-Adressen aus Text oder JSON (Tor: Onionoo "1.2.3.4:9001", "[2001:db8::1]:9001", exit_addresses). */
+function tor_ips(string $text): array
+{
+	$ips = array();
+	preg_match_all('/(?<![0-9.])\d{1,3}(?:\.\d{1,3}){3}(?![0-9.])/', $text, $m4);
+	preg_match_all('/(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])/', $text, $m6);
+	foreach(array_merge($m4[0], $m6[0]) as $ip) { if(filter_var($ip, FILTER_VALIDATE_IP)) { $ips[] = $ip; } }
+	return array_values(array_unique($ips));
+}
+
 $statement = $pdo->prepare("SELECT * FROM blocklisten");
 $result = $statement->execute();
 $blocklisten = $statement->fetchAll();
@@ -15,7 +25,7 @@ foreach($blocklisten as $blockliste)
 	  CURLOPT_RETURNTRANSFER => true,
 	  CURLOPT_ENCODING => '',
 	  CURLOPT_MAXREDIRS => 10,
-	  CURLOPT_TIMEOUT => 10,
+	  CURLOPT_TIMEOUT => 60,
 	  CURLOPT_FOLLOWLOCATION => true,
 	  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
 	  CURLOPT_CUSTOMREQUEST => 'GET',
@@ -38,7 +48,7 @@ foreach($blocklisten as $blockliste)
 		  CURLOPT_RETURNTRANSFER => true,
 		  CURLOPT_ENCODING => '',
 		  CURLOPT_MAXREDIRS => 10,
-		  CURLOPT_TIMEOUT => 10,
+		  CURLOPT_TIMEOUT => 60,
 		  CURLOPT_FOLLOWLOCATION => true,
 		  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
 		  CURLOPT_CUSTOMREQUEST => 'GET',
@@ -48,7 +58,6 @@ foreach($blocklisten as $blockliste)
 		
 		$response .= "\n";
 		$response .= $responsev6;
-		print_r($response);
 		$ips = array();
 		
 		foreach (explode("\n", $response) as $line) {
@@ -57,11 +66,6 @@ foreach($blocklisten as $blockliste)
 			if (isset($data->cidr)) {
 				$ips[] = $data->cidr;
 				//echo $data->cidr;
-			}
-
-			if(filter_var($ips, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) OR filter_var($ips, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6))
-			{
-				array_push($ips,$ip);
 			}
 		}
 		$ips = array_values(array_unique($ips));
@@ -117,19 +121,8 @@ foreach($blocklisten as $blockliste)
 	}
 	if($blockliste["file_name"] == "tor_exit" OR $blockliste["file_name"] == "tor_all")
 	{
-		// Regulärer Ausdruck für die Extraktion der IP-Adressen
-		$pattern = '/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/';
-		// Suchen nach Übereinstimmungen im Text
-		preg_match_all($pattern, $response, $matches);
-		// Ausgabe der gefundenen IP-Adressen
-		$ips = array();
-		foreach ($matches[0] as $ip) {
-			if(filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) OR filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6))
-			{	
-				array_push($ips,$ip);
-			}
-		}
-		$ips = array_values(array_unique($ips));
+		// IPv4 und IPv6 (Quelle: Onionoo des Tor-Projekts, JSON)
+		$ips = tor_ips($response);
 		foreach($ips as $ip) {
 			$ip = checkipsubnet($ip);
 			//$ipCount += countValidIPsInSubnet($ip);

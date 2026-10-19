@@ -24,6 +24,8 @@ Die Seite liest die Skripte aus `blocklists/tools/` und zeigt sie an. Seite und 
 
 ## 2. Generator: eigener Listenname je MikroTik-Datei
 
+**Erledigt in der fertigen Datei** `site/bots/blocklist/create_blocklists_v2.php` (siehe FEHLER-HOCHLADEN.md). Der Abschnitt bleibt zur Erklärung stehen.
+
 Bisher nutzen alle `.rsc`-Dateien den Listennamen `IPv64-Blocklist`. Wer zwei Listen importiert, löscht mit der
 zweiten die Einträge der ersten. Der Leitfaden geht von `IPv64-<id>` aus (z. B. `IPv64-firehole_l1`).
 
