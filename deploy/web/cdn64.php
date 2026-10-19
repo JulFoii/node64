@@ -121,7 +121,7 @@ echo $info;
 			<div class="card-body p-3 small">
 				<p class="mb-2">CDN64 makes your service reachable from the internet over IPv4 and IPv6 – also behind DS-Lite or without open ports. Built-in load balancing: visitors are spread across both servers (Nuremberg and Falkenstein) automatically, and if one server fails, the other one takes over.</p>
 				<ul class="mb-2">
-					<li><b>Mode 1 / Mode 2 (recommended):</b> <a href="https://github.com/ipv64net/node64" target="_blank" rel="noopener">Node64</a> opens an encrypted tunnel from your network to both servers – no open ports, your IP stays hidden. Mode 1 keeps TLS end-to-end, mode 2 terminates TLS on the servers (protection and HTTP/3 there). Set it up with one click in Node64 (<i>CDN64 › Proxy-Hosts › CDN64 online</i>).</li>
+					<li><b>Mode 1 / Mode 2 (recommended):</b> <a href="https://github.com/ipv64net/node64" target="_blank" rel="noopener">Node64</a> opens an encrypted tunnel from your network to both servers – no open ports, your IP stays hidden. Mode 1 keeps TLS end-to-end, mode 2 terminates TLS on the servers (protection and HTTP/3 there). Set it up with one click in Node64 (<i>PROXY64 › Proxy-Hosts › CDN64</i>).</li>
 					<li><b>Mode 3 (here):</b> without Node64 – the servers connect to your target directly (your DynDNS address or a fixed target). The target has to be reachable from the internet.</li>
 				</ul>
 				<p class="mb-0 text-muted">Install Node64: <code>docker run -d --name node64 -p 8080:8080 -v node64-data:/data --restart unless-stopped ghcr.io/ipv64net/node64:latest</code></p>
