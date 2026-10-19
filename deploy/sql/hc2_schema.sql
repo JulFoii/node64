@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS `hc2_checks` (
   `policy`             ENUM('all','any','majority') NOT NULL DEFAULT 'all',
   `notify_degraded`    TINYINT NOT NULL DEFAULT 0,
   `slot`               SMALLINT NOT NULL DEFAULT 0,         -- crc32(token) % 1024
-  `type`               ENUM('http','keyword','icmp','tcp','port','cert','push','docker') NOT NULL,
+  `type`               ENUM('http','keyword','json','dns','icmp','tcp','port','cert','push','docker') NOT NULL,
   `name`               VARCHAR(200) NOT NULL,
   `target`             VARCHAR(500) NOT NULL DEFAULT '',
   `params`             JSON NOT NULL,
