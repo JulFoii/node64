@@ -25,7 +25,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 	hc2_redirect(HC2_BASE . '/check.php?token=' . $T);
 }
 $pdo = hc2_pdo();
-$state = (int)$c['paused'] ? 'paused' : ($c['state'] ?: 'pending');
+$state = hc2_check_state($c);
 $st = $pdo->prepare("SELECT * FROM hc2_check_states WHERE token = :t ORDER BY source"); $st->execute(array('t' => $T)); $sources = $st->fetchAll(PDO::FETCH_ASSOC);
 $st = $pdo->prepare("SELECT * FROM hc2_events WHERE token = :t ORDER BY id DESC LIMIT 50"); $st->execute(array('t' => $T)); $events = $st->fetchAll(PDO::FETCH_ASSOC);
 $st = $pdo->prepare("SELECT * FROM hc2_incidents WHERE token = :t ORDER BY id DESC LIMIT 20"); $st->execute(array('t' => $T)); $incidents = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -65,6 +65,8 @@ if ($c['execution'] === 'both') {
 	</div>
 	<div class="text-muted small mb-3"><?php if ($c['target'] !== '') { echo '<code>' . hc2_h($c['target']) . '</code> · '; } ?>alle <?php echo (int)$c['interval_sec']; ?> s<?php if ($c['description'] !== '' && $c['description'] !== null) { echo ' · ' . nl2br(hc2_h($c['description'])); } if ($parent) { echo ' · abhängig von <a href="' . HC2_BASE . '/check.php?token=' . hc2_h($parent['token']) . '">' . hc2_h($parent['name']) . '</a>'; } ?></div>
 	<?php if ($diag !== '') { echo '<div class="alert alert-info"><i class="fa-solid fa-stethoscope"></i> ' . hc2_h($diag) . '</div>'; } ?>
+	<?php if ($state === 'quota') { echo '<div class="alert alert-secondary"><i class="fa-solid fa-hourglass-half"></i> <strong>Tageskontingent aufgebraucht.</strong> ipv64 misst diesen Check bis Mitternacht nicht mehr, danach wieder automatisch. Letzte Messung ' . hc2_ago($c['last_check_at'] ?? $c['state_since']) . '. <a href="/account?account_class">Mehr Messungen pro Tag</a></div>'; }
+	elseif ($state === 'unchecked') { echo '<div class="alert alert-warning"><i class="fa-solid fa-hourglass-half"></i> <strong>Wird nicht überwacht.</strong> ' . hc2_h((string)$c['last_message']) . ' – ob der Dienst gerade erreichbar ist, ist unbekannt.</div>'; } ?>
 	<?php if ($state === 'down' || $state === 'degraded') { echo '<div class="alert alert-' . ($state === 'down' ? 'danger' : 'warning') . '"><strong>' . hc2_h(hc2_reason_text($c['last_reason'])) . '</strong> ' . hc2_h((string)$c['last_message']) . ' <span class="text-muted">seit ' . hc2_dt($c['down_since'] ?: $c['state_since']) . ' (' . hc2_ago($c['down_since'] ?: $c['state_since']) . ')</span></div>'; } ?>
 	<div class="row">
 		<div class="col-lg-8">
@@ -80,7 +82,7 @@ if ($c['execution'] === 'both') {
 					<?php $httpCol = in_array($c['type'], array('http', 'keyword', 'json'), true); ?>
 					<thead><tr><th>Zeit</th><th>Messstelle</th><th>Ereignis</th><th>Grund</th><?php echo $httpCol ? '<th>HTTP</th>' : ''; ?><th>Details</th><th>Dauer</th></tr></thead><tbody>
 					<?php if (!$events) { echo '<tr><td colspan="' . ($httpCol ? 7 : 6) . '" class="text-muted">Noch keine Ereignisse.</td></tr>'; } ?>
-					<?php foreach ($events as $e) { $kinds = array('down' => array('Gestört', 'danger'), 'up' => array('Wieder OK', 'success'), 'degraded' => array('Teilweise gestört', 'warning'), 'degraded_end' => array('Wieder vollständig OK', 'success'), 'flapping_start' => array('Instabil', 'warning'), 'flapping_end' => array('Stabil', 'success'), 'reminder' => array('Erinnerung', 'secondary')); $k = $kinds[$e['kind']] ?? array($e['kind'], 'secondary'); ?>
+					<?php foreach ($events as $e) { $kinds = array('down' => array('Gestört', 'danger'), 'up' => array('Wieder OK', 'success'), 'degraded' => array('Teilweise gestört', 'warning'), 'degraded_end' => array('Wieder vollständig OK', 'success'), 'flapping_start' => array('Instabil', 'warning'), 'flapping_end' => array('Stabil', 'success'), 'reminder' => array('Erinnerung', 'secondary'), 'unchecked' => array('Nicht überwacht', 'warning'), 'rechecked' => array('Wird wieder geprüft', 'success'), 'state' => array('Zustand', 'secondary')); $k = $kinds[$e['kind']] ?? array($e['kind'], 'secondary'); ?>
 					<tr><td class="text-nowrap small"><?php echo hc2_dt($e['time']); ?></td><td class="small"><?php echo hc2_h(hc2_source_label($e['source'], $nodes)); ?></td><td><span class="badge badge-<?php echo $k[1]; ?>"><?php echo hc2_h($k[0]); ?></span><?php echo ((int)$e['flags'] & 2) ? ' <small class="text-muted">(ohne Alarm)</small>' : ''; ?></td><td><?php echo hc2_reason_badge($e['reason']); ?></td><?php if ($httpCol) { echo '<td class="text-nowrap">' . hc2_http_badges((string)$e['message']) . '</td>'; } ?><td class="small text-break"><?php echo hc2_h((string)$e['message']); ?></td><td class="small text-nowrap"><?php echo (int)$e['duration_sec'] > 0 ? hc2_dur((int)$e['duration_sec']) : ''; ?></td></tr>
 					<?php } ?>
 					</tbody></table></div>

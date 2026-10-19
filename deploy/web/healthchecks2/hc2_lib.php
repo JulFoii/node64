@@ -187,7 +187,17 @@ function hc2_types(): array {
 }
 function hc2_states(): array {
 	return array('up' => array('OK', 'success'), 'down' => array('Gestört', 'danger'), 'degraded' => array('Teilweise gestört', 'warning'), 'flapping' => array('Instabil', 'warning'),
-		'paused' => array('Pausiert', 'secondary'), 'pending' => array('Ausstehend', 'info'), 'maintenance' => array('Wartung', 'secondary'), 'unknown' => array('Unbekannt', 'secondary'));
+		'paused' => array('Pausiert', 'secondary'), 'pending' => array('Ausstehend', 'info'), 'maintenance' => array('Wartung', 'secondary'), 'unknown' => array('Unbekannt', 'secondary'),
+		'stabilizing' => array('Stabilisiert sich', 'info'), 'dependent' => array('Abhängigkeit gestört', 'secondary'), 'unchecked' => array('Nicht überwacht', 'warning'), 'quota' => array('Kontingent aufgebraucht', 'secondary'));
+}
+/** Zustand fuer die Anzeige: wie gespeichert, aber "ausstehend" mit Grund unchecked bzw. quota_exhausted als
+ *  "nicht ueberwacht" bzw. "Kontingent aufgebraucht" (der hub misst bzw. bekommt keine Messung mehr). */
+function hc2_check_state(array $c): string {
+	if ((int)$c['paused']) { return 'paused'; }
+	$s = $c['state'] ?: 'pending';
+	if ($s === 'pending' && ($c['last_reason'] ?? '') === 'unchecked') { return 'unchecked'; }
+	if ($s === 'pending' && ($c['last_reason'] ?? '') === 'quota_exhausted') { return 'quota'; }
+	return $s;
 }
 function hc2_state_badge(?string $state): string {
 	$s = hc2_states(); $x = $s[$state ?? 'pending'] ?? array($state, 'secondary');
@@ -205,7 +215,8 @@ function hc2_reason_text(?string $r): string {
 		'cert_hostname_mismatch' => 'Zertifikat passt nicht zum Namen', 'push_reported_down' => 'Push meldet Störung', 'container_missing' => 'Container fehlt',
 		'container_stopped' => 'Container gestoppt', 'container_paused' => 'Container pausiert', 'container_restarting' => 'Container startet neu',
 		'container_unhealthy' => 'Container ungesund', 'docker_unavailable' => 'Docker nicht erreichbar', 'dependency_down' => 'Abhängigkeit gestört', 'internal_error' => 'Interner Fehler',
-		'json_invalid' => 'Keine gültige JSON-Antwort', 'json_mismatch' => 'JSON-Bedingung nicht erfüllt', 'dns_mismatch' => 'DNS-Antwort passt nicht', 'dns_nxdomain' => 'Name existiert nicht', 'dnssec_failed' => 'DNSSEC nicht validiert');
+		'json_invalid' => 'Keine gültige JSON-Antwort', 'json_mismatch' => 'JSON-Bedingung nicht erfüllt', 'dns_mismatch' => 'DNS-Antwort passt nicht', 'dns_nxdomain' => 'Name existiert nicht', 'dnssec_failed' => 'DNSSEC nicht validiert',
+		'unchecked' => 'Nicht überwacht', 'quota_exhausted' => 'Tageskontingent aufgebraucht');
 	return $m[$r ?? ''] ?? (string)$r;
 }
 

@@ -38,7 +38,11 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 
 // ---- Daten
 try { $all = hc2_checks($uid); } catch (Throwable $e) { error_log('hc2 index: ' . $e->getMessage()); $all = array(); echo '<div class="container"><div class="alert alert-danger mt-3">Healthchecks derzeit nicht abrufbar.</div></div>'; include("../footer.php"); exit; }
-$stateOf = function(array $c): string { if ((int)$c['paused']) { return 'paused'; } return $c['state'] ?: 'pending'; };
+$stateOf = function(array $c): string { return hc2_check_state($c); };
+// aktuelle Latenz je Check: letzte Messung einer Messstelle (hc2_checks.last_latency_ms aendert sich nur beim Zustandswechsel)
+$curLat = array();
+try { $st = hc2_pdo()->prepare("SELECT s.token, s.last_latency_ms FROM hc2_check_states s JOIN hc2_checks c ON c.token = s.token WHERE c.userid = :u AND c.deleted_at IS NULL ORDER BY s.updated_at"); $st->execute(array('u' => $uid)); foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $curLat[$r['token']] = (float)$r['last_latency_ms']; } } catch (Throwable $e) { error_log('hc2 index latency: ' . $e->getMessage()); }
+foreach ($all as &$c) { if (isset($curLat[$c['token']])) { $c['last_latency_ms'] = $curLat[$c['token']]; } } unset($c);
 $counts = array('up' => 0, 'down' => 0, 'degraded' => 0, 'paused' => 0, 'other' => 0, 'online' => 0, 'local' => 0, 'both' => 0);
 $allTags = array(); $allGroups = array();
 foreach ($all as $c) {
@@ -61,7 +65,7 @@ $list = array_values(array_filter($all, function($c) use ($q, $fState, $fType, $
 	if ($fGroup !== '' && $c['group_name'] !== $fGroup) { return false; }
 	return true;
 }));
-$rank = array('down' => 0, 'degraded' => 1, 'flapping' => 2, 'pending' => 3, 'up' => 4, 'paused' => 5);
+$rank = array('down' => 0, 'degraded' => 1, 'flapping' => 2, 'dependent' => 2, 'unchecked' => 3, 'stabilizing' => 3, 'quota' => 4, 'pending' => 4, 'up' => 5, 'paused' => 6);
 usort($list, function($a, $b) use ($sort, $stateOf, $rank) {
 	switch ($sort) {
 		case 'state': return ($rank[$stateOf($a)] ?? 9) <=> ($rank[$stateOf($b)] ?? 9) ?: strcasecmp($a['name'], $b['name']);
