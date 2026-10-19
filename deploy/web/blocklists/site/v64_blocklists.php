@@ -54,6 +54,9 @@ function bl_status(string $updated): string { $old = $updated === '' || (time() 
 					<tr>
 						<td><i class="fa-solid fa-check-double"></i>
 						<td><?php echo $blockliste["name"];?>
+						<?php if(!empty($blockliste["category"]) AND $blockliste["category"] != "attack") { ?><span class="badge badge-info"><?php echo htmlspecialchars(ucfirst($blockliste["category"]));?></span><?php } ?>
+						<?php if(isset($blockliste["in_all"]) AND $blockliste["in_all"] == 0) { ?><span class="badge badge-light" title="Not part of the combined list &quot;All&quot;">not in All</span><?php } ?>
+						<?php if(!empty($blockliste["description"])) { ?><br><small class="text-muted"><?php echo htmlspecialchars($blockliste["description"]);?><?php if(!empty($blockliste["license"])) { ?> &middot; <?php echo htmlspecialchars($blockliste["license"]);?><?php } ?></small><?php } ?>
 						<td><span class="badge badge-dark" title="<?php echo $blockliste["ips"];?>"><?php echo formatLargeNumber($blockliste["ips"]);?></span>
 						<td><?php echo bl_status((string)$blockliste["last_updated"]); ?>
 						<span class="badge badge-primary"> <?php echo timeago2($blockliste["last_updated"],date("Y-m-d H:i:s",time())); ?></span>
@@ -245,7 +248,8 @@ function bl_status(string $updated): string { $old = $updated === '' || (time() 
 				The lists are regenerated several times a day, country lists daily from the regional Internet registries (RIR).
 				</p>
 				<p>
-					<ul><li><a href="v64_blocklist_integration_guide">Read the IPv64 Blocklist integration Guide <i class="fa-solid fa-book"></i></a></li></ul>
+					<ul><li><a href="v64_blocklist_integration_guide">Read the IPv64 Blocklist integration Guide <i class="fa-solid fa-book"></i></a></li>
+					<li><a href="/blocklists/index.json" target="_blank">index.json: all lists with count, update, source and license (for scripts)</a></li></ul>
 				</p>
 			  </div>
 		  </div>

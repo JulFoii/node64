@@ -11,6 +11,39 @@ function tor_ips(string $text): array
 	return array_values(array_unique($ips));
 }
 
+/** Adressen und Netze (mit /Praefix) aus Text oder JSON, fuer alle Listen ohne eigenen Leser unten. */
+function net_tokens(string $text): array
+{
+	$ips = array();
+	preg_match_all('/(?<![0-9.])\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?(?![0-9.])/', $text, $m4);
+	preg_match_all('/(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:\/\d{1,3})?(?![0-9A-Fa-f:])/', $text, $m6);
+	foreach(array_merge($m4[0], $m6[0]) as $ip) { if(filter_var(explode("/", $ip)[0], FILTER_VALIDATE_IP)) { $ips[] = $ip; } }
+	return array_values(array_unique($ips));
+}
+
+/** Eine Adresse laden; false bei Fehler oder HTTP-Status ab 400. */
+function bl_get(string $url)
+{
+	$curl = curl_init();
+	curl_setopt_array($curl, array(
+	  CURLOPT_URL => $url,
+	  CURLOPT_RETURNTRANSFER => true,
+	  CURLOPT_ENCODING => '',
+	  CURLOPT_MAXREDIRS => 10,
+	  CURLOPT_TIMEOUT => 60,
+	  CURLOPT_FOLLOWLOCATION => true,
+	  CURLOPT_FAILONERROR => true,
+	  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+	  CURLOPT_CUSTOMREQUEST => 'GET',
+	));
+	$response = curl_exec($curl);
+	curl_close($curl);
+	return $response;
+}
+
+// Listen mit eigenem Leser unten; alle anderen laufen ueber net_tokens()
+$eigene_leser = array("spamhaus_drop", "firehole_l1", "blocklistde_all", "dshield1", "tor_exit", "tor_all");
+
 $statement = $pdo->prepare("SELECT * FROM blocklisten");
 $result = $statement->execute();
 $blocklisten = $statement->fetchAll();
@@ -19,23 +52,25 @@ foreach($blocklisten as $blockliste)
 	
 	$ipCount = 0;
 	echo $blockliste["name"]." wird aktualisiert.\n";
-	$curl = curl_init();
-	curl_setopt_array($curl, array(
-	  CURLOPT_URL => "$blockliste[url]",
-	  CURLOPT_RETURNTRANSFER => true,
-	  CURLOPT_ENCODING => '',
-	  CURLOPT_MAXREDIRS => 10,
-	  CURLOPT_TIMEOUT => 60,
-	  CURLOPT_FOLLOWLOCATION => true,
-	  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-	  CURLOPT_CUSTOMREQUEST => 'GET',
-	));
-	$response = curl_exec($curl);
-	curl_close($curl);
-	
+	// url kann mehrere Adressen enthalten (durch Leerzeichen getrennt, z. B. v4 und v6); alle muessen klappen
+	$response = '';
+	foreach(preg_split('/\s+/', trim($blockliste["url"])) as $u)
+	{
+		$r = bl_get($u);
+		if($r === false) { $response = false; break; }
+		$response .= $r."\n";
+	}
+
 	//print_r($response);
-	
-	if($response === false OR strlen($response) < 1000) { echo "  Download fehlgeschlagen, Liste bleibt unveraendert.\n"; continue; }
+
+	$eigener_leser = in_array($blockliste["file_name"], $eigene_leser);
+	if($response === false OR ($eigener_leser AND strlen($response) < 1000)) { echo "  Download fehlgeschlagen, Liste bleibt unveraendert.\n"; continue; }
+	if(!$eigener_leser)
+	{
+		// kleine Listen (Cloudflare, Feodo) sind gueltig; leer heisst Fehler
+		$ips = net_tokens($response);
+		if(count($ips) < 1) { echo "  Keine Adressen gefunden, Liste bleibt unveraendert.\n"; continue; }
+	}
 	$statement = $pdo->prepare("TRUNCATE TABLE $blockliste[db_name]");
 	$result = $statement->execute();
 
@@ -129,7 +164,15 @@ foreach($blocklisten as $blockliste)
 			$statement = $pdo->prepare("INSERT INTO $blockliste[db_name] (ip) VALUES (:ip)");
 			$result = $statement->execute(array('ip'=> $ip));
 		}
-	
+
+	}
+	if(!$eigener_leser)
+	{
+		foreach($ips as $ip) {
+			$ip = checkipsubnet($ip);
+			$statement = $pdo->prepare("INSERT INTO $blockliste[db_name] (ip) VALUES (:ip)");
+			$result = $statement->execute(array('ip'=> $ip));
+		}
 	}
 	$ipCount = count($ips);
 	$ips = "";

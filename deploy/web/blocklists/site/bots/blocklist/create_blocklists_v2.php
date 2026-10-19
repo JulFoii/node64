@@ -158,20 +158,59 @@ function split46(array $nets): array
 }
 
 // ---------------------------------------------------------------
+// index.json: alle Listen mit Anzahl, Stand, Quelle und Lizenz (fuer Node64 und andere Werkzeuge)
+// ---------------------------------------------------------------
+/** Dateinamen relativ zu base; $p = "" (Hauptlisten) oder "countries/" */
+function index_files(string $p, string $f, bool $mikrotik): array
+{
+	$files = ['all' => $p."ipv64_blocklist_$f.txt", 'v4' => $p."ipv64_blocklist_v4_$f.txt", 'v6' => $p."ipv64_blocklist_v6_$f.txt"];
+	if($mikrotik) { $files['mikrotik_v4'] = "v64_mikrotik_v4_$f.rsc"; $files['mikrotik_v6'] = "v64_mikrotik_v6_$f.rsc"; }
+	return $files;
+}
+
+/** Eintrag fuer eine Quellliste; $v4/$v6 null = Liste diesmal nicht neu geschrieben, Zahlen aus der DB */
+function index_list(array $bl, string $kat, bool $in_all, ?array $v4, ?array $v6): array
+{
+	$e = ['id' => $bl["file_name"], 'name' => $bl["name"], 'category' => $kat, 'in_all' => $in_all,
+		'description' => $bl["description"] ?? '', 'source' => $bl["source"] ?? '', 'license' => $bl["license"] ?? ''];
+	if($v4 === null) { $e['count'] = (int)$bl["ips"]; }
+	else { $e['count'] = count($v4) + count($v6); $e['count_v4'] = count($v4); $e['count_v6'] = count($v6); }
+	$t = strtotime((string)$bl["last_updated"]);
+	$e['updated'] = $t ? date('c', $t) : null;
+	$e['files'] = index_files('', $bl["file_name"], true);
+	return $e;
+}
+
+function index_entry(string $id, string $name, string $p, array $v4, array $v6, bool $mikrotik): array
+{
+	return ['id' => $id, 'name' => $name, 'count' => count($v4) + count($v6), 'count_v4' => count($v4), 'count_v6' => count($v6),
+		'updated' => date('c'), 'files' => index_files($p, $id, $mikrotik)];
+}
+
+// ---------------------------------------------------------------
 // 1. Einzelne Quelllisten
 // ---------------------------------------------------------------
 $alle = []; $alle_notor = []; // Gesamtliste mit und ohne Tor
+$index = ['version' => 1, 'generated' => date('c'), 'info' => 'https://ipv64.net/v64_blocklists', 'base' => 'https://ipv64.net/blocklists/', 'lists' => [], 'combined' => [], 'countries' => [], 'regions' => []];
 $statement = $pdo->prepare("SELECT * FROM blocklisten WHERE disabled = 0");
 $statement->execute();
 foreach($statement->fetchAll(PDO::FETCH_ASSOC) as $bl)
 {
 	if(!preg_match('/^[a-z0-9_]+$/', $bl["db_name"]) OR !preg_match('/^[a-z0-9_]+$/', $bl["file_name"])) { echo "SKIP ".$bl["name"].": unsauberer Tabellen-/Dateiname\n"; continue; }
+	// Spalten aus blocklists_neue_listen.sql; fehlen sie noch, gilt das alte Verhalten (alles in "all", tor_* ohne notor)
+	$kat = $bl["category"] ?? (str_starts_with($bl["file_name"], "tor_") ? "tor" : "attack");
+	$in_all = (!isset($bl["in_all"]) || (int)$bl["in_all"] === 1);
 	$rows = $pdo->query("SELECT ip FROM `".$bl["db_name"]."`")->fetchAll(PDO::FETCH_COLUMN);
-	if(count($rows) === 0) { echo "SKIP ".$bl["name"].": Quelltabelle leer, Dateien bleiben wie sie sind\n"; continue; }
+	if(count($rows) === 0) {
+		echo "SKIP ".$bl["name"].": Quelltabelle leer, Dateien bleiben wie sie sind\n";
+		if(is_file("$OUT/ipv64_blocklist_".$bl["file_name"].".txt")) { $index['lists'][] = index_list($bl, $kat, $in_all, null, null); }
+		continue;
+	}
 	[$nets, $bad, $bog] = net_clean($rows);
 	[$v4, $v6] = split46($nets);
-	foreach($nets as $n) { $alle[] = $n; }
-	if(!str_starts_with($bl["file_name"], "tor_")) { foreach($nets as $n) { $alle_notor[] = $n; } }
+	if($in_all) { foreach($nets as $n) { $alle[] = $n; } }
+	if($in_all AND $kat !== "tor") { foreach($nets as $n) { $alle_notor[] = $n; } }
+	$index['lists'][] = index_list($bl, $kat, $in_all, $v4, $v6);
 	printf("%-22s Quelle %6d -> %6d Netze (v4 %6d, v6 %4d) | ungueltig %d, nicht routbar %d\n", $bl["name"], count($rows), count($nets), count($v4), count($v6), $bad, $bog);
 
 	$f = $bl["file_name"];
@@ -197,6 +236,7 @@ write_raw("$OUT/ipv64_blocklist_v4_all.txt", $v4);
 write_raw("$OUT/ipv64_blocklist_v6_all.txt", $v6);
 write_mikrotik("$OUT/v64_mikrotik_v4_all.rsc", $v4, 4, "IPv64-all");
 write_mikrotik("$OUT/v64_mikrotik_v6_all.rsc", $v6, 6, "IPv64-all");
+$index['combined'][] = index_entry("all", "All lists (incl. Tor)", "", $v4, $v6, true);
 
 // Gesamtliste ohne Tor (wer nur Angreifer sperren will, nicht alle Tor-Nutzer)
 $alle_notor = net_merge($alle_notor);
@@ -207,6 +247,7 @@ write_raw("$OUT/ipv64_blocklist_v4_all_notor.txt", $v4);
 write_raw("$OUT/ipv64_blocklist_v6_all_notor.txt", $v6);
 write_mikrotik("$OUT/v64_mikrotik_v4_all_notor.rsc", $v4, 4, "IPv64-all_notor");
 write_mikrotik("$OUT/v64_mikrotik_v6_all_notor.rsc", $v6, 6, "IPv64-all_notor");
+$index['combined'][] = index_entry("all_notor", "All lists without Tor", "", $v4, $v6, true);
 
 // ---------------------------------------------------------------
 // 3. Laender und Regionen
@@ -222,7 +263,7 @@ $regionen = [
 $region_nets = array_fill_keys(array_keys($regionen), []);
 
 $st = $pdo->prepare("SELECT ip FROM bl_countries_ips WHERE country = :c");
-$laender = $pdo->query("SELECT id, country, file_name FROM blocklisten_countries ORDER BY country")->fetchAll(PDO::FETCH_ASSOC);
+$laender = $pdo->query("SELECT id, country, country_name, file_name FROM blocklisten_countries ORDER BY country")->fetchAll(PDO::FETCH_ASSOC);
 $geschrieben = 0;
 foreach($laender as $land)
 {
@@ -236,6 +277,7 @@ foreach($laender as $land)
 	write_raw("$OUT/countries/ipv64_blocklist_$f.txt", $nets);
 	write_raw("$OUT/countries/ipv64_blocklist_v4_$f.txt", $v4);
 	write_raw("$OUT/countries/ipv64_blocklist_v6_$f.txt", $v6);
+	$index['countries'][] = ['country' => strtoupper($land["country"])] + index_entry($f, $land["country_name"], "countries/", $v4, $v6, false);
 	$geschrieben++;
 	foreach($regionen as $r => $cc) { if(in_array(strtoupper($land["country"]), $cc, true)) { foreach($nets as $n) { $region_nets[$r][] = $n; } } }
 	if(!$dry AND !$extern) {
@@ -253,7 +295,11 @@ foreach($region_nets as $r => $nets)
 	write_raw("$OUT/countries/ipv64_blocklist_$r.txt", $nets);
 	write_raw("$OUT/countries/ipv64_blocklist_v4_$r.txt", $v4);
 	write_raw("$OUT/countries/ipv64_blocklist_v6_$r.txt", $v6);
+	$index['regions'][] = ['countries' => $regionen[$r]] + index_entry($r, ucwords(str_replace("_", " ", $r)), "countries/", $v4, $v6, false);
 }
+
+write_atomic("$OUT/index.json", json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
+echo "index.json: ".count($index['lists'])." Listen, ".count($index['countries'])." Laender\n";
 
 echo "Fertig".($dry ? " (nichts geschrieben)" : "")."\n";
 ?>
