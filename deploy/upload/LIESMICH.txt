@@ -1,8 +1,0 @@
-Honeypot64 - Herkunft der Angreifer (Land je IP, country_ranges.txt.gz)
-
-1. datenbank.sql in die Hauptdatenbank ipv64 einspielen (mehrfach ausfuehrbar):  mysql ipv64 < datenbank.sql
-2. Den Ordner web/ nach /var/www/ipv64.net/web/ hochladen (5 Dateien, ersetzen jeweils die vorhandenen).
-3. Nichts an api_v2.php oder Crontab aendern. country_ranges.txt.gz entsteht beim naechsten vollen (taeglichen) Lauf
-   von bots/blocklist/create_blocklists_v2.php; sofort:  php bots/blocklist/create_blocklists_v2.php
-   Danach fuellt die Bewertung (alle 30 min) hp_scores.country; die Rangliste erscheint spaetestens 10 min spaeter.
-Pruefen: /blocklists/index.json enthaelt "geo", /honeypot/stats.php zeigt "Herkunft nach Land".
