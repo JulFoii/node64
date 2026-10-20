@@ -1,7 +1,0 @@
-Honeypot64 H6 (ipv64): Passwortpruefung, Aenderungs-Feed, Fingerabdruecke (JA4/HASSH)
-
-1. ZUERST datenbank.sql in die Hauptdatenbank ipv64 einspielen (legt nur neue Tabellen an, mehrfach ausfuehrbar).
-2. DANACH den Ordner web/ 1:1 nach /var/www/ipv64.net/web/ kopieren (neue und geaenderte Dateien, ganze Dateien).
-3. Sonst nichts: api_v2.php und Crontab bleiben unveraendert (neuer Job laeuft ueber bots/honeypot_cron.php).
-   Optional, damit die Passwortpruefung sofort Daten hat:  php /var/www/ipv64.net/web/bots/honeypot_passwords.php
-Neu: https://ipv64.net/honeypot/password.php, API /threat/passwords/range/{prefix} und /threat/feed.
