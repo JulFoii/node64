@@ -27,6 +27,8 @@
  *   - Nie listen: nicht oeffentliche Adressen und IPs der Sensoren (beide gar nicht in hp_scores), Infrastruktur von
  *     ipv64 (reason infra), Cloudflare (cdn), Freigaben aus hp_allowlist und hp_release_requests.protected_until
  *     (allowlist), IPs von ipv64-Kunden (aktuelle A/AAAA-Records, oeffentliche VPN-IPs: customer_ip, nur markiert).
+ *   - H6: jede Aenderung der gelisteten IPs (neu, nicht mehr gelistet, andere Listen) kommt in derselben Transaktion nach
+ *     hp_list_changes (Aenderungs-Feed GET /threat/feed, api_v2_threat_feed.php), Frist 30 Tage.
  */
 if(php_sapi_name() !== 'cli') { exit; }
 include("/var/www/clients/client1/web58/web/dbconnect.php");
@@ -40,6 +42,7 @@ const HPS_NEW_ACCOUNT = 7 * 86400;   // neue Accounts: halbes Vertrauen
 const HPS_CONF_MIN    = 50;          // ab so vielen IPs je Sensor zaehlt die Bestaetigungsquote
 const HPS_CONF_RATE   = 0.05;        // darunter: halbes Vertrauen
 const HPS_CHUNK       = 500;         // Zeilen je INSERT
+const HPS_CHANGES_KEEP = 30 * 86400; // H6: Aenderungs-Feed (hp_list_changes)
 
 // Infrastruktur von ipv64, die nie gelistet wird (zusaetzlich zu hp_allowlist source=infra und den Server-Tabellen
 // cdn_server, vpn_gw_server, dns64_server). Netze als CIDR, z. B. '203.0.113.0/24'.
@@ -57,6 +60,30 @@ if($lock === false OR !flock($lock, LOCK_EX | LOCK_NB)) { echo "Laeuft schon, En
 // ---------------------------------------------------------------- Hilfen
 
 function hps_q(string $sql, array $p = array()): PDOStatement { global $pdo; $st = $pdo->prepare($sql); $st->execute($p); return $st; }
+
+/**
+ * H6: Aenderungen der gelisteten IPs nach hp_list_changes (vor dem Schreiben von hp_scores, in derselben Transaktion).
+ * Vorher = hp_scores mit listed = 1, nachher = $rowsOut mit listed = 1 (Spalten wie im INSERT unten); IPs, die ganz aus
+ * hp_scores fallen, zaehlen als entfernt. Rueckgabe: Anzahl je Art.
+ */
+function hps_changes(array $rowsOut, string $run): array {
+	$set = function(string $l): string { $a = $l === '' ? array() : explode(',', $l); sort($a); return implode(',', $a); };
+	$old = array();
+	foreach(hps_q("SELECT ip_bin, ip, lists FROM hp_scores WHERE listed = 1")->fetchAll(PDO::FETCH_ASSOC) as $r) { $old[$r['ip_bin']] = array($r['ip'], (string)$r['lists']); }
+	$ch = array(); $n = array('add' => 0, 'remove' => 0, 'update' => 0);
+	foreach($rowsOut as $x) {
+		if((int)$x[13] !== 1) { continue; }
+		$bin = hex2bin($x[0]);
+		if(!isset($old[$bin])) { $ch[] = array($run, 'add', $x[1], $x[10], ''); $n['add']++; }
+		elseif($set($old[$bin][1]) !== $set($x[10])) { $ch[] = array($run, 'update', $x[1], $x[10], $old[$bin][1]); $n['update']++; }
+		unset($old[$bin]);
+	}
+	foreach($old as [$ip, $lists]) { $ch[] = array($run, 'remove', $ip, '', $lists); $n['remove']++; }
+	foreach(array_chunk($ch, HPS_CHUNK) as $chunk) {
+		hps_q("INSERT INTO hp_list_changes (created_at, action, ip, lists, prev_lists) VALUES " . implode(',', array_fill(0, count($chunk), '(?,?,?,?,?)')), array_merge(...$chunk));
+	}
+	return $n;
+}
 
 /** Zeilen ungepuffert lesen (grosse Abfragen); waehrenddessen keine andere Abfrage auf derselben Verbindung. */
 function hps_stream(string $sql, array $p, callable $fn): void {
@@ -344,6 +371,9 @@ if($dry) { echo "*** DRY RUN, nichts geschrieben ***\n"; exit(0); }
 
 $pdo->beginTransaction();
 try {
+	// H6: Aenderungs-Feed; fehlt die Tabelle noch, laeuft die Bewertung ohne Protokoll weiter
+	try { $chg = hps_changes($rowsOut, $run); echo "hp_list_changes: {$chg['add']} neu, {$chg['remove']} entfernt, {$chg['update']} geaendert\n"; }
+	catch(Throwable $e) { echo "Warnung: hp_list_changes nicht geschrieben: " . $e->getMessage() . "\n"; }
 	foreach(array_chunk($rowsOut, HPS_CHUNK) as $chunk) {
 		hps_q("INSERT INTO hp_scores (ip_bin, ip, family, score, accounts, accounts_eff, strong_eff, sensors, events, kinds, lists, first_seen, last_seen, listed, listed_since, reason, updated_at) VALUES "
 			. implode(',', array_fill(0, count($chunk), '(UNHEX(?),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'))
@@ -361,3 +391,9 @@ try {
 	exit(1);
 }
 echo "hp_scores: " . count($rowsOut) . " geschrieben, $del entfernt\n";
+// H6: Aenderungs-Feed nach 30 Tagen loeschen
+try {
+	$cd = 0;
+	do { $c = hps_q("DELETE FROM hp_list_changes WHERE created_at < :d LIMIT 10000", array('d' => gmdate('Y-m-d H:i:s', $now - HPS_CHANGES_KEEP)))->rowCount(); $cd += $c; } while($c >= 10000);
+	if($cd > 0) { echo "hp_list_changes: $cd alte Eintraege geloescht\n"; }
+} catch(Throwable $e) { echo "Warnung: hp_list_changes nicht aufgeraeumt: " . $e->getMessage() . "\n"; }

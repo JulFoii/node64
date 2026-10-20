@@ -18,6 +18,7 @@ const HPC_JOBS = array(
 	'watch'   => array('12,42', '*',  'honeypot_watch.php',                '', null),
 	'release' => array('15', '*',     'honeypot_release.php',              '', null),
 	'lists'   => array('17', '*/6',   'honeypot_lists.php',                '', null),
+	'pwrange' => array('27', '*/6',   'honeypot_passwords.php',            '', null), // H6: Passwortpruefung (hp_pw_range)
 	'cleanup' => array('40', '3',     'honeypot_cleanup.php',              '', null),
 );
 

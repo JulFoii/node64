@@ -11,6 +11,8 @@
  *   GET  /honeypot/stats     eigener Beitrag: Ereignisse, Quell-IPs, Top-Arten, Top-Ports, Verlauf 7 Tage
  *
  * Proben zaehlen zusaetzlich je Account (hp_sample_contrib, H4: deploy/sql/honeypot_h4_stats.sql).
+ * H6: samples.fingerprints (JA4/HASSH) -> hp_samples_fps + hp_sample_contrib kind fp (deploy/sql/honeypot_h6.sql); am Ende
+ * dieser Datei werden die H6-Endpunkte eingebunden (api_v2_threat_passwords.php, api_v2_threat_feed.php).
  * Die IP des Sensors (aus der Verbindung) wird nur intern gespeichert, nie ausgegeben; Meldungen ueber eigene IPs
  * (dieser Sensor und alle Sensoren des Accounts) sowie private/reservierte Adressen werden verworfen.
  */
@@ -41,6 +43,7 @@ const HP_SOURCES  = array('honeypot', 'log', 'syslog');
 // Neue Arten/Dienste spaeterer Sensor-Versionen werden angenommen, wenn sie dem Muster folgen (kein Upload je neuem Dienst)
 const HP_KIND_RE    = '/^[a-z][a-z0-9-]{0,15}:[a-z][a-z0-9-]{0,23}(:[a-z0-9-]{1,24})?$/';
 const HP_SERVICE_RE = '/^[a-z][a-z0-9-]{0,15}$/';
+const HP_FP_RE      = '/^(ja4:[a-z0-9_]{1,64}|hassh:[0-9a-f]{32})$/D'; // H6: Fingerabdruck, sonst verworfen und gezaehlt
 const HP_PROFILES = array('minimal', 'standard', 'full', 'custom');
 const HP_MODES    = array('module', 'headless');
 
@@ -235,6 +238,19 @@ function hp_parse(array $b, int $now): array {
 			}
 		}
 	}
+	// H6: Fingerabdruecke (optional); Key nicht nach Muster -> verworfen und gezaehlt (invalid_fingerprint)
+	$list = $sm['fingerprints'] ?? array();
+	if(!is_array($list) OR !hp_is_list($list)) { hp_bad('samples.fingerprints', "Field 'samples.fingerprints' must be an array."); }
+	if(count($list) > HP_MAX_SAMPLES) { fail(413, 'too_many_samples', "At most " . HP_MAX_SAMPLES . " entries in samples.fingerprints.", array('field' => 'samples.fingerprints')); }
+	$samples['fingerprints'] = array();
+	foreach($list as $i => $x) {
+		$f = "samples.fingerprints[$i]";
+		if(!is_array($x)) { hp_bad($f, "$f must be an object."); }
+		$cnt = hp_int($x['count'] ?? null, "$f.count", 1, 1000000000);
+		$key = $x['key'] ?? null;
+		if(!is_string($key) OR !preg_match(HP_FP_RE, $key)) { $rej['invalid_fingerprint'] = ($rej['invalid_fingerprint'] ?? 0) + 1; continue; }
+		$samples['fingerprints'][] = array('hash' => hash('sha256', $key, true), 'key' => $key, 'count' => $cnt);
+	}
 	return array('report_id' => $rid, 'sensor' => array('id' => $sid, 'version' => $ver, 'profile' => $s['profile'], 'mode' => $s['mode']),
 		'start' => $start, 'end' => $end, 'dropped' => $dropped, 'sources' => $out, 'samples' => $samples, 'rejected' => $rej);
 }
@@ -298,7 +314,8 @@ function hp_store(array $r, int $bytes, int $now): array {
 		$smp['paths'] = hp_merge($smp['paths'], fn($x) => $x['hash']);
 		$smp['user_agents'] = hp_merge($smp['user_agents'], fn($x) => $x['hash']);
 		$smp['payloads'] = hp_merge($smp['payloads'], fn($x) => $x['sha256'] . '|' . $x['service'] . '|' . $x['port']);
-		$nsmp = count($smp['credentials']) + count($smp['paths']) + count($smp['user_agents']) + count($smp['payloads']);
+		$smp['fingerprints'] = hp_merge($smp['fingerprints'], fn($x) => $x['hash']);
+		$nsmp = count($smp['credentials']) + count($smp['paths']) + count($smp['user_agents']) + count($smp['payloads']) + count($smp['fingerprints']);
 		$overlap = ($sen['last_period_end'] !== null AND (int)$sen['userid'] === $u AND $r['start'] < strtotime($sen['last_period_end'] . ' UTC')) ? 1 : 0;
 
 		q("INSERT INTO hp_reports (day, report_id, sensor_id, userid, schema_version, version, period_start, period_end, received_at, sources, rejected, dropped, samples, overlap, ip, bytes)
@@ -331,9 +348,11 @@ function hp_store(array $r, int $bytes, int $now): array {
 			array_map(fn($x) => array($sday, bin2hex($x['hash']), hp_text($x['key']), $x['count'], $ts), $smp['user_agents']), $upd);
 		hp_insert("INSERT INTO hp_samples_payloads (day, sha256, service, port, head_b64, `count`, last_seen)", '(?,?,?,?,?,?,?)',
 			array_map(fn($x) => array($sday, $x['sha256'], $x['service'], $x['port'], $x['head'], $x['count'], $ts), $smp['payloads']), $upd);
+		hp_insert("INSERT INTO hp_samples_fps (day, key_hash, fp, `count`, last_seen)", '(?,UNHEX(?),?,?,?)',
+			array_map(fn($x) => array($sday, bin2hex($x['hash']), $x['key'], $x['count'], $ts), $smp['fingerprints']), $upd);
 		// H4: Beitrag je Account (Listen/Ranglisten nur ab mehreren Accounts, deploy/sql/honeypot_h4_stats.sql)
 		$con = array();
-		foreach(array('cred' => 'credentials', 'path' => 'paths', 'ua' => 'user_agents') as $ck => $sk) {
+		foreach(array('cred' => 'credentials', 'path' => 'paths', 'ua' => 'user_agents', 'fp' => 'fingerprints') as $ck => $sk) {
 			foreach($smp[$sk] as $x) { $con[] = array($ck, $sday, bin2hex($x['hash']), $u, $x['count']); }
 		}
 		$pl = array();
@@ -406,3 +425,7 @@ route('GET', '/honeypot/stats', function() {
 		'timeline' => array_map(fn($d, $e) => array('day' => $d, 'events' => $e), array_keys($days), array_values($days)),
 	));
 });
+
+// H6: weitere Endpunkte, ohne Aenderung an api_v2.php (dort ist nur diese Datei und die H3-H5-Dateien eingebunden)
+foreach(array('api_v2_threat_passwords.php', 'api_v2_threat_feed.php') as $hpH6File) { if(is_file(__DIR__ . "/$hpH6File")) { require_once __DIR__ . "/$hpH6File"; } }
+unset($hpH6File); // eingebunden im globalen Bereich von api_v2.php

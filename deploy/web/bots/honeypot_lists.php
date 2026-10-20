@@ -135,7 +135,7 @@ try {
 		hps_overview($pdo, $OUT, true, false);
 		// Beitraege je Account nur so lange wie noetig
 		$cut = gmdate('Y-m-d', $now - HPL_CONTRIB_KEEP * 86400); $del = 0;
-		foreach(array('cred', 'path', 'ua', 'payload') as $k) {
+		foreach(array('cred', 'path', 'ua', 'payload', 'fp') as $k) {
 			do { $c = hps_q($pdo, "DELETE FROM hp_sample_contrib WHERE kind = :k AND day < :d LIMIT " . HPL_BATCH, array('k' => $k, 'd' => $cut))->rowCount(); $del += $c; } while($c >= HPL_BATCH);
 		}
 		echo "hp_sample_contrib: $del Zeilen vor $cut geloescht\n";

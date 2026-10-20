@@ -3,11 +3,11 @@
  * Honeypot64 – Statistik (Phase H4, Plan Abschnitt 10). Oeffentlich, ohne Menuelink; verlinkt aus "Secure".
  *
  *   stats.php                     Ueberblick fuer alle: Sensoren, Angriffe 24 h und Verlauf, Top 10 Ports/Arten,
- *                                 Groesse der Listen, Top 10 Benutzernamen/Passwoerter/Pfade/User-Agents
+ *                                 Groesse der Listen, Top 10 Benutzernamen/Passwoerter/Pfade/User-Agents/Fingerabdruecke (H6)
  *                                 Volle Seite (eingeloggt, Klasse ausser Standard, users.user_class != 1): Top 100,
  *                                 neu gelistete IPs heute, neue Pfade heute, Suche, CSV-Export
- *   stats.php?q=<text>&k=<art>    Suche in einer Rangliste (volle Seite; art: pass, user, path, ua)
- *   stats.php?export=<art>        CSV (volle Seite; art: pass, user, path, ua, ports, kinds, timeline, new_ips, new_paths)
+ *   stats.php?q=<text>&k=<art>    Suche in einer Rangliste (volle Seite; art: pass, user, path, ua, fp)
+ *   stats.php?export=<art>        CSV (volle Seite; art: pass, user, path, ua, fp, ports, kinds, timeline, new_ips, new_paths)
  *   &lang=en                      Englisch
  *
  * Daten aus dem Cache (honeypot/hp_stats_lib.php, hoechstens alle 10 Minuten neu); Ranglisten nur mit Eintraegen, die
@@ -93,7 +93,8 @@ if($exp !== '' AND $o !== null) {
 ob_end_flush();
 
 // ---------------------------------------------------------------- Suche (volle Seite)
-$kinds = array('pass' => hss_t('Passwörter', 'Passwords'), 'user' => hss_t('Benutzernamen', 'Usernames'), 'path' => hss_t('Pfade', 'Paths'), 'ua' => 'User-Agents');
+$kinds = array('pass' => hss_t('Passwörter', 'Passwords'), 'user' => hss_t('Benutzernamen', 'Usernames'), 'path' => hss_t('Pfade', 'Paths'), 'ua' => 'User-Agents',
+	'fp' => hss_t('Fingerabdrücke (JA4/HASSH)', 'Fingerprints (JA4/HASSH)'));
 $q = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);
 $k = isset($kinds[$_GET['k'] ?? '']) ? (string)$_GET['k'] : 'pass';
 $found = null;
@@ -198,10 +199,10 @@ $l = $o['lists'];
 <?php } ?>
 
 	<div class="row">
-		<?php foreach(array('user' => 'usernames', 'pass' => 'passwords', 'path' => 'paths', 'ua' => 'user_agents') as $kk => $key) { ?>
+		<?php foreach(array('user' => 'usernames', 'pass' => 'passwords', 'path' => 'paths', 'ua' => 'user_agents', 'fp' => 'fingerprints') as $kk => $key) { ?>
 		<div class="col-12 col-lg-6 pb-3"><div class="card h-100"><div class="card-header p-2"><?php echo hss_t('Top', 'Top') . ' ' . $lim . ' ' . hss_h($kinds[$kk]); ?> <small class="text-muted">(30 <?php echo hss_t('Tage', 'days'); ?>)</small>
 			<?php if($full) { ?><a class="float-right small" href="<?php echo hss_h(hss_url(array('export' => $kk))); ?>">CSV</a><?php } ?></div>
-			<div class="card-body p-0"><?php echo hss_table(array_slice($o['top'][$key], 0, $lim), hss_t('Noch keine Einträge über der Schwelle.', 'No entries above the threshold yet.')); ?></div></div></div>
+			<div class="card-body p-0"><?php echo hss_table(array_slice($o['top'][$key] ?? array(), 0, $lim), hss_t('Noch keine Einträge über der Schwelle.', 'No entries above the threshold yet.')); ?></div></div></div>
 		<?php } ?>
 	</div>
 

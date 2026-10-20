@@ -13,6 +13,8 @@
  * Strings, bei Benutzernamen keine Telefonnummern, bei Pfaden keine Allerweltspfade, bei User-Agents keine Browser und
  * keine bekannten Suchmaschinen/Monitoring-Dienste. Solche Eintraege fallen ganz weg (nichts wird umgeschrieben).
  *
+ * H6: Rangliste der Fingerabdruecke (kind fp: JA4/HASSH aus hp_samples_fps, gleiche Schwelle, nur gueltige Keys).
+ *
  * Cache: hps_overview() rechnet hoechstens alle HPS_TTL Sekunden neu (Sperre GET_LOCK, ein Prozess rechnet, die anderen
  * nehmen den alten Stand), sonst kommt alles aus hp_stats_cache.
  */
@@ -24,9 +26,9 @@ const HPS_CAP_DAY     = 10000;   // je Account, Tag und Probe hoechstens so viel
 const HPS_ACTIVE_LOW  = 20;      // unter so vielen aktiven Accounts (Meldung in 7 Tagen) Schwelle 2, sonst 3
 const HPS_TOP_PUBLIC  = 10;      // Ueberblick (alle)
 const HPS_TOP_FULL    = 100;     // volle Seite (Klassen ausser Standard)
-const HPS_KEEP        = array('pass' => 10000, 'user' => 10000, 'path' => 5000, 'ua' => 2000); // Eintraege je Rangliste
-const HPS_MAXLEN      = array('pass' => 64, 'user' => 64, 'path' => 256, 'ua' => 256);       // Zeichen
-const HPS_TOPKEYS     = array('pass' => 'passwords', 'user' => 'usernames', 'path' => 'paths', 'ua' => 'user_agents');
+const HPS_KEEP        = array('pass' => 10000, 'user' => 10000, 'path' => 5000, 'ua' => 2000, 'fp' => 1000); // Eintraege je Rangliste
+const HPS_MAXLEN      = array('pass' => 64, 'user' => 64, 'path' => 256, 'ua' => 256, 'fp' => 70);       // Zeichen
+const HPS_TOPKEYS     = array('pass' => 'passwords', 'user' => 'usernames', 'path' => 'paths', 'ua' => 'user_agents', 'fp' => 'fingerprints');
 const HPS_PATH_SKIP   = array('/', '/favicon.ico', '/robots.txt', '/sitemap.xml', '/index.html', '/index.htm', '/index.php', '/ads.txt',
 	'/app-ads.txt', '/humans.txt', '/security.txt', '/manifest.json', '/site.webmanifest', '/browserconfig.xml', '/crossdomain.xml');
 const HPS_PATH_SKIP_PREFIX = array('/.well-known/', '/apple-touch-icon', '/favicon');
@@ -102,6 +104,8 @@ function hps_clean(string $kind, string $s): ?string {
 			if(!preg_match(HPS_UA_TOOLS, $s) AND preg_match('#^Mozilla/5\.0 \(#', $s) AND preg_match('#AppleWebKit/|Gecko/|Trident/|Chrome/|Safari/|Firefox/|Edg/#', $s)) { return null; } // Browser
 			foreach(preg_split('/[\s;()\/,]+/', $s) as $part) { if(hps_random($part)) { return null; } }
 			return $s;
+		case 'fp': // H6: nur das Muster der Annahme (JA4/HASSH sehen zufaellig aus, darum ohne hps_random)
+			return preg_match('/^(ja4:[a-z0-9_]{1,64}|hassh:[0-9a-f]{32})$/D', $s) ? $s : null;
 	}
 	return null;
 }
@@ -115,7 +119,7 @@ function hps_clean(string $kind, string $s): ?string {
 function hps_rebuild_top(PDO $pdo, int $n, int $now): array {
 	$from = gmdate('Y-m-d', $now - (HPS_DAYS - 1) * 86400);
 	$src = array('pass' => array('cred', 'hp_samples_creds', 'password'), 'user' => array('cred', 'hp_samples_creds', 'username'),
-		'path' => array('path', 'hp_samples_paths', 'path'), 'ua' => array('ua', 'hp_samples_uas', 'user_agent'));
+		'path' => array('path', 'hp_samples_paths', 'path'), 'ua' => array('ua', 'hp_samples_uas', 'user_agent'), 'fp' => array('fp', 'hp_samples_fps', 'fp'));
 	$out = array();
 	foreach($src as $kind => [$ck, $tab, $col]) {
 		// CAST AS BINARY: Gross-/Kleinschreibung und Leerzeichen am Ende unterscheiden (die Spalten sind _general_ci)

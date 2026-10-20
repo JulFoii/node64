@@ -12817,6 +12817,159 @@
           }
         }
       }
+    },
+    "/threat/passwords/range/{prefix}": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Passwortprüfung mit k-Anonymität",
+        "operationId": "get_threat_passwords_range",
+        "description": "Wie die Range-API von Have I Been Pwned: SHA-1 des Passworts lokal berechnen, nur die ersten 5 Hex-Zeichen schicken, die Antwort lokal vergleichen. Antwort text/plain, je Zeile \"<restliche 35 Hex-Zeichen, groß>:<Anzahl>\" (CRLF, sortiert) für alle Passwörter, die Angreifer in den letzten 365 Tagen an Honeypot64-Sensoren probiert haben und die mindestens 2 bzw. 3 unabhängige Accounts gemeldet haben (Schwelle wie die Ranglisten). Immer mindestens 64 Zeilen: fehlende werden mit Zufallszeilen mit Anzahl 0 aufgefüllt, damit die Größe der Antwort nichts verrät. Cache 1 h. Limit wie /threat/ip: ohne API-Key je Client-IP 10 sofort, dann 1 je Minute; mit API-Key je Account 120 sofort, dann 2 je Sekunde. Seite für Menschen: https://ipv64.net/honeypot/password.php",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "path",
+            "required": true,
+            "description": "Die ersten 5 Hex-Zeichen von SHA-1(Passwort), groß oder klein",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-Fa-f]{5}$",
+              "example": "5BAA6"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hash-Enden mit Anzahl (Anzahl 0 = Füllzeile)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "1E4C9B93F3F0682250B6CF8331B7EE68FD8:4211\r\n2F1A0C4B7E9D3A5C6B8E0F1D2C3B4A5968F:0\r\n"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "description": "Prüfung gerade nicht verfügbar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/threat/feed": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Änderungs-Feed der v64 Blocklist",
+        "operationId": "get_threat_feed",
+        "description": "Änderungen der v64 Blocklist und ihrer Teillisten (Live-Stand, nach jeder Bewertung alle 30 Minuten) nach dem Cursor since, älteste zuerst, höchstens 10 000 je Abruf (more = true: sofort mit next weiter). Vorgehen: einmal die Live-Liste vollständig laden und /threat/feed ohne since abrufen (liefert nur den aktuellen Cursor), danach regelmäßig mit since = next. ETag/If-None-Match: ohne Änderungen 304. Änderungen bleiben 30 Tage; ist ein Cursor älter und sind Änderungen danach schon gelöscht, kommt 410 (Liste neu laden, ohne since beginnen). Für alle Klassen außer Standard und für Beitragende (ein Honeypot64-Sensor des Accounts hat in den letzten 7 Tagen gemeldet), sonst 403 feed_not_available. Limit je Account 120 sofort, dann 2 je Sekunde.",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Cursor aus next der vorigen Antwort; ohne: aktueller Cursor ohne Einträge",
+            "schema": {
+              "type": "string"
+            },
+            "example": "AAAAAGkGJcwAAAAAAAAAKg"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "ETag der vorigen Antwort mit demselben since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich (Kopfzeile ETag)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatFeed"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Keine Änderungen seit dem Abruf mit diesem ETag"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "410": {
+            "description": "Cursor abgelaufen (cursor_expired): Live-Liste neu laden und ohne since beginnen",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "description": "Feed gerade nicht verfügbar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -18158,6 +18311,29 @@
                 }
               }
             }
+          },
+          "fingerprints": {
+            "type": "array",
+            "maxItems": 500,
+            "description": "H6: Fingerabdrücke der Werkzeuge (optional). Keys, die nicht dem Muster folgen, werden verworfen und als invalid_fingerprint gezählt.",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "count"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^(ja4:[a-z0-9_]{1,64}|hassh:[0-9a-f]{32})$",
+                  "example": "ja4:t13d1516h2_8daaf6152771_02713d6af862"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
           }
         }
       },
@@ -18177,7 +18353,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "not_public, own_ip, unknown_kind, unknown_service, unknown_source, out_of_period"
+            "description": "not_public, own_ip, unknown_kind, unknown_service, unknown_source, out_of_period, invalid_fingerprint"
           },
           "report_id": {
             "type": "string"
@@ -18646,6 +18822,13 @@
                 "items": {
                   "$ref": "#/components/schemas/ThreatStatsEntry"
                 }
+              },
+              "fingerprints": {
+                "type": "array",
+                "description": "H6: Fingerabdrücke (JA4/HASSH)",
+                "items": {
+                  "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
               }
             }
           },
@@ -18825,6 +19008,70 @@
             "type": "string",
             "description": "Cursor für den nächsten Abruf (unverändert als since zurückgeben)",
             "example": "2026-10-20T12:12:03Z_42"
+          }
+        }
+      },
+      "ThreatFeedChange": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "example": "203.0.113.7"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "add",
+              "remove",
+              "update"
+            ],
+            "description": "add = neu gelistet, remove = nicht mehr gelistet, update = andere Teillisten"
+          },
+          "lists": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Listen danach (v64, ssh, web, mail, rdp, scanner, research), leer bei remove",
+            "example": [
+              "v64",
+              "ssh"
+            ]
+          },
+          "previous_lists": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Listen davor, leer bei add",
+            "example": []
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Zeitpunkt der Bewertung (UTC)",
+            "example": "2026-10-20T12:07:00Z"
+          }
+        }
+      },
+      "ThreatFeed": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreatFeedChange"
+            },
+            "description": "älteste zuerst, höchstens 10 000"
+          },
+          "next": {
+            "type": "string",
+            "description": "Cursor für den nächsten Abruf (undurchsichtig, unverändert als since verwenden)",
+            "example": "AAAAAGkGJcwAAAAAAAAAKg"
+          },
+          "more": {
+            "type": "boolean",
+            "description": "es liegen weitere Änderungen bereit (sofort mit next weiter abrufen)"
           }
         }
       }
