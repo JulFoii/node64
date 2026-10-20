@@ -1,0 +1,10 @@
+HOCHLADEN – alles, was noch auf ipv64.net fehlt (Stand 2026-10-20)
+
+1. Inhalt von "web" 1:1 nach /var/www/ipv64.net/web/ kopieren (ueberschreiben).
+   - bots/honeypot_cron.php   (neu: ein Cron fuer alle Honeypot-Jobs)
+   - api_v2_honeypot.php      (neue Fallen-Dienste werden kuenftig ohne Upload angenommen)
+
+2. Crontab: die 5 Honeypot-Zeilen loeschen und durch diese EINE ersetzen:
+   * * * * * php8.4 /var/www/ipv64.net/web/bots/honeypot_cron.php > /dev/null 2>&1
+
+Keine SQL-Datei dieses Mal. Danach Bescheid sagen – ich pruefe live und leere diesen Ordner.

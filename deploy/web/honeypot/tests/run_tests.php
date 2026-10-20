@@ -72,8 +72,8 @@ $repA = report($A, 0, function($r) {
 	foreach(array('10.1.2.3', '100.64.1.1', '127.0.0.1', '::1', 'fe80::1', '::ffff:9.9.9.9', '2001:db8::1', '224.0.0.1', '172.16.5.5') as $ip) {
 		$r['sources'][] = array('ip' => $ip, 'kind' => 'ssh:bruteforce', 'service' => 'ssh', 'port' => 22, 'count' => 1, 'first' => $r['period']['start'], 'last' => $r['period']['start'], 'source' => 'honeypot');
 	}
-	$r['sources'][] = array('ip' => '1.0.0.1', 'kind' => 'future:thing', 'service' => 'ssh', 'port' => 22, 'count' => 1, 'first' => $r['period']['start'], 'last' => $r['period']['start'], 'source' => 'honeypot');
-	$r['sources'][] = array('ip' => '1.0.0.2', 'kind' => 'ssh:bruteforce', 'service' => 'gopher', 'port' => 70, 'count' => 1, 'first' => $r['period']['start'], 'last' => $r['period']['start'], 'source' => 'honeypot');
+	$r['sources'][] = array('ip' => '1.0.0.1', 'kind' => '9future:thing', 'service' => 'ssh', 'port' => 22, 'count' => 1, 'first' => $r['period']['start'], 'last' => $r['period']['start'], 'source' => 'honeypot');
+	$r['sources'][] = array('ip' => '1.0.0.2', 'kind' => 'ssh:bruteforce', 'service' => '9gopher', 'port' => 70, 'count' => 1, 'first' => $r['period']['start'], 'last' => $r['period']['start'], 'source' => 'honeypot');
 	$r['samples']['credentials'][] = array('service' => 'ssh', 'user' => 'pi', 'pass' => "raspberry\u{1F600}", 'count' => 2);
 	$r['samples']['credentials'][] = array('service' => 'ssh', 'user' => 'root', 'pass' => '123456', 'count' => 1); // gleicher Schluessel: wird addiert
 	return $r;
@@ -86,7 +86,7 @@ check('report_id zurueck', ($d['report_id'] ?? '') === $repA['report_id'], $d);
 $rr = (array)($d['rejected_reasons'] ?? array());
 check('verworfen: 10 nicht oeffentlich (inkl. 192.0.2.10)', ($rr['not_public'] ?? 0) === 10, $rr);
 check('verworfen: eigene IP', ($rr['own_ip'] ?? 0) === 1, $rr);
-check('verworfen: unbekannte Art/Dienst', ($rr['unknown_kind'] ?? 0) === 1 AND ($rr['unknown_service'] ?? 0) === 1, $rr);
+check('verworfen: Art/Dienst ausserhalb des Musters', ($rr['unknown_kind'] ?? 0) === 1 AND ($rr['unknown_service'] ?? 0) === 1, $rr);
 check('Antwort in 1 s', $r['ms'] < 1000, $r['ms'] . ' ms');
 
 $sen = one("SELECT * FROM hp_sensors WHERE sensor_id = ?", array($A));

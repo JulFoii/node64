@@ -38,6 +38,9 @@ const HP_KINDS = array('ssh:bruteforce', 'telnet:bruteforce', 'http:bruteforce',
 const HP_SERVICES = array('ssh', 'telnet', 'http', 'https', 'tcp', 'scan',
 	'ftp', 'smtp', 'pop3', 'imap', 'rdp', 'mysql', 'mssql', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'docker', 'kubernetes', 'mqtt', 'vnc', 'sip', 'udp', 'vpn');
 const HP_SOURCES  = array('honeypot', 'log', 'syslog');
+// Neue Arten/Dienste spaeterer Sensor-Versionen werden angenommen, wenn sie dem Muster folgen (kein Upload je neuem Dienst)
+const HP_KIND_RE    = '/^[a-z][a-z0-9-]{0,15}:[a-z][a-z0-9-]{0,23}(:[a-z0-9-]{1,24})?$/';
+const HP_SERVICE_RE = '/^[a-z][a-z0-9-]{0,15}$/';
 const HP_PROFILES = array('minimal', 'standard', 'full', 'custom');
 const HP_MODES    = array('module', 'headless');
 
@@ -188,8 +191,8 @@ function hp_parse(array $b, int $now): array {
 		// verwerfen statt abweisen
 		$why = null;
 		if(!hp_public_ip($bin)) { $why = 'not_public'; }
-		elseif(!in_array($kind, HP_KINDS, true)) { $why = 'unknown_kind'; }
-		elseif(!in_array($svc, HP_SERVICES, true)) { $why = 'unknown_service'; }
+		elseif(!in_array($kind, HP_KINDS, true) AND !preg_match(HP_KIND_RE, $kind)) { $why = 'unknown_kind'; }
+		elseif(!in_array($svc, HP_SERVICES, true) AND !preg_match(HP_SERVICE_RE, $svc)) { $why = 'unknown_service'; }
 		elseif(!in_array($source, HP_SOURCES, true)) { $why = 'unknown_source'; }
 		elseif($first < $start - HP_CLOCK_SKEW OR $last > $end + HP_CLOCK_SKEW) { $why = 'out_of_period'; }
 		if($why !== null) { $rej[$why] = ($rej[$why] ?? 0) + 1; continue; }
@@ -213,7 +216,7 @@ function hp_parse(array $b, int $now): array {
 				if(!is_string($svc) OR !preg_match('/^[a-z0-9-]{1,16}$/', $svc)) { hp_bad("$f.service", "$f.service is invalid."); }
 				$user = hp_str($x['user'] ?? null, "$f.user", HP_MAX_TEXT, true);
 				$pass = hp_str($x['pass'] ?? null, "$f.pass", HP_MAX_TEXT, true);
-				if(!in_array($svc, HP_SERVICES, true)) { $rej['unknown_service'] = ($rej['unknown_service'] ?? 0) + 1; continue; }
+				if(!in_array($svc, HP_SERVICES, true) AND !preg_match(HP_SERVICE_RE, $svc)) { $rej['unknown_service'] = ($rej['unknown_service'] ?? 0) + 1; continue; }
 				$samples[$k][] = array('hash' => hash('sha256', $svc . "\0" . $user . "\0" . $pass, true), 'service' => $svc, 'user' => $user, 'pass' => $pass, 'count' => $cnt);
 			} elseif($k === 'payloads') {
 				$sha = is_string($x['sha256'] ?? null) ? strtolower($x['sha256']) : '';
@@ -224,7 +227,7 @@ function hp_parse(array $b, int $now): array {
 				$svc = $x['service'] ?? null;
 				if(!is_string($svc) OR !preg_match('/^[a-z0-9-]{1,16}$/', $svc)) { hp_bad("$f.service", "$f.service is invalid."); }
 				$port = hp_int($x['port'] ?? null, "$f.port", 0, 65535);
-				if(!in_array($svc, HP_SERVICES, true)) { $rej['unknown_service'] = ($rej['unknown_service'] ?? 0) + 1; continue; }
+				if(!in_array($svc, HP_SERVICES, true) AND !preg_match(HP_SERVICE_RE, $svc)) { $rej['unknown_service'] = ($rej['unknown_service'] ?? 0) + 1; continue; }
 				$samples[$k][] = array('sha256' => $sha, 'head' => base64_encode($raw), 'service' => $svc, 'port' => $port, 'count' => $cnt);
 			} else {
 				$key = hp_str($x['key'] ?? null, "$f.key", $k === 'paths' ? HP_MAX_PATH : HP_MAX_TEXT);
