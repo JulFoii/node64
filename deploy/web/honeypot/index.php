@@ -48,10 +48,14 @@ $maxDay = max(1, max($days));
 	<div class="card mb-3"><div class="card-body">
 		<h4 class="mb-2"><i class="fa-solid fa-bug text-primary"></i> Honeypot64 – deine Sensoren</h4>
 		<p class="mb-1">Deine Node64-Sensoren melden alle 10 Minuten, welche IPs sie angegriffen haben. Aus den Meldungen mehrerer
-		unabhängiger Beitragender entsteht die <b>v64 Blocklist</b> (folgt mit der Bewertung, Phase H3); als Beitragende/r bekommst du dann den Live-Stand.</p>
+		unabhängiger Beitragender entsteht die <b>v64 Blocklist</b>; als Beitragende/r bekommst du den Live-Stand.</p>
 		<p class="mb-0 small text-muted">Einrichtung, Profile und Datenschutz: <a href="https://node64.de/docs/honeypot/" target="_blank" rel="noopener">node64.de/docs/honeypot/</a>.
 		Details (Zugangsdaten, Pfade, Top-Angreifer) zeigt die Oberfläche bzw. Info-Seite deiner Node.</p>
 	</div></div>
+
+	<div class="card mb-3"><div class="card-body p-2 small"><i class="fa-solid fa-list text-primary"></i> <b>Live-Listen:</b>
+		v64 Blocklist im Live-Stand (alle 30 Minuten) für Beitragende und Klassen ab VIP – Listen-Token unter <a href="/honeypot/token.php">/honeypot/token.php</a>,
+		Tagesstand für alle unter <a href="/v64_blocklists">/v64_blocklists</a>.</div></div>
 
 	<div class="row">
 		<?php foreach(array(array('Sensoren online', $online . ' / ' . count($sensors)), array('Ereignisse 24 h', hpw_num($tot['e24'])), array('Ereignisse 7 Tage', hpw_num($tot['e7'])),

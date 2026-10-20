@@ -37,12 +37,25 @@ function bl_status(string $updated): string { $old = $updated === '' || (time() 
 				</tr>
 			  </thead>
 				  <tbody>
+					<?php [$cnt, $upd] = bl_file_info('ipv64_blocklist_v64.txt'); ?>
 					<tr class="table-info">
 					<td><i class="fa-solid fa-crown text-warning"></i>
-					<td>v64 Blocker Blocklist
-					<td><span class="badge badge-warning">Coming soon</span>
-					<td><span class="badge badge-dark">Coming soon</span>
-					<td><span class="badge badge-dark">Coming soon</span>
+					<td>v64 Blocklist (Honeypot64) <span class="badge badge-info">Honeypot</span> <span class="badge badge-light" title="Not part of the combined list &quot;All&quot;">not in All</span>
+					<br><small class="text-muted">Own data of IPv64.net: attackers confirmed by several independent Honeypot64 sensors. Daily list free for everyone;
+					live list (every 30 min) for contributors and plans from VIP: token at <a href="/honeypot/token.php">/honeypot/token.php</a></small>
+					<br><small>Sub-lists:
+					<?php foreach(array('ssh' => 'SSH/Telnet', 'web' => 'Web', 'mail' => 'Mail', 'rdp' => 'RDP', 'scanner' => 'Scanner', 'research' => 'Research scanners') as $sl => $sn) { [$c2] = bl_file_info("ipv64_blocklist_v64_$sl.txt"); ?>
+					<a href="https://ipv64.net/blocklists/ipv64_blocklist_v64_<?php echo $sl;?>.txt" target="_blank" title="v64 <?php echo $sn;?> RAW Format (v4: ipv64_blocklist_v4_v64_<?php echo $sl;?>.txt, v6: ipv64_blocklist_v6_v64_<?php echo $sl;?>.txt)"><span class="badge badge-light"><?php echo $sn;?> <?php echo formatLargeNumber($c2);?></span></a>
+					<?php } ?></small>
+					<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+					<td><?php echo bl_status($upd); ?>
+					<span class="badge badge-primary"> <?php echo $upd !== '' ? timeago2($upd,date("Y-m-d H:i:s",time())) : '-'; ?></span>
+					<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_v64.txt" target="_blank" title="v64 Blocklist RAW Format">
+					<span class="badge badge-success">All</span></a>
+					<a href="https://ipv64.net/blocklists/ipv64_blocklist_v4_v64.txt" target="_blank" title="v64 Blocklist only IPv4 RAW Format">
+					<span class="badge badge-dark">Only v4</span></a>
+					<a href="https://ipv64.net/blocklists/ipv64_blocklist_v6_v64.txt" target="_blank" title="v64 Blocklist only IPv6 RAW Format">
+					<span class="badge badge-secondary">Only v6</span></a>
 					</tr>
 					<?php 
 					$statement = $pdo->prepare("SELECT * FROM blocklisten");

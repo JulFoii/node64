@@ -99,6 +99,10 @@
     {
       "name": "Honeypot64",
       "description": "Honeypot64-Sensoren (Node64) melden alle 10 Minuten Angriffe (Format schema 1); eigene Sensoren und eigener Beitrag. Aus den Meldungen mehrerer Accounts entsteht die v64 Blocklist."
+    },
+    {
+      "name": "Threat",
+      "description": "IP-Auskunft zur v64 Blocklist (Honeypot64): Warum ist eine IP gelistet? Ohne API-Key mit engem Limit je Client-IP (10 sofort, dann 1 je Minute), mit API-Key großzügiger (120 sofort, dann 2 je Sekunde je Account). Keine Angaben zu Sensoren oder meldenden Accounts."
     }
   ],
   "paths": {
@@ -12486,6 +12490,66 @@
           }
         }
       }
+    },
+    "/threat/ip/{ip}": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "IP-Auskunft",
+        "operationId": "get_threat_ip",
+        "description": "„Warum ist diese IP gelistet?“ Gelistet ja/nein, Status (auch Freigabe), Vertrauenswert, Listen, Arten, Ports (nur von mindestens 2 Accounts gemeldet), erste/letzte Sichtung (Tag, UTC), Anzahl meldender Accounts, Land/ASN (falls vorhanden, sonst null). Für nicht gelistete IPs keine Einzelheiten. Freigaben wirken hier sofort, in den Listen mit der nächsten Bewertung. Ein angegebener, aber ungültiger API-Key ergibt 401.",
+        "parameters": [
+          {
+            "name": "ip",
+            "in": "path",
+            "required": true,
+            "description": "Genau eine öffentliche IPv4- oder IPv6-Adresse (kein Netz)",
+            "schema": {
+              "type": "string",
+              "example": "203.0.113.7"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatIp"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyHeader": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -17983,6 +18047,168 @@
                 }
               }
             }
+          }
+        }
+      },
+      "ThreatIp": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "Normalisierte Adresse",
+            "example": "203.0.113.7"
+          },
+          "family": {
+            "type": "integer",
+            "enum": [
+              4,
+              6
+            ],
+            "example": 4
+          },
+          "listed": {
+            "type": "boolean",
+            "description": "steht auf der v64 Blocklist (Freigaben sind schon herausgerechnet)",
+            "example": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "listed",
+              "not_listed",
+              "released",
+              "allowlisted"
+            ],
+            "description": "released = Freigabe aus Antrag (befristet), allowlisted = Freigabeliste",
+            "example": "listed"
+          },
+          "score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertrauenswert 0–100 (nur wenn gelistet)",
+            "example": 72
+          },
+          "lists": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ssh",
+                "web",
+                "mail",
+                "rdp",
+                "scanner",
+                "research"
+              ]
+            },
+            "description": "Teillisten (ipv64_blocklist_v64_<name>)",
+            "example": [
+              "ssh"
+            ]
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Arten (feste Einteilung, z. B. ssh:bruteforce)",
+            "example": [
+              "ssh:bruteforce",
+              "generic:portscan"
+            ]
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "service": {
+                  "type": "string",
+                  "example": "ssh"
+                },
+                "port": {
+                  "type": "integer",
+                  "example": 22
+                }
+              }
+            },
+            "description": "angegriffene Ports, die mindestens 2 Accounts gemeldet haben (höchstens 10)"
+          },
+          "first_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "erste Sichtung (Tag, UTC)",
+            "example": "2026-10-18"
+          },
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "letzte Sichtung (Tag, UTC)",
+            "example": "2026-10-20"
+          },
+          "accounts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Anzahl verschiedener meldender Accounts",
+            "example": 4
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Land (ISO 3166-1), falls bekannt",
+            "example": null
+          },
+          "asn": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Netzbetreiber (ASN), falls bekannt",
+            "example": null
+          },
+          "release": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "in_review",
+                  "released",
+                  "allowlisted",
+                  "rejected"
+                ],
+                "example": "none"
+              },
+              "protected_until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "Freigabe gilt bis (UTC); null = dauerhaft bzw. keine Freigabe",
+                "example": null
+              }
+            }
+          },
+          "details": {
+            "type": "string",
+            "description": "Seite mit Erklärung und Freigabe-Antrag",
+            "example": "https://ipv64.net/honeypot/ip.php?ip=203.0.113.7"
           }
         }
       }

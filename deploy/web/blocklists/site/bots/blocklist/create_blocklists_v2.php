@@ -18,15 +18,21 @@
 // Aufruf:  php create_blocklists_v2.php              -> schreibt nach ../../blocklists/
 //          php create_blocklists_v2.php --out=/tmp/x  -> schreibt zum Vergleichen nach /tmp/x (keine DB-Updates)
 //          php create_blocklists_v2.php --dry         -> nur Statistik, schreibt nichts
+//          php create_blocklists_v2.php --only=v64    -> nur die v64 Blocklist (Honeypot64, nach honeypot_score.php alle 30 min)
+//          php create_blocklists_v2.php --v64-daily   -> Tagesstand der v64 Blocklist jetzt neu schreiben
 include("/var/www/clients/client1/web58/web/dbconnect.php");
 set_time_limit(900);
 ini_set('memory_limit', '1024M');
 
 $OUT = realpath(__DIR__."/../../blocklists");
-$dry = false; $extern = false;
+// Live-Stand der v64 Blocklist: nicht oeffentlich (ISPConfig-Ordner private/ neben web/), ausgeliefert ueber blocklists/live.php
+$LIVE = dirname(__DIR__, 3)."/private/blocklists_live";
+$dry = false; $extern = false; $only_v64 = false; $v64_daily = false;
 foreach($argv as $a) {
 	if($a === '--dry') { $dry = true; }
-	if(str_starts_with($a, '--out=')) { $OUT = rtrim(substr($a, 6), '/'); $extern = true; @mkdir($OUT, 0755, true); @mkdir($OUT."/countries", 0755, true); @mkdir($OUT."/user", 0755, true); }
+	if($a === '--only=v64') { $only_v64 = true; }
+	if($a === '--v64-daily') { $v64_daily = true; }
+	if(str_starts_with($a, '--out=')) { $OUT = rtrim(substr($a, 6), '/'); $LIVE = $OUT."/live"; $extern = true; @mkdir($OUT, 0755, true); @mkdir($OUT."/countries", 0755, true); @mkdir($OUT."/user", 0755, true); }
 }
 if($OUT === false OR !is_dir($OUT)) { die("Ausgabeverzeichnis nicht gefunden\n"); }
 echo ($dry ? "*** DRY RUN ***\n" : "Ausgabe: $OUT\n");
@@ -188,6 +194,80 @@ function index_entry(string $id, string $name, string $p, array $v4, array $v6, 
 }
 
 // ---------------------------------------------------------------
+// 0. v64 Blocklist (Honeypot64) aus hp_scores (bots/blocklist/honeypot_score.php), Hauptliste und Teillisten.
+//    Live-Stand bei jedem Lauf nach $LIVE (nicht oeffentlich, Abruf mit Listen-Token ueber blocklists/live.php),
+//    Tagesstand beim ersten Lauf eines UTC-Tages nach blocklists/ (frei fuer alle). Nicht in "all"/"all_notor".
+// ---------------------------------------------------------------
+const V64_LISTS = [
+	'v64'          => ['v64 Blocklist (Honeypot64)', 'Attackers confirmed by several independent Honeypot64 sensors (logins, exploits, scans); research scanners not included'],
+	'v64_ssh'      => ['v64 SSH/Telnet', 'Honeypot64: SSH and Telnet brute force'],
+	'v64_web'      => ['v64 Web', 'Honeypot64: web attacks (login pages, exploits, scans)'],
+	'v64_mail'     => ['v64 Mail', 'Honeypot64: mail login brute force'],
+	'v64_rdp'      => ['v64 RDP', 'Honeypot64: RDP brute force'],
+	'v64_scanner'  => ['v64 Scanner', 'Honeypot64: port scanners, probes and scanner user agents'],
+	'v64_research' => ['v64 Research Scanner', 'Honeypot64: research scanners (Shodan, Censys and others), not part of the v64 Blocklist'],
+];
+
+/** index.json-Eintraege der v64-Listen aus den oeffentlichen Dateien (Tagesstand) */
+function v64_index(string $OUT): array
+{
+	$e = [];
+	foreach(V64_LISTS as $id => [$name, $desc]) {
+		$p = "$OUT/ipv64_blocklist_$id.txt";
+		if(!is_file($p)) { continue; }
+		$c4 = is_file("$OUT/ipv64_blocklist_v4_$id.txt") ? count(file("$OUT/ipv64_blocklist_v4_$id.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : 0;
+		$c6 = is_file("$OUT/ipv64_blocklist_v6_$id.txt") ? count(file("$OUT/ipv64_blocklist_v6_$id.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : 0;
+		$e[] = ['id' => $id, 'name' => $name, 'category' => 'honeypot', 'in_all' => false, 'description' => $desc,
+			'source' => 'https://ipv64.net/honeypot/', 'license' => 'own data of IPv64.net (Honeypot64), free to use',
+			'count' => $c4 + $c6, 'count_v4' => $c4, 'count_v6' => $c6, 'updated' => date('c', filemtime($p)),
+			'files' => index_files('', $id, true), 'live' => true];
+	}
+	return $e;
+}
+
+$v64_index = [];
+try {
+	$v64 = array_fill_keys(array_keys(V64_LISTS), []);
+	foreach($pdo->query("SELECT ip, lists FROM hp_scores WHERE listed = 1")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+		foreach(explode(',', (string)$r["lists"]) as $l) { $id = ($l === 'v64') ? 'v64' : "v64_$l"; if(isset($v64[$id])) { $v64[$id][] = $r["ip"]; } }
+	}
+	$daily = $v64_daily || !is_file("$OUT/ipv64_blocklist_v64.txt") || gmdate('Y-m-d', filemtime("$OUT/ipv64_blocklist_v64.txt")) !== gmdate('Y-m-d');
+	if(!$dry AND !is_dir($LIVE)) { mkdir($LIVE, 0755, true); }
+	foreach($v64 as $f => $ips) {
+		[$nets, $bad, $bog] = net_clean($ips);
+		[$v4, $v6] = split46($nets);
+		foreach(($daily ? [$LIVE, $OUT] : [$LIVE]) as $dir) {
+			write_raw("$dir/ipv64_blocklist_$f.txt", $nets);
+			write_raw("$dir/ipv64_blocklist_v4_$f.txt", $v4);
+			write_raw("$dir/ipv64_blocklist_v6_$f.txt", $v6);
+			write_mikrotik("$dir/v64_mikrotik_v4_$f.rsc", $v4, 4, "IPv64-$f");
+			write_mikrotik("$dir/v64_mikrotik_v6_$f.rsc", $v6, 6, "IPv64-$f");
+		}
+		printf("%-22s %6d Netze (v4 %6d, v6 %4d) live%s\n", $f, count($nets), count($v4), count($v6), $daily ? " + Tagesstand" : "");
+	}
+} catch(Throwable $e) {
+	echo "v64 Blocklist: nicht geschrieben (".$e->getMessage().")\n";
+}
+$v64_index = v64_index($OUT);
+$v64_live = ['base' => 'https://ipv64.net/blocklists/live/{token}/', 'categories' => ['honeypot'], 'token' => 'https://ipv64.net/honeypot/token.php',
+	'info' => 'Live list for contributors and all plans except Standard; otherwise the daily list (header X-IPv64-List: live|daily)'];
+if($only_v64) {
+	// nur die honeypot-Eintraege in der vorhandenen index.json ersetzen
+	$idx = is_file("$OUT/index.json") ? json_decode((string)file_get_contents("$OUT/index.json"), true) : null;
+	if(is_array($idx) AND isset($idx['lists']) AND is_array($idx['lists'])) {
+		$idx['lists'] = array_values(array_filter($idx['lists'], fn($e) => ($e['category'] ?? '') !== 'honeypot'));
+		$idx['lists'] = array_merge($idx['lists'], $v64_index);
+		$idx['live'] = $v64_live;
+		write_atomic("$OUT/index.json", json_encode($idx, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
+		echo "index.json: ".count($v64_index)." v64-Listen eingetragen\n";
+	} else {
+		echo "index.json fehlt oder ist ungueltig: v64-Listen kommen mit dem naechsten vollen Lauf hinein\n";
+	}
+	echo "Fertig (nur v64)".($dry ? " (nichts geschrieben)" : "")."\n";
+	exit(0);
+}
+
+// ---------------------------------------------------------------
 // 1. Einzelne Quelllisten
 // ---------------------------------------------------------------
 $alle = []; $alle_notor = []; // Gesamtliste mit und ohne Tor
@@ -298,6 +378,8 @@ foreach($region_nets as $r => $nets)
 	$index['regions'][] = ['countries' => $regionen[$r]] + index_entry($r, ucwords(str_replace("_", " ", $r)), "countries/", $v4, $v6, false);
 }
 
+$index['lists'] = array_merge($index['lists'], $v64_index); // v64 Blocklist (Abschnitt 0), nicht in "all"
+$index['live'] = $v64_live;
 write_atomic("$OUT/index.json", json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 echo "index.json: ".count($index['lists'])." Listen, ".count($index['countries'])." Laender\n";
 
