@@ -22,7 +22,7 @@ const HP_MAX_BACK     = 612000;   // period.start hoechstens 7 Tage + 2 h zuruec
 const HP_MAX_PERIOD   = 604800;   // Zeitraum hoechstens 7 Tage
 const HP_CLOCK_SKEW   = 300;      // Zeiten duerfen 5 min in der Zukunft liegen
 const HP_MIN_GAP      = 120;      // hoechstens eine Meldung je Sensor in 2 Minuten
-const HP_MAX_SENSORS  = 50;       // Sensoren je Account
+const HP_MAX_SENSORS  = 50;       // Sensoren je Account, nur falls honeypot/hp_limits_lib.php fehlt (H5: Limit je Klasse)
 const HP_ONLINE       = 1800;     // online = Meldung in den letzten 30 Minuten
 const HP_MAX_TEXT     = 256;      // MaxText (Benutzer, Passwort, User-Agent, Detail)
 const HP_MAX_PATH     = 1024;     // MaxPath
@@ -36,7 +36,7 @@ const HP_KINDS = array('ssh:bruteforce', 'telnet:bruteforce', 'http:bruteforce',
 	'http:bad-useragent', 'generic:portscan', 'generic:probe', 'scanner:research',
 	'rdp:bruteforce', 'mail:auth-bruteforce', 'db:bruteforce', 'vpn:bruteforce');
 const HP_SERVICES = array('ssh', 'telnet', 'http', 'https', 'tcp', 'scan',
-	'ftp', 'smtp', 'pop3', 'imap', 'rdp', 'mysql', 'mssql', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'docker', 'kubernetes', 'mqtt', 'vnc', 'sip', 'udp');
+	'ftp', 'smtp', 'pop3', 'imap', 'rdp', 'mysql', 'mssql', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'docker', 'kubernetes', 'mqtt', 'vnc', 'sip', 'udp', 'vpn');
 const HP_SOURCES  = array('honeypot', 'log', 'syslog');
 const HP_PROFILES = array('minimal', 'standard', 'full', 'custom');
 const HP_MODES    = array('module', 'headless');
@@ -265,8 +265,11 @@ function hp_store(array $r, int $bytes, int $now): array {
 		}
 		if((int)$sen['disabled'] === 1) { fail(403, 'sensor_disabled', 'This sensor is disabled by ipv64.'); }
 		if((int)$sen['userid'] !== $u OR $sen['last_seen'] === null) { // neu oder an einen anderen Account umgezogen
-			$n = (int)q1("SELECT count(*) c FROM hp_sensors WHERE userid = :u AND sensor_id != :s", array('u' => $u, 's' => $sid))['c'];
-			if($n >= HP_MAX_SENSORS) { fail(403, 'sensor_limit', 'At most ' . HP_MAX_SENSORS . ' honeypot sensors per account.'); }
+			// H5: Limit je Klasse (honeypot/hp_limits_lib.php: Standard 5, sonst 25), es zaehlen nur Sensoren mit Meldung in 30 Tagen
+			if(is_file(__DIR__ . '/honeypot/hp_limits_lib.php')) { require_once __DIR__ . '/honeypot/hp_limits_lib.php'; }
+			[$max, $act] = function_exists('hpl_sensor_limit') ? array(hpl_sensor_limit((int)($GLOBALS['ME']['user_class'] ?? 1)), HPL_SENSOR_ACTIVE) : array(HP_MAX_SENSORS, 3650 * 86400);
+			$n = (int)q1("SELECT count(*) c FROM hp_sensors WHERE userid = :u AND sensor_id != :s AND last_seen >= :d", array('u' => $u, 's' => $sid, 'd' => hp_dt($now - $act)))['c'];
+			if($n >= $max) { fail(403, 'sensor_limit', "At most $max active honeypot sensors per account (account class).", array('limit' => $max)); }
 			if((int)$sen['userid'] !== $u) { q("UPDATE hp_sensors set userid = :u WHERE sensor_id = :s", array('u' => $u, 's' => $sid)); }
 		}
 		if($sen['last_seen'] !== null AND (int)$sen['userid'] === $u) {

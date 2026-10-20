@@ -12301,7 +12301,7 @@
         ],
         "summary": "Meldung eines Sensors annehmen",
         "operationId": "post_honeypot_reports",
-        "description": "Nur für Node64 (Modul honeypot bzw. NODE64_MODE=honeypot). Body JSON, optional mit Content-Encoding: gzip, höchstens 2 MiB entpackt. report_id = <sensor.id>-<period.start unix>; schon bekannte report_id: 200 mit duplicate. Höchstens eine Meldung je Sensor in 2 Minuten (429 mit Retry-After), höchstens 50 Sensoren je Account. Quellen mit privater/reservierter IP, der IP eines eigenen Sensors oder unbekannter Art/Dienst werden verworfen und in rejected gezählt. 400/413/422: nicht wiederholen; 401/403: Key bzw. Sensor prüfen; 429/5xx: später erneut.",
+        "description": "Nur für Node64 (Modul honeypot bzw. NODE64_MODE=honeypot). Body JSON, optional mit Content-Encoding: gzip, höchstens 2 MiB entpackt. report_id = <sensor.id>-<period.start unix>; schon bekannte report_id: 200 mit duplicate. Höchstens eine Meldung je Sensor in 2 Minuten (429 mit Retry-After), neue Sensoren je Account höchstens 5 (Klasse Standard) bzw. 25 (andere Klassen), es zählen Sensoren mit Meldung in den letzten 30 Tagen (sonst 403 sensor_limit). Quellen mit privater/reservierter IP, der IP eines eigenen Sensors oder unbekannter Art/Dienst werden verworfen und in rejected gezählt. 400/413/422: nicht wiederholen; 401/403: Key bzw. Sensor prüfen; 429/5xx: später erneut.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ActAs"
@@ -12604,6 +12604,218 @@
             "apiKeyHeader": []
           }
         ]
+      }
+    },
+    "/threat/watch": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Frühwarnung: Netze und Limits",
+        "operationId": "get_threat_watch",
+        "description": "Frühwarnung für eigene Netze (Honeypot64): Limits deiner Klasse, eingetragene Netze und die automatisch überwachten DynDNS-IPs des Accounts (aktuelle öffentliche A/AAAA-Einträge deiner Domains). Limit wie GET /threat/ip mit API-Key (eigener Topf).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatWatch"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Frühwarnung: Netz eintragen",
+        "operationId": "post_threat_watch",
+        "description": "Trägt ein öffentliches Netz (CIDR) oder eine einzelne IP ein; Host-Bits werden entfernt (203.0.113.7/24 → 203.0.113.0/24). Ohne Nachweis (verified false, setzt nur ipv64) gibt es Treffer nur für IPs, die auf der v64 Blocklist stehen. Fehler: 422 invalid_cidr, prefix_too_large (größer als limits.min_prefix_v4/v6), not_public; 409 duplicate; 403 limit_reached (limits.max erreicht).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cidr": {
+                    "type": "string",
+                    "description": "Netz in CIDR-Form oder einzelne IP (IPv4 bis /16, IPv6 bis /32)",
+                    "example": "203.0.113.0/24"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Bezeichnung (optional)",
+                    "example": "Büro"
+                  }
+                },
+                "required": [
+                  "cidr"
+                ]
+              },
+              "example": {
+                "cidr": "203.0.113.0/24",
+                "label": "Büro"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatWatchNetwork"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
+    "/threat/watch/{id}": {
+      "delete": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Frühwarnung: Netz löschen",
+        "operationId": "delete_threat_watch_id",
+        "description": "Entfernt ein eigenes Netz. Frühere Treffer bleiben (mit network_id) erhalten.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ID des Netzes",
+            "schema": {
+              "type": "string"
+            },
+            "example": "12"
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Erfolgreich, ohne Inhalt"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
+    "/threat/watch/alerts": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Frühwarnung: Treffer",
+        "operationId": "get_threat_watch_alerts",
+        "description": "Treffer der Frühwarnung: eine IP aus einem eigenen Netz bzw. eine DynDNS-IP des Accounts ist bei der Bewertung (alle 30 Minuten) als Angreifer aufgefallen. Netze ohne Nachweis nur mit gelisteten IPs, DynDNS-IPs mit jeder Sichtung. Dieselbe IP höchstens einmal je 24 h, außer sie wird neu gelistet. Älteste zuerst (created_at, id), höchstens 100 je Abruf. next ist ein Cursor (für den Client undurchsichtig, derzeit \"<RFC 3339>_<id>\"): unverändert als since des nächsten Abrufs verwenden; doppelte IDs verwerfen. Ohne neue Treffer ist next der übergebene Stand, bei leerem since die aktuelle Zeit (minus 5 Minuten). Treffer werden 90 Tage aufgehoben.",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Cursor aus next der vorigen Antwort ((created_at, id) danach) oder ein RFC-3339-Zeitpunkt (created_at danach); ohne: alle",
+            "schema": {
+              "type": "string"
+            },
+            "example": "2026-10-20T12:12:03Z_42"
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatWatchAlerts"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
       }
     }
   },
@@ -18444,6 +18656,175 @@
           "license": {
             "type": "string",
             "example": "CC BY 4.0 (IPv64.net Honeypot64), provided as is without warranty"
+          }
+        }
+      },
+      "ThreatWatch": {
+        "type": "object",
+        "properties": {
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max": {
+                "type": "integer",
+                "description": "Netze je Account (Standard 3, sonst 50)",
+                "example": 3
+              },
+              "min_prefix_v4": {
+                "type": "integer",
+                "description": "IPv4 höchstens /16",
+                "example": 16
+              },
+              "min_prefix_v6": {
+                "type": "integer",
+                "description": "IPv6 höchstens /32",
+                "example": 32
+              }
+            }
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreatWatchNetwork"
+            }
+          },
+          "dyndns": {
+            "type": "array",
+            "description": "automatisch überwacht (gelten als nachgewiesen)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ip": {
+                  "type": "string",
+                  "example": "198.51.100.7"
+                },
+                "domain": {
+                  "type": "string",
+                  "example": "x.ipv64.net"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ThreatWatchNetwork": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "cidr": {
+            "type": "string",
+            "description": "Netz, normalisiert (Netzadresse ohne Host-Bits)",
+            "example": "203.0.113.0/24"
+          },
+          "label": {
+            "type": "string",
+            "example": "Büro"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Nachweis erbracht (setzt nur ipv64): dann meldet jede Sichtung, sonst nur gelistete IPs",
+            "example": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-20T12:00:00Z"
+          }
+        }
+      },
+      "ThreatWatchAlert": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 7
+          },
+          "ip": {
+            "type": "string",
+            "example": "203.0.113.9"
+          },
+          "cidr": {
+            "type": "string",
+            "description": "Netz bzw. bei dyndns die IP als /32 bzw. /128",
+            "example": "203.0.113.0/24"
+          },
+          "network_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null bei dyndns",
+            "example": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "network",
+              "dyndns"
+            ],
+            "example": "network"
+          },
+          "label": {
+            "type": "string",
+            "description": "Bezeichnung des Netzes bzw. Domain (zusätzlich)",
+            "example": "Büro"
+          },
+          "listed": {
+            "type": "boolean",
+            "description": "steht auf der v64 Blocklist",
+            "example": true
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertrauenswert der Bewertung",
+            "example": 72
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "ssh:bruteforce"
+            ]
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date",
+            "description": "erste Sichtung (Tag, UTC)",
+            "example": "2026-10-19"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date",
+            "description": "letzte Sichtung (Tag, UTC)",
+            "example": "2026-10-20"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-20T12:12:03Z"
+          }
+        }
+      },
+      "ThreatWatchAlerts": {
+        "type": "object",
+        "properties": {
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreatWatchAlert"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Cursor für den nächsten Abruf (unverändert als since zurückgeben)",
+            "example": "2026-10-20T12:12:03Z_42"
           }
         }
       }
