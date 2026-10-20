@@ -13,7 +13,7 @@
 
 const HPR_URL            = 'https://ipv64.net/honeypot/ip.php';
 const HPR_ADMIN_URL      = 'https://ipv64.net/honeypot/admin.php';
-const HPR_NOTIFY         = '';        // Mail bei Eskalation; leer = alle Accounts mit users.admin = 1
+const HPR_NOTIFY         = 'info@ipv64.net'; // Mail bei Eskalation (Dennis 2026-10-20); leer = alle Accounts mit users.admin = 1
 const HPR_QUIET          = 86400;     // 24 h ohne Beruehrung nach der Bestaetigung -> automatisch frei
 const HPR_PROTECT_DAYS   = 30;        // Schutz nach Freigabe
 const HPR_MAX_PER_DAY    = 3;         // Antraege je Absender-IP und je E-Mail/Account in 24 h

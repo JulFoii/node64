@@ -72,8 +72,8 @@ require __DIR__ . '/api_v2_threat.php';
 
 ## 5. Mail an Dennis
 
-Eskalationen gehen an alle Accounts mit `users.admin = 1`. Soll es nur eine feste Adresse sein: in
-`honeypot/hp_release_lib.php` `const HPR_NOTIFY = '';` auf die Adresse setzen. Versand über `send_mail()` aus
+Eskalationen gehen nur an **info@ipv64.net** (`const HPR_NOTIFY` in `honeypot/hp_release_lib.php`; leer = alle
+Accounts mit `users.admin = 1`). Versand über `send_mail()` aus
 `dbconnect.php` (wie Healthchecks 2.0: mit dem 9. Parameter, falls vorhanden, sonst die alte Form).
 
 ## 6. Prüfen
@@ -139,7 +139,7 @@ Die Admin-Seite bekommt bewusst keinen Menüpunkt (Lesezeichen).
   (nach 2 Tagen geleert). Statusseite je Antrag über `?request=<token>`.
 - **`bots/honeypot_release.php`** (stündlich): 24 h nach der Bestätigung ohne neue Berührung → `released`,
   30 Tage geschützt, Eintrag in `hp_allowlist` (`source = request`, `until`), Bescheid per Mail. Eskaliert (Mail an
-  Admins, Entscheidung auf der Admin-Seite): greift weiter an, weitere Anträge für dieselbe IP in 90 Tagen, ein
+  info@ipv64.net, Entscheidung auf der Admin-Seite): greift weiter an, weitere Anträge für dieselbe IP in 90 Tagen, ein
   Absender mit Anträgen für 5+ IPs in 30 Tagen, Provider-/Cloud-Netz (Listen mit `blocklisten.category = 'cloud'`,
   z. B. AWS, Google Cloud). Fristen: unbestätigte Anträge 48 h, E-Mail 90 Tage nach Entscheidung, Anträge 365 Tage,
   abgelaufene Freigaben aus Anträgen 7 Tage nach Ablauf.

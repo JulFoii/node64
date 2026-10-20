@@ -218,7 +218,7 @@ function v64_index(string $OUT): array
 		$c4 = is_file("$OUT/ipv64_blocklist_v4_$id.txt") ? count(file("$OUT/ipv64_blocklist_v4_$id.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : 0;
 		$c6 = is_file("$OUT/ipv64_blocklist_v6_$id.txt") ? count(file("$OUT/ipv64_blocklist_v6_$id.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : 0;
 		$e[] = ['id' => $id, 'name' => $name, 'category' => 'honeypot', 'in_all' => false, 'description' => $desc,
-			'source' => 'https://ipv64.net/honeypot/', 'license' => 'own data of IPv64.net (Honeypot64), free to use',
+			'source' => 'https://ipv64.net/honeypot/', 'license' => 'CC BY 4.0 (IPv64.net Honeypot64), provided as is without warranty',
 			'count' => $c4 + $c6, 'count_v4' => $c4, 'count_v6' => $c6, 'updated' => date('c', filemtime($p)),
 			'files' => index_files('', $id, true), 'live' => true];
 	}
