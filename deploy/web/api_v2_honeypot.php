@@ -10,6 +10,7 @@
  *   GET  /honeypot/sensors   eigene Sensoren mit Beitrag 24 h / 7 d
  *   GET  /honeypot/stats     eigener Beitrag: Ereignisse, Quell-IPs, Top-Arten, Top-Ports, Verlauf 7 Tage
  *
+ * Proben zaehlen zusaetzlich je Account (hp_sample_contrib, H4: deploy/sql/honeypot_h4_stats.sql).
  * Die IP des Sensors (aus der Verbindung) wird nur intern gespeichert, nie ausgegeben; Meldungen ueber eigene IPs
  * (dieser Sensor und alle Sensoren des Accounts) sowie private/reservierte Adressen werden verworfen.
  */
@@ -324,6 +325,15 @@ function hp_store(array $r, int $bytes, int $now): array {
 			array_map(fn($x) => array($sday, bin2hex($x['hash']), hp_text($x['key']), $x['count'], $ts), $smp['user_agents']), $upd);
 		hp_insert("INSERT INTO hp_samples_payloads (day, sha256, service, port, head_b64, `count`, last_seen)", '(?,?,?,?,?,?,?)',
 			array_map(fn($x) => array($sday, $x['sha256'], $x['service'], $x['port'], $x['head'], $x['count'], $ts), $smp['payloads']), $upd);
+		// H4: Beitrag je Account (Listen/Ranglisten nur ab mehreren Accounts, deploy/sql/honeypot_h4_stats.sql)
+		$con = array();
+		foreach(array('cred' => 'credentials', 'path' => 'paths', 'ua' => 'user_agents') as $ck => $sk) {
+			foreach($smp[$sk] as $x) { $con[] = array($ck, $sday, bin2hex($x['hash']), $u, $x['count']); }
+		}
+		$pl = array();
+		foreach($smp['payloads'] as $x) { $pl[$x['sha256']] = ($pl[$x['sha256']] ?? 0) + $x['count']; }
+		foreach($pl as $sha => $c) { $con[] = array('payload', $sday, $sha, $u, $c); }
+		hp_insert("INSERT INTO hp_sample_contrib (kind, day, key_hash, userid, cnt)", '(?,?,UNHEX(?),?,?)', $con, 'ON DUPLICATE KEY UPDATE cnt = cnt + VALUES(cnt)');
 
 		q("UPDATE hp_sensors set version = :v, profile = :p, mode = :m, last_seen = :t, last_ip = :ip, last_report_id = :r, reports = reports + 1,
 			last_period_end = IF(last_period_end IS NULL OR last_period_end < :pe, :pe2, last_period_end) WHERE sensor_id = :s",

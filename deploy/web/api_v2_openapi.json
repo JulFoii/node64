@@ -12550,6 +12550,61 @@
           }
         ]
       }
+    },
+    "/threat/stats": {
+      "get": {
+        "tags": [
+          "Threat"
+        ],
+        "summary": "Statistik Honeypot64 (Überblick)",
+        "operationId": "get_threat_stats",
+        "description": "Öffentlicher Überblick wie auf https://ipv64.net/honeypot/stats.php: aktive Sensoren, Angriffe 24 h, Verlauf 30 Tage, Top 10 Ports und Arten, Größe der Listen, Top 10 Benutzernamen, Passwörter, Pfade und User-Agents. Ranglisten enthalten nur Einträge, die mindestens threshold.accounts unabhängige Accounts in den letzten 30 Tagen gemeldet haben (bereinigt: keine E-Mail-Adressen, Steuerzeichen, zufälligen Zeichenketten). Antwort aus dem Cache, höchstens alle 10 Minuten neu berechnet. Limit wie /threat/ip: ohne API-Key je Client-IP 10 sofort, dann 1 je Minute; mit API-Key je Account 120 sofort, dann 2 je Sekunde. Ein angegebener, aber ungültiger API-Key ergibt 401.",
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ThreatStats"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "description": "Statistik gerade nicht verfügbar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyHeader": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -18209,6 +18264,186 @@
             "type": "string",
             "description": "Seite mit Erklärung und Freigabe-Antrag",
             "example": "https://ipv64.net/honeypot/ip.php?ip=203.0.113.7"
+          }
+        }
+      },
+      "ThreatStatsEntry": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "example": "admin"
+          },
+          "events": {
+            "type": "integer",
+            "description": "Summe der Versuche (30 Tage)",
+            "example": 18423
+          },
+          "accounts": {
+            "type": "integer",
+            "description": "verschiedene meldende Accounts (30 Tage)",
+            "example": 5
+          }
+        }
+      },
+      "ThreatStats": {
+        "type": "object",
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Stand des Caches (UTC)",
+            "example": "2026-10-20T12:00:00Z"
+          },
+          "window_days": {
+            "type": "integer",
+            "description": "Fenster der Ranglisten in Tagen",
+            "example": 30
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "accounts": {
+                "type": "integer",
+                "description": "Mindestzahl meldender Accounts für Ranglisten und Listen (2 unter 20 aktiven Accounts, sonst 3)",
+                "example": 2
+              },
+              "active_accounts_7d": {
+                "type": "integer",
+                "description": "Accounts, deren Sensoren in den letzten 7 Tagen gemeldet haben",
+                "example": 12
+              }
+            }
+          },
+          "sensors": {
+            "type": "object",
+            "properties": {
+              "active_7d": {
+                "type": "integer",
+                "example": 25
+              },
+              "online": {
+                "type": "integer",
+                "description": "Meldung in den letzten 30 Minuten",
+                "example": 21
+              }
+            }
+          },
+          "attacks_24h": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "integer",
+                "example": 120345
+              },
+              "sources": {
+                "type": "integer",
+                "description": "verschiedene Angreifer-IPs",
+                "example": 4312
+              }
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "description": "Angriffe je Tag (UTC), 30 Tage",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "events": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "top_ports": {
+            "type": "array",
+            "description": "meistangegriffene Ports (7 Tage, höchstens 10)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "service": {
+                  "type": "string",
+                  "example": "ssh"
+                },
+                "port": {
+                  "type": "integer",
+                  "example": 22
+                },
+                "events": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "top_kinds": {
+            "type": "array",
+            "description": "häufigste Arten (7 Tage, höchstens 10)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "example": "ssh:bruteforce"
+                },
+                "events": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "lists": {
+            "type": "object",
+            "description": "Größe der Listen: v64 und v64_<teilliste> (gelistete IPs, Live-Stand), honeypot_passwords, honeypot_usernames, honeypot_bad_useragents, honeypot_attack_paths (Einträge der Text-Listen)",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "example": {
+              "v64": 812,
+              "v64_ssh": 640,
+              "honeypot_passwords": 10000
+            }
+          },
+          "top": {
+            "type": "object",
+            "description": "Top 10 je Bereich (30 Tage, ab threshold.accounts Accounts)",
+            "properties": {
+              "usernames": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
+              },
+              "passwords": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
+              },
+              "user_agents": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
+              }
+            }
+          },
+          "info": {
+            "type": "string",
+            "example": "https://ipv64.net/honeypot/stats.php"
+          },
+          "license": {
+            "type": "string",
+            "example": "CC BY 4.0 (IPv64.net Honeypot64), provided as is without warranty"
           }
         }
       }

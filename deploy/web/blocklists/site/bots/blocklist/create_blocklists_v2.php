@@ -380,6 +380,8 @@ foreach($region_nets as $r => $nets)
 
 $index['lists'] = array_merge($index['lists'], $v64_index); // v64 Blocklist (Abschnitt 0), nicht in "all"
 $index['live'] = $v64_live;
+// Honeypot64 Text-Listen (bots/honeypot_lists.php) unter "data", nicht unter "lists" (dort waeren es IP-Listen)
+if(is_file(__DIR__."/../honeypot_lists_index.php")) { require_once __DIR__."/../honeypot_lists_index.php"; $index['data'] = hpl_index_entries($OUT); }
 write_atomic("$OUT/index.json", json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 echo "index.json: ".count($index['lists'])." Listen, ".count($index['countries'])." Laender\n";
 
