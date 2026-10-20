@@ -7,11 +7,12 @@
  *                                 Volle Seite (eingeloggt, Klasse ausser Standard, users.user_class != 1): Top 100,
  *                                 neu gelistete IPs heute, neue Pfade heute, Suche, CSV-Export
  *   stats.php?q=<text>&k=<art>    Suche in einer Rangliste (volle Seite; art: pass, user, path, ua, fp)
- *   stats.php?export=<art>        CSV (volle Seite; art: pass, user, path, ua, fp, ports, kinds, timeline, new_ips, new_paths)
+ *   stats.php?export=<art>        CSV (volle Seite; art: pass, user, path, ua, fp, ports, kinds, timeline, new_ips, new_paths, countries)
  *   &lang=en                      Englisch
  *
  * Daten aus dem Cache (honeypot/hp_stats_lib.php, hoechstens alle 10 Minuten neu); Ranglisten nur mit Eintraegen, die
- * mindestens N Accounts gemeldet haben. Keine Sensor-IPs, keine Accounts. Land fehlt noch (keine Anreicherung).
+ * mindestens N Accounts gemeldet haben. Keine Sensor-IPs, keine Accounts. Herkunft nach Land (IPs der v64 Blocklist, 30 Tage):
+ * Flaggen als Emoji aus dem Code, volle Seite alle Laender, sonst Top 10.
  */
 ob_start(); // CSV-Export: Ausgabe von header.php wieder verwerfen
 include("../header.php");
@@ -25,6 +26,10 @@ function hss_url(array $q): string { global $hssEn; if($hssEn) { $q['lang'] = 'e
 function hss_day(string $d): string { global $hssEn; return gmdate($hssEn ? 'm-d' : 'd.m.', (int)strtotime($d . ' UTC')); }
 /** ISO (UTC) -> Ortszeit der Seite */
 function hss_time($iso): string { global $hssEn; return $iso === null ? '–' : date($hssEn ? 'Y-m-d H:i' : 'd.m.Y H:i', (int)strtotime($iso)); }
+/** Flagge als Emoji aus dem Laendercode (zwei Regional-Indicator-Zeichen) */
+function hss_flag(string $cc): string { return preg_match('/^[A-Z]{2}$/', $cc) ? mb_chr(0x1F1E6 + ord($cc[0]) - 65, 'UTF-8') . mb_chr(0x1F1E6 + ord($cc[1]) - 65, 'UTF-8') : ''; }
+/** Name des Landes (intl, falls vorhanden), sonst der Code */
+function hss_country(string $cc): string { global $hssEn; $n = class_exists('Locale') ? (string)Locale::getDisplayRegion('und_' . $cc, $hssEn ? 'en' : 'de') : ''; return $n === '' ? $cc : $n; }
 /** Tabelle einer Rangliste (Wert, Ereignisse, Accounts) */
 function hss_table(array $rows, string $empty, bool $mono = true, int $start = 1): string {
 	if(!$rows) { return '<p class="text-muted small p-3 mb-0">' . hss_h($empty) . '</p>'; }
@@ -77,6 +82,9 @@ if($exp !== '' AND $o !== null) {
 	} elseif($exp === 'new_paths') {
 		$csv = array(array('path', 'events', 'accounts'));
 		foreach($o['new_paths_today'] as $r) { $csv[] = array($r['value'], $r['events'], $r['accounts']); }
+	} elseif($exp === 'countries') {
+		$csv = array(array('country', 'ips', 'events'));
+		foreach($o['top']['countries'] ?? array() as $r) { $csv[] = array($r['country'], $r['ips'], $r['events']); }
 	}
 	if($csv !== null) {
 		while(ob_get_level() > 0) { ob_end_clean(); }
@@ -167,6 +175,22 @@ $l = $o['lists'];
 			</tbody></table>
 		</div></div></div>
 	</div>
+
+<?php $hssC = $o['top']['countries'] ?? array(); $hssCmax = $hssC ? max(1, $hssC[0]['ips']) : 1; $hssCsum = max(1, array_sum(array_column($hssC, 'ips'))); ?>
+	<div class="card mb-3"><div class="card-header p-2"><i class="fa-solid fa-earth-europe text-primary"></i> <?php echo hss_t('Herkunft nach Land', 'Origin by country'); ?>
+		<small class="text-muted">(<?php echo hss_t('IPs der v64 Blocklist mit Sichtung in 30 Tagen', 'IPs on the v64 Blocklist seen in the last 30 days'); ?><?php if(!$full AND count($hssC) > HPS_TOP_PUBLIC) { echo ', Top ' . HPS_TOP_PUBLIC; } ?>)</small>
+		<?php if($full) { ?><a class="float-right small" href="<?php echo hss_h(hss_url(array('export' => 'countries'))); ?>">CSV</a><?php } ?></div>
+		<div class="card-body p-0"><?php if(!$hssC) { echo '<p class="text-muted small p-3 mb-0">' . hss_t('Noch keine Daten.', 'No data yet.') . '</p>'; } else { ?>
+		<div class="table-responsive"><table class="table table-sm mb-0 small"><thead><tr><th>#</th><th><?php echo hss_t('Land', 'Country'); ?></th><th style="width:40%"></th>
+			<th class="text-right">IPs</th><th class="text-right"><?php echo hss_t('Ereignisse', 'Events'); ?></th></tr></thead><tbody>
+		<?php foreach(($full ? $hssC : array_slice($hssC, 0, HPS_TOP_PUBLIC)) as $i => $x) {
+			$w = max(1, (int)round(100 * $x['ips'] / $hssCmax)); $hue = (int)round(45 - 45 * $x['ips'] / $hssCmax); // groesste rot, kleine gelb
+			echo '<tr><td class="text-muted">' . ($i + 1) . '</td><td style="white-space:nowrap"><span style="font-size:1.25em">' . hss_flag($x['country']) . '</span> ' . hss_h(hss_country($x['country']))
+				. (hss_country($x['country']) !== $x['country'] ? ' <small class="text-muted">' . hss_h($x['country']) . '</small>' : '') . '</td><td class="align-middle"><div title="' . hss_h(round(100 * $x['ips'] / $hssCsum, 1) . ' %')
+				. '" style="height:.7rem;border-radius:3px;width:' . $w . '%;background:hsl(' . $hue . ',80%,50%)"></div></td><td class="text-right">' . hss_num($x['ips'])
+				. '</td><td class="text-right">' . hss_num($x['events']) . '</td></tr>';
+		} ?>
+		</tbody></table></div><?php } ?></div></div>
 
 	<div class="card mb-3"><div class="card-header p-2"><i class="fa-solid fa-list text-primary"></i> <?php echo hss_t('Listen', 'Lists'); ?>
 		<small class="text-muted">– <?php echo hss_t('frei, Lizenz CC BY 4.0, ohne Gewähr', 'free, license CC BY 4.0, provided as is'); ?></small></div>

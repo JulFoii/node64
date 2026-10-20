@@ -29,6 +29,7 @@
  *     (allowlist), IPs von ipv64-Kunden (aktuelle A/AAAA-Records, oeffentliche VPN-IPs: customer_ip, nur markiert).
  *   - H6: jede Aenderung der gelisteten IPs (neu, nicht mehr gelistet, andere Listen) kommt in derselben Transaktion nach
  *     hp_list_changes (Aenderungs-Feed GET /threat/feed, api_v2_threat_feed.php), Frist 30 Tage.
+ *   - Herkunft: hp_scores.country (ISO 3166-1, NULL = unbekannt) aus blocklists/country_ranges.txt.gz (RIR-Daten).
  */
 if(php_sapi_name() !== 'cli') { exit; }
 include("/var/www/clients/client1/web58/web/dbconnect.php");
@@ -166,6 +167,39 @@ function hps_sublists(string $kind): array {
 
 /** Alter in Tagen -> Gewicht: bis 1 Tag 1.0, dann linear bis 0.25 nach 14 Tagen */
 function hps_age(int $ts, int $now): float { $d = max(0, $now - $ts) / 86400; return $d <= 1 ? 1.0 : max(0.25, 1 - 0.75 * ($d - 1) / 13); }
+
+/**
+ * Herkunft: blocklists/country_ranges.txt.gz (create_blocklists_v2.php, taeglich aus den RIR-Daten) einmal laden.
+ * Rueckgabe je Adresslaenge (4/16 Byte) drei parallele, nach Anfang sortierte Listen [Anfang, Ende, Land] oder null.
+ */
+function hps_geo_load(string $file): ?array {
+	$fh = is_file($file) ? gzopen($file, 'rb') : false;
+	if($fh === false) { return null; }
+	$g = array(4 => array(array(), array(), array()), 16 => array(array(), array(), array()));
+	$sorted = true; $prev = array(4 => '', 16 => '');
+	while(($l = gzgets($fh)) !== false) {
+		if($l === '' OR $l[0] === '#') { continue; }
+		$f = explode(' ', trim($l));
+		if(count($f) !== 3 OR !preg_match('/^[A-Z]{2}$/', $f[0]) OR !filter_var($f[1], FILTER_VALIDATE_IP) OR !filter_var($f[2], FILTER_VALIDATE_IP)) { continue; }
+		$a = inet_pton($f[1]); $b = inet_pton($f[2]); $w = strlen($a);
+		if($w !== strlen($b) OR strcmp($a, $b) > 0) { continue; }
+		if(strcmp($a, $prev[$w]) < 0) { $sorted = false; }
+		$prev[$w] = $a;
+		$g[$w][0][] = $a; $g[$w][1][] = $b; $g[$w][2][] = $f[0];
+	}
+	gzclose($fh);
+	if(!$sorted) { foreach($g as $w => $x) { array_multisort($g[$w][0], SORT_STRING, $g[$w][1], $g[$w][2]); } }
+	return (count($g[4][0]) + count($g[16][0])) > 0 ? $g : null;
+}
+
+/** Land einer IP (binaer) per Binaersuche: letzter Bereich mit Anfang <= IP, IP <= Ende; sonst null */
+function hps_geo_find(array $g, string $bin): ?string {
+	$w = strlen($bin);
+	if(!isset($g[$w])) { return null; }
+	$s = $g[$w][0]; $lo = 0; $hi = count($s) - 1; $hit = -1;
+	while($lo <= $hi) { $m = ($lo + $hi) >> 1; if(strcmp($s[$m], $bin) <= 0) { $hit = $m; $lo = $m + 1; } else { $hi = $m - 1; } }
+	return ($hit >= 0 AND strcmp($bin, $g[$w][1][$hit]) <= 0) ? $g[$w][2][$hit] : null;
+}
 
 // ---------------------------------------------------------------- 1. Sensoren, Gruppen, aktive Accounts
 
@@ -391,6 +425,29 @@ try {
 	exit(1);
 }
 echo "hp_scores: " . count($rowsOut) . " geschrieben, $del entfernt\n";
+// Herkunft (hp_scores.country): Bereiche einmal laden, je IP Binaersuche, geschrieben werden nur Aenderungen (je Land gesammelt).
+// Fehlt die Spalte (datenbank.sql noch nicht eingespielt) oder die Datei, laeuft alles andere unveraendert weiter.
+try {
+	$geo = hps_geo_load(dirname(__DIR__, 2) . '/blocklists/country_ranges.txt.gz');
+	if($geo === null) { echo "Herkunft: country_ranges.txt.gz fehlt (kommt mit dem naechsten vollen Lauf von create_blocklists_v2.php)\n"; }
+	else {
+		$geoSet = array(); $geoKnown = 0; $geoAll = 0;
+		hps_stream("SELECT ip_bin, country FROM hp_scores", array(), function($r) use (&$geoSet, &$geoKnown, &$geoAll, $geo) {
+			$cc = hps_geo_find($geo, $r['ip_bin']); $geoAll++;
+			if($cc !== null) { $geoKnown++; }
+			if($cc !== ($r['country'] === null ? null : strtoupper($r['country']))) { $geoSet[$cc ?? ''][] = bin2hex($r['ip_bin']); }
+		});
+		$geoChanged = 0;
+		foreach($geoSet as $cc => $hex) {
+			foreach(array_chunk($hex, HPS_CHUNK) as $chunk) {
+				$geoChanged += hps_q("UPDATE hp_scores SET country = ? WHERE ip_bin IN (" . implode(',', array_fill(0, count($chunk), 'UNHEX(?)')) . ")",
+					array_merge(array($cc === '' ? null : (string)$cc), $chunk))->rowCount();
+			}
+		}
+		echo "Herkunft: $geoKnown von $geoAll IPs mit Land, $geoChanged geaendert\n";
+	}
+	unset($geo, $geoSet);
+} catch(Throwable $e) { echo "Warnung: Herkunft nicht geschrieben (hp_scores.country fehlt? datenbank.sql): " . $e->getMessage() . "\n"; }
 // H6: Aenderungs-Feed nach 30 Tagen loeschen
 try {
 	$cd = 0;

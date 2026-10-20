@@ -12558,7 +12558,7 @@
         ],
         "summary": "Statistik Honeypot64 (Überblick)",
         "operationId": "get_threat_stats",
-        "description": "Öffentlicher Überblick wie auf https://ipv64.net/honeypot/stats.php: aktive Sensoren, Angriffe 24 h, Verlauf 30 Tage, Top 10 Ports und Arten, Größe der Listen, Top 10 Benutzernamen, Passwörter, Pfade und User-Agents. Ranglisten enthalten nur Einträge, die mindestens threshold.accounts unabhängige Accounts in den letzten 30 Tagen gemeldet haben (bereinigt: keine E-Mail-Adressen, Steuerzeichen, zufälligen Zeichenketten). Antwort aus dem Cache, höchstens alle 10 Minuten neu berechnet. Limit wie /threat/ip: ohne API-Key je Client-IP 10 sofort, dann 1 je Minute; mit API-Key je Account 120 sofort, dann 2 je Sekunde. Ein angegebener, aber ungültiger API-Key ergibt 401.",
+        "description": "Öffentlicher Überblick wie auf https://ipv64.net/honeypot/stats.php: aktive Sensoren, Angriffe 24 h, Verlauf 30 Tage, Top 10 Ports und Arten, Größe der Listen, Top 10 Benutzernamen, Passwörter, Pfade und User-Agents, Top 10 Herkunftsländer der v64 Blocklist (top.countries). Ranglisten enthalten nur Einträge, die mindestens threshold.accounts unabhängige Accounts in den letzten 30 Tagen gemeldet haben (bereinigt: keine E-Mail-Adressen, Steuerzeichen, zufälligen Zeichenketten). Antwort aus dem Cache, höchstens alle 10 Minuten neu berechnet. Limit wie /threat/ip: ohne API-Key je Client-IP 10 sofort, dann 1 je Minute; mit API-Key je Account 120 sofort, dann 2 je Sekunde. Ein angegebener, aber ungültiger API-Key ergibt 401.",
         "responses": {
           "200": {
             "description": "Erfolgreich",
@@ -18828,6 +18828,30 @@
                 "description": "H6: Fingerabdrücke (JA4/HASSH)",
                 "items": {
                   "$ref": "#/components/schemas/ThreatStatsEntry"
+                }
+              },
+              "countries": {
+                "type": "array",
+                "description": "Herkunft nach Land: IPs der v64 Blocklist mit Sichtung in den letzten 30 Tagen je Land (Top 10, nach Anzahl IPs). Land aus den RIR-Daten (https://ipv64.net/blocklists/country_ranges.txt.gz).",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "country": {
+                      "type": "string",
+                      "description": "ISO 3166-1 alpha-2",
+                      "example": "CN"
+                    },
+                    "ips": {
+                      "type": "integer",
+                      "description": "gelistete IPs aus diesem Land",
+                      "example": 214
+                    },
+                    "events": {
+                      "type": "integer",
+                      "description": "Ereignisse dieser IPs (Bewertungsfenster)",
+                      "example": 51234
+                    }
+                  }
                 }
               }
             }

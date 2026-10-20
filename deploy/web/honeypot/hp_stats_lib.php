@@ -14,6 +14,7 @@
  * keine bekannten Suchmaschinen/Monitoring-Dienste. Solche Eintraege fallen ganz weg (nichts wird umgeschrieben).
  *
  * H6: Rangliste der Fingerabdruecke (kind fp: JA4/HASSH aus hp_samples_fps, gleiche Schwelle, nur gueltige Keys).
+ * Herkunft: Rangliste nach Land (top.countries) aus hp_scores.country, nur IPs der v64 Blocklist (also ab Schwelle).
  *
  * Cache: hps_overview() rechnet hoechstens alle HPS_TTL Sekunden neu (Sperre GET_LOCK, ein Prozess rechnet, die anderen
  * nehmen den alten Stand), sonst kommt alles aus hp_stats_cache.
@@ -200,6 +201,13 @@ function hps_compute(PDO $pdo, string $bldir, int $now, bool $rebuild = true): a
 
 	$o['top'] = array();
 	foreach(HPS_TOPKEYS as $kind => $key) { $o['top'][$key] = hps_top($pdo, $kind, HPS_TOP_FULL); }
+	// Herkunft nach Land: IPs der v64 Blocklist mit Sichtung in 30 Tagen, je Land IPs und Ereignisse (hp_scores.country)
+	$o['top']['countries'] = array();
+	try {
+		$o['top']['countries'] = array_map(fn($x) => array('country' => strtoupper($x['c']), 'ips' => (int)$x['n'], 'events' => (int)$x['e']),
+			hps_all($pdo, "SELECT country c, COUNT(*) n, COALESCE(SUM(events), 0) e FROM hp_scores WHERE listed = 1 AND FIND_IN_SET('v64', lists) > 0 AND last_seen >= :d
+				AND country IS NOT NULL AND country != '' GROUP BY country ORDER BY n DESC, e DESC, c LIMIT 300", array('d' => hps_dt($now - HPS_DAYS * 86400))));
+	} catch(Throwable $e) { error_log('hp_stats countries: ' . $e->getMessage()); } // Spalte country fehlt noch
 
 	// neu gelistet heute (nur gelistete IPs; stehen ohnehin in der v64 Blocklist)
 	$o['new_ips_today'] = array('count' => 0, 'items' => array());
@@ -257,7 +265,8 @@ function hps_overview(PDO $pdo, string $bldir, bool $force = false, bool $rebuil
 /** Ueberblick fuer alle (Seite ohne Anmeldung/Klasse Standard, GET /threat/stats): Top 10, ohne neue IPs/Pfade. */
 function hps_public(array $o): array {
 	$top = array();
-	foreach($o['top'] as $k => $l) { $top[$k] = array_map(fn($x) => array('value' => $x['value'], 'events' => $x['events'], 'accounts' => $x['accounts']), array_slice($l, 0, HPS_TOP_PUBLIC)); }
+	foreach($o['top'] as $k => $l) { $top[$k] = $k === 'countries' ? array_slice($l, 0, HPS_TOP_PUBLIC) : array_map(fn($x) => array('value' => $x['value'], 'events' => $x['events'], 'accounts' => $x['accounts']), array_slice($l, 0, HPS_TOP_PUBLIC)); }
+	$top += array('countries' => array()); // Cache von vor der Herkunft
 	return array('generated_at' => $o['generated_at'], 'window_days' => $o['window_days'], 'threshold' => $o['threshold'], 'sensors' => $o['sensors'],
 		'attacks_24h' => $o['attacks_24h'], 'timeline' => $o['timeline'], 'top_ports' => array_slice($o['top_ports'], 0, HPS_TOP_PUBLIC),
 		'top_kinds' => array_slice($o['top_kinds'], 0, HPS_TOP_PUBLIC), 'lists' => (object)$o['lists'], 'top' => $top,

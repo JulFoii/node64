@@ -20,6 +20,8 @@
 //          php create_blocklists_v2.php --dry         -> nur Statistik, schreibt nichts
 //          php create_blocklists_v2.php --only=v64    -> nur die v64 Blocklist (Honeypot64, nach honeypot_score.php alle 30 min)
 //          php create_blocklists_v2.php --v64-daily   -> Tagesstand der v64 Blocklist jetzt neu schreiben
+//
+// Voller Lauf schreibt zusaetzlich country_ranges.txt.gz (Herkunft fuer Honeypot64/Node64, index.json "geo")
 include("/var/www/clients/client1/web58/web/dbconnect.php");
 set_time_limit(900);
 ini_set('memory_limit', '1024M');
@@ -161,6 +163,44 @@ function split46(array $nets): array
 	$v4 = []; $v6 = [];
 	foreach($nets as $n) { if($n['v'] === 4) { $v4[] = $n; } else { $v6[] = $n; } }
 	return [$v4, $v6];
+}
+
+// ---------------------------------------------------------------
+// Herkunft (Honeypot64, Node64 internal/geoip): country_ranges.txt.gz aus denselben Laendernetzen (bl_countries_ips)
+// ---------------------------------------------------------------
+/** Netz -> Sortierschluessel: erste IP . letzte IP . Land (IPv4 10 Byte, IPv6 34 Byte) */
+function geo_key(array $n, string $cc): string
+{
+	return $n['bin'].($n['bin'] | ~net_mask($n['len'], strlen($n['bin']))).$cc;
+}
+
+/** Naechste Adresse (Binaerstring + 1), null bei Ueberlauf */
+function geo_next(string $b): ?string
+{
+	for($i = strlen($b) - 1; $i >= 0; $i--) {
+		if($b[$i] !== "\xFF") { $b[$i] = chr(ord($b[$i]) + 1); return $b; }
+		$b[$i] = "\x00";
+	}
+	return null;
+}
+
+/** Schluessel sortieren, benachbarte Bereiche desselben Landes zusammenfassen -> Zeilen "<CC> <erste IP> <letzte IP>".
+ *  Ueberlappungen (selten, zwei Registrierungsstellen) werden gekuerzt: der zuerst beginnende Bereich gilt. */
+function geo_lines(array $keys, int $w, int &$n): string
+{
+	sort($keys, SORT_STRING);
+	$s = ''; $ca = null; $cb = null; $cc0 = null;
+	foreach($keys as $k) {
+		$a = substr($k, 0, $w); $b = substr($k, $w, $w); $cc = substr($k, 2 * $w, 2);
+		if($ca !== null) {
+			if(strcmp($a, $cb) <= 0) { if(strcmp($b, $cb) <= 0) { continue; } $a = geo_next($cb); }
+			if($cc === $cc0 AND $a === geo_next($cb)) { $cb = $b; continue; }
+			$s .= "$cc0 ".inet_ntop($ca)." ".inet_ntop($cb)."\n"; $n++;
+		}
+		$ca = $a; $cb = $b; $cc0 = $cc;
+	}
+	if($ca !== null) { $s .= "$cc0 ".inet_ntop($ca)." ".inet_ntop($cb)."\n"; $n++; }
+	return $s;
 }
 
 // ---------------------------------------------------------------
@@ -345,6 +385,7 @@ $region_nets = array_fill_keys(array_keys($regionen), []);
 $st = $pdo->prepare("SELECT ip FROM bl_countries_ips WHERE country = :c");
 $laender = $pdo->query("SELECT id, country, country_name, file_name FROM blocklisten_countries ORDER BY country")->fetchAll(PDO::FETCH_ASSOC);
 $geschrieben = 0;
+$geo = [4 => [], 6 => []]; // Herkunft: Sortierschluessel je Familie (geo_key)
 foreach($laender as $land)
 {
 	if(!preg_match('/^[A-Za-z0-9_]+$/', $land["file_name"])) { continue; }
@@ -359,6 +400,7 @@ foreach($laender as $land)
 	write_raw("$OUT/countries/ipv64_blocklist_v6_$f.txt", $v6);
 	$index['countries'][] = ['country' => strtoupper($land["country"])] + index_entry($f, $land["country_name"], "countries/", $v4, $v6, false);
 	$geschrieben++;
+	if(preg_match('/^[A-Z]{2}$/', strtoupper($land["country"]))) { foreach($nets as $n) { $geo[$n['v']][] = geo_key($n, strtoupper($land["country"])); } }
 	foreach($regionen as $r => $cc) { if(in_array(strtoupper($land["country"]), $cc, true)) { foreach($nets as $n) { $region_nets[$r][] = $n; } } }
 	if(!$dry AND !$extern) {
 		$up = $pdo->prepare("UPDATE blocklisten_countries set ips = :ips, last_updated = NOW() WHERE id = :id");
@@ -366,6 +408,26 @@ foreach($laender as $land)
 	}
 }
 echo "Laender: $geschrieben Dateisaetze geschrieben\n";
+
+// Herkunft: country_ranges.txt.gz (gzip-Text, "#"-Kopf, je Zeile "<CC> <erste IP> <letzte IP>", IPv4 dann IPv6, sortiert)
+$t0 = microtime(true); $geo4 = 0; $geo6 = 0;
+$geo_txt = geo_lines($geo[4], 4, $geo4).geo_lines($geo[6], 16, $geo6);
+unset($geo);
+if($geo4 + $geo6 > 0) {
+	$geo_gz = gzencode("# IPv64.net country ranges - ".gmdate("Y-m-d H:i")." UTC - https://ipv64.net/v64_blocklists\n"
+		."# Source: RIR delegated-extended statistics (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC), same data as the country lists\n"
+		."# Format: <CC> <first IP> <last IP> (ISO 3166-1 alpha-2), IPv4 then IPv6, sorted ascending, adjacent ranges merged\n"
+		."# Ranges: ".($geo4 + $geo6)." (IPv4 $geo4, IPv6 $geo6)\n".$geo_txt, 9);
+	write_atomic("$OUT/country_ranges.txt.gz", $geo_gz);
+	$index['geo'] = ['file' => 'country_ranges.txt.gz', 'updated' => date('c'), 'ranges' => $geo4 + $geo6];
+	printf("%-22s %6d Bereiche (v4 %6d, v6 %6d), %d KB gz, %.1f s\n", "Herkunft", $geo4 + $geo6, $geo4, $geo6, strlen($geo_gz) / 1024, microtime(true) - $t0);
+	unset($geo_gz);
+} elseif(is_file("$OUT/index.json")) {
+	// keine Laendernetze: alte Datei und alten Eintrag behalten
+	$alt = json_decode((string)file_get_contents("$OUT/index.json"), true);
+	if(isset($alt['geo'])) { $index['geo'] = $alt['geo']; }
+}
+unset($geo_txt);
 
 foreach($region_nets as $r => $nets)
 {
