@@ -95,6 +95,10 @@
     {
       "name": "Nodes",
       "description": "Node64-Nodes: verknüpfen, umbenennen, Befehle, trennen."
+    },
+    {
+      "name": "Honeypot64",
+      "description": "Honeypot64-Sensoren (Node64) melden alle 10 Minuten Angriffe (Format schema 1); eigene Sensoren und eigener Beitrag. Aus den Meldungen mehrerer Accounts entsteht die v64 Blocklist."
     }
   ],
   "paths": {
@@ -12285,6 +12289,203 @@
           }
         }
       }
+    },
+    "/honeypot/reports": {
+      "post": {
+        "tags": [
+          "Honeypot64"
+        ],
+        "summary": "Meldung eines Sensors annehmen",
+        "operationId": "post_honeypot_reports",
+        "description": "Nur für Node64 (Modul honeypot bzw. NODE64_MODE=honeypot). Body JSON, optional mit Content-Encoding: gzip, höchstens 2 MiB entpackt. report_id = <sensor.id>-<period.start unix>; schon bekannte report_id: 200 mit duplicate. Höchstens eine Meldung je Sensor in 2 Minuten (429 mit Retry-After), höchstens 50 Sensoren je Account. Quellen mit privater/reservierter IP, der IP eines eigenen Sensors oder unbekannter Art/Dienst werden verworfen und in rejected gezählt. 400/413/422: nicht wiederholen; 401/403: Key bzw. Sensor prüfen; 429/5xx: später erneut.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActAs"
+          },
+          {
+            "name": "Content-Encoding",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gzip",
+                "identity"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoneypotReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Angenommen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/HoneypotReportAccepted"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "report_id schon bekannt (zählt als Erfolg)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "report_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "413": {
+            "description": "Body größer als 2 MiB (auch entpackt), mehr als 5000 Quellen oder 500 Proben je Art",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
+    "/honeypot/sensors": {
+      "get": {
+        "tags": [
+          "Honeypot64"
+        ],
+        "summary": "Eigene Sensoren",
+        "operationId": "get_honeypot_sensors",
+        "description": "Sensoren des Accounts mit Beitrag 24 h / 7 d. Die IP eines Sensors wird nie ausgegeben.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/HoneypotSensor"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
+    "/honeypot/stats": {
+      "get": {
+        "tags": [
+          "Honeypot64"
+        ],
+        "summary": "Eigener Beitrag",
+        "operationId": "get_honeypot_stats",
+        "description": "Ereignisse und verschiedene Quell-IPs 24 h / 7 d, Top-Arten und Top-Ports (7 Tage), Verlauf je Tag (UTC, 7 Tage).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/HoneypotStats"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -17360,6 +17561,428 @@
           "next_after": {
             "type": "integer",
             "description": ""
+          }
+        }
+      },
+      "HoneypotReport": {
+        "type": "object",
+        "required": [
+          "schema",
+          "report_id",
+          "sensor",
+          "period",
+          "sources"
+        ],
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "const": 1
+          },
+          "report_id": {
+            "type": "string",
+            "description": "<sensor.id>-<period.start unix>"
+          },
+          "sensor": {
+            "type": "object",
+            "required": [
+              "id",
+              "version",
+              "profile",
+              "mode"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "fest je Installation, nicht die IP"
+              },
+              "version": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "profile": {
+                "type": "string",
+                "enum": [
+                  "minimal",
+                  "standard",
+                  "full",
+                  "custom"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "module",
+                  "headless"
+                ]
+              }
+            }
+          },
+          "period": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "description": "UTC, start inklusive, end exklusive; höchstens 7 Tage, Ende höchstens 5 min in der Zukunft",
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "$ref": "#/components/schemas/HoneypotReportSource"
+            }
+          },
+          "samples": {
+            "$ref": "#/components/schemas/HoneypotReportSamples"
+          },
+          "dropped": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "vom Sensor wegen Grenzen weggelassen"
+          }
+        }
+      },
+      "HoneypotReportSource": {
+        "type": "object",
+        "required": [
+          "ip",
+          "kind",
+          "service",
+          "port",
+          "count",
+          "first",
+          "last",
+          "source"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "öffentliche IPv4/IPv6"
+          },
+          "kind": {
+            "type": "string",
+            "example": "ssh:bruteforce",
+            "description": "feste Liste: ssh:bruteforce, telnet:bruteforce, http:bruteforce, http:exploit[:sqli|xss|traversal|rce|jndi|log4shell|ssrf|upload], http:scan, http:bad-useragent, generic:portscan, generic:probe, scanner:research, rdp:bruteforce, mail:auth-bruteforce, db:bruteforce, vpn:bruteforce"
+          },
+          "service": {
+            "type": "string",
+            "example": "ssh"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "honeypot",
+              "log",
+              "syslog"
+            ]
+          },
+          "rule": {
+            "type": "string",
+            "maxLength": 64,
+            "example": "honeypot/ssh@1"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "HoneypotReportSamples": {
+        "type": "object",
+        "description": "Proben (nur Honeypot), als Tagessummen gespeichert",
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": [
+                "service",
+                "user",
+                "pass",
+                "count"
+              ],
+              "properties": {
+                "service": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "pass": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "count"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "user_agents": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "count"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "payloads": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": [
+                "sha256",
+                "head",
+                "service",
+                "port",
+                "count"
+              ],
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "head": {
+                  "type": "string",
+                  "contentEncoding": "base64",
+                  "description": "höchstens 256 Bytes"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        }
+      },
+      "HoneypotReportAccepted": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "description": "gespeicherte Quellen"
+          },
+          "rejected": {
+            "type": "integer",
+            "description": "verworfene Quellen/Proben"
+          },
+          "rejected_reasons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "not_public, own_ip, unknown_kind, unknown_service, unknown_source, out_of_period"
+          },
+          "report_id": {
+            "type": "string"
+          }
+        }
+      },
+      "HoneypotSensor": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Meldung in den letzten 30 Minuten"
+          },
+          "reports": {
+            "type": "integer"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "sources_24h": {
+            "type": "integer",
+            "description": "verschiedene Quell-IPs"
+          },
+          "sources_7d": {
+            "type": "integer"
+          },
+          "events_24h": {
+            "type": "integer"
+          },
+          "events_7d": {
+            "type": "integer"
+          }
+        }
+      },
+      "HoneypotStats": {
+        "type": "object",
+        "properties": {
+          "sensors": {
+            "type": "integer"
+          },
+          "sensors_online": {
+            "type": "integer"
+          },
+          "contributor": {
+            "type": "boolean",
+            "description": "mindestens ein Sensor hat in den letzten 7 Tagen gemeldet"
+          },
+          "last_report": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "events_24h": {
+            "type": "integer"
+          },
+          "events_7d": {
+            "type": "integer"
+          },
+          "sources_24h": {
+            "type": "integer"
+          },
+          "sources_7d": {
+            "type": "integer"
+          },
+          "top_kinds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "events": {
+                  "type": "integer"
+                },
+                "sources": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "top_ports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "service": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "events": {
+                  "type": "integer"
+                },
+                "sources": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "events": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         }
       }
