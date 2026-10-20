@@ -2,6 +2,8 @@
 # Grundeinrichtung eines CDN64-Servers (srv07/srv08.cdn64.de, Debian 13). Idempotent, mehrfach ausfuehrbar.
 # Aufruf: bash setup-edge.sh <name: srv07|srv08> <location: nbg|fsn> <oeffentlicher Hostname> [Nachbar-IPv4] [Nachbar-IPv6]
 # Aendert sshd nicht und startet den Dienst erst, wenn das Binary liegt (edge-deploy.sh).
+# Prometheus (promexport.go): METRICS_ALLOW="ip-oder-netz ..." oeffnet METRICS_PORT (Standard 9464, TCP) nur fuer diese
+# Adressen; ohne METRICS_ALLOW bleibt der Port zu. In config.yaml dazu metrics_listen und metrics_allow setzen.
 # Planung: docs/CDN64-ONLINE.md (Abschnitt 10, Phase T0).
 set -euo pipefail
 NAME=${1:?name}; LOCATION=${2:?location}; HOST=${3:?hostname}; PEER4=${4:-}; PEER6=${5:-}
@@ -106,12 +108,22 @@ MaxRetentionSec=14day
 systemctl restart systemd-journald
 
 # Firewall: 22 (neue Verbindungen je Absender gebremst), 80/443 TCP, 443 UDP (HTTP/3, Tunnel per ALPN), 7844 TCP/UDP (Tunnel),
-# 7845 TCP nur vom Nachbarserver, 50000-62000 TCP/UDP (Portmapper, Modus 3), ICMP; alles andere zu.
+# 7845 TCP nur vom Nachbarserver, 50000-62000 TCP/UDP (Portmapper, Modus 3), ICMP, 9464 TCP nur fuer METRICS_ALLOW;
+# alles andere zu.
 PEERRULES=""
 [ -n "$PEER4" ] && PEERRULES="${PEERRULES}    ip saddr ${PEER4} tcp dport 7845 accept
 "
 [ -n "$PEER6" ] && PEERRULES="${PEERRULES}    ip6 saddr ${PEER6} tcp dport 7845 accept
 "
+METRICSRULES=""
+for a in ${METRICS_ALLOW:-}; do
+  case "$a" in
+    *:*) METRICSRULES="${METRICSRULES}    ip6 saddr ${a} tcp dport ${METRICS_PORT:-9464} accept
+" ;;
+    *) METRICSRULES="${METRICSRULES}    ip saddr ${a} tcp dport ${METRICS_PORT:-9464} accept
+" ;;
+  esac
+done
 cat > /etc/nftables.conf <<EOF
 #!/usr/sbin/nft -f
 flush ruleset
@@ -131,7 +143,7 @@ table inet filter {
     tcp dport { 80, 443, 7844 } accept
     udp dport { 443, 7844 } accept
     meta l4proto { tcp, udp } th dport 50000-62000 accept
-${PEERRULES}  }
+${PEERRULES}${METRICSRULES}  }
   chain forward { type filter hook forward priority 0; policy drop; }
   chain output  { type filter hook output priority 0; policy accept; }
 }
