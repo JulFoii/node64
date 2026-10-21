@@ -251,6 +251,13 @@ function c64o_dns_on(array $h, array $d): bool {
 }
 
 /** DNS zurueck: Server-Eintraege loeschen, Originale wieder aktivieren, an PowerDNS. */
+/** Alles eines Namens bei ipv64 entfernen (nach c64o_dns_off): Zuordnung zu Tunneln, Zertifikat, Ziel, Liste, Portmapper. */
+function c64o_host_purge(array $h): void {
+	foreach(array('cdn64o_host_tunnels', 'cdn64o_targets', 'cdn64o_acl', 'cdn64o_mappings') as $tab) { q("DELETE FROM $tab WHERE host_id = :h", array('h' => $h['id'])); }
+	q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
+	q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
+}
+
 function c64o_dns_off(array $h): bool {
 	$u = (int)$h['userid']; $sid = (int)$h['subdomain_id']; $p = $h['praefix'];
 	foreach(qa("SELECT record_id, role FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id'])) as $r) {
@@ -384,9 +391,7 @@ route('DELETE', '/cdn64o/tunnels/{id}', function($p) {
 		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h AND tunnel_id = :t", array('h' => $h['id'], 't' => $t['id']));
 		if(q1("SELECT host_id FROM cdn64o_host_tunnels WHERE host_id = :h LIMIT 1", array('h' => $h['id'])) === null) { // letzter Tunnel: Host aus
 			c64o_dns_off($h);
-			q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
-			q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
-			q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
+			c64o_host_purge($h); // auch Portmapper und Ziel, sonst zaehlen sie weiter und belegen Ports
 		}
 	}
 	q("DELETE FROM cdn64o_tunnels WHERE id = :i AND userid = :u", array('i' => $t['id'], 'u' => uid()));
@@ -560,12 +565,7 @@ route('DELETE', '/cdn64o/hosts/{id}', function($p) {
 	global $pdo;
 	$h = c64o_find_host($p['id']);
 	if(!c64o_dns_off($h)) { fail(502, 'dns_update_failed', 'The DNS update failed. Try again later.'); }
-	q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
-	q("DELETE FROM cdn64o_hosts WHERE id = :h", array('h' => $h['id']));
-	q("DELETE FROM cdn64o_certs WHERE fqdn = :f", array('f' => $h['fqdn']));
-	q("DELETE FROM cdn64o_targets WHERE host_id = :h", array('h' => $h['id']));
-	q("DELETE FROM cdn64o_acl WHERE host_id = :h", array('h' => $h['id']));
-	q("DELETE FROM cdn64o_mappings WHERE host_id = :h", array('h' => $h['id']));
+	c64o_host_purge($h);
 	c64o_event((int)$h['id'], uid(), 'disabled');
 	add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . " ausgeschaltet.");
 	no_content();
@@ -665,6 +665,14 @@ route('POST', '/cdn64o/edge/report', function() {
 			array('h' => $h['id'], 'u' => $h['userid'], 'd' => $day, 'i' => $in, 'o' => $out, 'c' => $conns, 'q' => $req, 'r' => $rej));
 		$users[(int)$h['userid']] = true;
 	}
+	// Namen, deren Domain es nicht mehr gibt (Domain oder Account auf ipv64.net geloescht): austragen, damit die Server sie
+	// nicht weiter bedienen; Tunnel geloeschter Accounts ebenso
+	foreach(qa("SELECT h.* FROM cdn64o_hosts h LEFT JOIN subdomains s ON s.id = h.subdomain_id AND s.userid = h.userid WHERE s.id IS NULL") as $h) {
+		q("DELETE FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id']));
+		c64o_host_purge($h);
+		c64o_event((int)$h['id'], (int)$h['userid'], 'disabled', 'domain deleted');
+	}
+	q("DELETE t FROM cdn64o_tunnels t LEFT JOIN users u ON u.id = t.userid WHERE u.id IS NULL");
 	// Kontingent: auch Accounts mit wegen Traffic gesperrten Hosts pruefen (neuer Monat, hoehere Klasse)
 	foreach(qa("SELECT DISTINCT userid FROM cdn64o_hosts WHERE status = 'blocked' AND blocked_reason = 'traffic'") as $r) { $users[(int)$r['userid']] = true; }
 	$changed = 0;
