@@ -171,3 +171,8 @@ CREATE TABLE IF NOT EXISTS `cdn64o_mappings` (
   KEY `host_id` (`host_id`),
   KEY `userid` (`userid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Pause je Name (alle Modi): die Server nehmen nichts mehr an (Sperre "paused"), DNS bleibt auf den Servern, Einstellungen
+-- und Statistik bleiben. Unabhaengig von der Traffic-Sperre (status/blocked_reason).
+ALTER TABLE `cdn64o_hosts` ADD COLUMN IF NOT EXISTS `paused` tinyint(1) NOT NULL DEFAULT 0 AFTER `blocked_reason`;
+ALTER TABLE `cdn64o_hosts` ADD COLUMN IF NOT EXISTS `paused_at` datetime NULL DEFAULT NULL AFTER `paused`;

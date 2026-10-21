@@ -91,6 +91,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
 				[$code, $r] = c64w_api('DELETE', "/cdn64o/hosts/$id/mappings/" . (int)($_POST['mid'] ?? 0));
 				$info = $code === 204 ? c64w_alert('success', 'Port mapping removed.') : c64w_alert('danger', c64w_err($r));
 				break;
+			case 'pause':
+			case 'resume':
+				[$code, $r] = c64w_api('PATCH', "/cdn64o/hosts/$id", array('paused' => $act === 'pause'));
+				$info = $code === 200 ? c64w_alert('success', $act === 'pause' ? 'CDN64 paused for ' . $r['fqdn'] . ': the servers accept nothing for this name any more and close open connections within seconds. DNS stays on the servers, so your address stays hidden.'
+					: 'CDN64 resumed for ' . $r['fqdn'] . '.') : c64w_alert('danger', c64w_err($r));
+				break;
 			case 'off':
 				[$code, $r] = c64w_api('DELETE', "/cdn64o/hosts/$id");
 				$info = $code === 204 ? c64w_alert('success', 'CDN64 switched off. DNS points to your previous address again.') : c64w_alert('danger', c64w_err($r));
@@ -122,6 +128,7 @@ echo $info;
 				<p class="mb-2">CDN64 makes your service reachable from the internet over IPv4 and IPv6 – also behind DS-Lite or without open ports. Built-in load balancing: visitors are spread across both servers (Nuremberg and Falkenstein) automatically, and if one server fails, the other one takes over.</p>
 				<ul class="mb-2">
 					<li><b>Mode 1 / Mode 2 (recommended):</b> <a href="https://github.com/ipv64net/node64" target="_blank" rel="noopener">Node64</a> opens an encrypted tunnel from your network to both servers – no open ports, your IP stays hidden. Mode 1 keeps TLS end-to-end, mode 2 terminates TLS on the servers (protection and HTTP/3 there). Set it up with one click in Node64 (<i>PROXY64 › Proxy-Hosts › CDN64</i>).</li>
+					<li><b>Pause</b> (<i class="fa-solid fa-pause"></i>, all modes): the servers stop forwarding anything for the name at once, e.g. to protect yourself during an attack. DNS stays on the servers, so your own address is not revealed; settings and statistics stay.</li>
 					<li><b>Mode 3 (here):</b> without Node64 – the servers connect to your target directly (your DynDNS address or a fixed target). The target has to be reachable from the internet.</li>
 				</ul>
 				<p class="mb-0 text-muted">Install Node64: <code>docker run -d --name node64 -p 8080:8080 -v node64-data:/data --restart unless-stopped ghcr.io/ipv64net/node64:latest</code></p>
@@ -248,12 +255,16 @@ function c64w_target_fields(?array $t): void {
 						: 'Node64 tunnel ' . implode(', ', $h['tunnels']);
 					if(!empty($h['mappings'])) { $tgt .= ' · ' . count($h['mappings']) . ' port' . (count($h['mappings']) > 1 ? 's' : ''); }
 					$st = $h['status'] === 'active' ? '<span class="badge badge-success">active</span>' : ($h['status'] === 'blocked' ? '<span class="badge badge-danger">blocked: ' . c64w_h($h['blocked_reason']) . '</span>' : '<span class="badge badge-warning">' . c64w_h($h['status']) . '</span>');
+					if(!empty($h['paused'])) { $st = '<span class="badge badge-secondary" title="Paused since ' . c64w_h($h['paused_at'] ?? '') . '"><i class="fa-solid fa-pause"></i> paused</span>'; }
 					if($h['acl']['default'] !== 'off') { $st .= ' <span class="badge badge-info">list</span>'; }
 					echo '<tr><td class="text-monospace">' . c64w_h($h['fqdn']) . '</td><td>' . c64w_h($modeName[$h['mode']] ?? $h['mode']) . '</td><td class="text-monospace text-break">' . c64w_h($tgt) . '</td><td>' . $st . '</td>';
 					echo '<td class="text-right text-nowrap">' . c64w_bytes($tm['bytes_in'] + $tm['bytes_out']) . ($tm['requests'] ? ' · ' . number_format($tm['requests'], 0, ',', '.') . ' req.' : '') . ($tm['rejected'] ? ' · <span class="text-danger">' . (int)$tm['rejected'] . ' rejected</span>' : '') . '</td>';
 					// Modus 1/2: verwaltet in Node64, hier nur ausschalten (Notfall, ohne Zugriff auf die Node)
 					echo (int)$h['mode'] !== 3 ? '<td class="text-right text-nowrap"><span class="text-muted mr-1" title="Target, mode, certificate and access lists are managed in Node64. Switching off here also removes it there."><i class="fa-solid fa-lock"></i> Node64</span>'
 						: '<td class="text-right text-nowrap"><a class="btn btn-sm btn-outline-primary py-0" href="cdn64?edit=' . (int)$h['id'] . '" title="Edit"><i class="fa-solid fa-pen"></i></a> ';
+					// Pause (alle Modi): Server nehmen nichts mehr an, DNS bleibt auf den Servern
+					$pa = !empty($h['paused']) ? 'resume' : 'pause';
+					echo '<form method="post" class="d-inline"' . ($pa === 'pause' ? ' onsubmit="return confirm(\'Pause CDN64 for ' . c64w_h($h['fqdn']) . '? The servers accept nothing for this name until you resume it. DNS stays on the servers.\')"' : '') . '><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="' . $pa . '"><input type="hidden" name="id" value="' . (int)$h['id'] . '"><button class="btn btn-sm btn-outline-' . ($pa === 'pause' ? 'warning' : 'success') . ' py-0 mr-1" title="' . ($pa === 'pause' ? 'Pause' : 'Resume') . '"><i class="fa-solid fa-' . ($pa === 'pause' ? 'pause' : 'play') . '"></i></button></form>';
 					echo '<form method="post" class="d-inline" onsubmit="return confirm(\'Switch off CDN64 for ' . c64w_h($h['fqdn']) . '? DNS points to the previous address again.\')"><input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="off"><input type="hidden" name="id" value="' . (int)$h['id'] . '"><button class="btn btn-sm btn-outline-danger py-0" title="Switch off"><i class="fa-solid fa-power-off"></i></button></form></td></tr>';
 				} ?>
 				</tbody>

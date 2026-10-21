@@ -65,7 +65,7 @@ function c64o_host_out(array $h): array {
 	$tr = q1("SELECT COALESCE(SUM(bytes_in), 0) i, COALESCE(SUM(bytes_out), 0) o, COALESCE(SUM(conns), 0) c, COALESCE(SUM(requests), 0) r, COALESCE(SUM(rejected), 0) x
 		FROM cdn64o_traffic WHERE host_id = :h AND day >= :d", array('h' => $h['id'], 'd' => date('Y-m-01')));
 	return array('id' => (int)$h['id'], 'fqdn' => $h['fqdn'], 'mode' => (int)$h['mode'], 'wildcard' => (int)$h['wildcard'] === 1, 'status' => $h['status'],
-		'blocked_reason' => $h['blocked_reason'] ?: null, 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
+		'blocked_reason' => $h['blocked_reason'] ?: null, 'paused' => (int)($h['paused'] ?? 0) === 1, 'paused_at' => iso($h['paused_at'] ?? null), 'error' => $h['error'] ?: null, 'tunnels' => $tun, 'domain_id' => (int)$h['subdomain_id'],
 		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o'], 'conns' => (int)$tr['c'], 'requests' => (int)$tr['r'], 'rejected' => (int)$tr['x']),
 		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']),
 		'target' => (int)$h['mode'] === 3 ? c64o_target_out((int)$h['id']) : null, 'acl' => c64o_acl_out($h),
@@ -525,22 +525,33 @@ route('GET', '/cdn64o/hosts/{id}/events', function($p) {
 		qa("SELECT * FROM cdn64o_events WHERE host_id = :h ORDER BY id DESC LIMIT 100", array('h' => $h['id']))));
 });
 
-/** PATCH /cdn64o/hosts/{id} {mode, tunnels: [ids]} */
+/** PATCH /cdn64o/hosts/{id} {mode, tunnels: [ids], paused}. paused: die Server nehmen fuer den Namen nichts mehr an und
+ * trennen offene Verbindungen; DNS bleibt auf den Servern (die eigene Adresse bleibt verborgen), Einstellungen und
+ * Statistik bleiben. */
 route('PATCH', '/cdn64o/hosts/{id}', function($p) {
+	global $pdo;
 	$h = c64o_find_host($p['id']);
+	$changed = false;
 	if(($m = in_int('mode', false, 1, 3)) !== null) {
+		$changed = true;
 		if(!in_array($m, C64O_MODES, true)) { fail(422, 'mode_not_available', "Mode $m is not available yet.", array('field' => 'mode')); }
 		if(($m === 3) !== ((int)$h['mode'] === 3)) { fail(422, 'mode_change_not_possible', 'Mode 3 (direct) and modes 1/2 (tunnel) cannot be switched; switch the name off and on again.', array('field' => 'mode')); }
 		q("UPDATE cdn64o_hosts set mode = :m WHERE id = :h", array('m' => $m, 'h' => $h['id']));
 	}
 	if(($list = in_list('tunnels')) !== null) {
+		$changed = true;
 		if(empty($list)) { fail(422, 'invalid_field', "Field 'tunnels' must not be empty.", array('field' => 'tunnels')); }
 		$ids = array();
 		foreach($list as $tid) { $ids[] = c64o_find_tunnel((string)$tid)['id']; }
 		q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h", array('h' => $h['id']));
 		foreach(array_values(array_unique($ids)) as $i => $tid) { q("INSERT INTO cdn64o_host_tunnels (host_id, tunnel_id, priority) VALUES (:h, :t, :p)", array('h' => $h['id'], 't' => $tid, 'p' => $i)); }
 	}
-	c64o_event((int)$h['id'], uid(), 'changed');
+	if($changed) { c64o_event((int)$h['id'], uid(), 'changed'); }
+	if(($v = in_bool('paused')) !== null AND $v !== ((int)$h['paused'] === 1)) {
+		q("UPDATE cdn64o_hosts set paused = :p, paused_at = " . ($v ? "NOW()" : "NULL") . " WHERE id = :h", array('p' => $v ? 1 : 0, 'h' => $h['id']));
+		c64o_event((int)$h['id'], uid(), $v ? 'paused' : 'resumed');
+		add_log($pdo, uid(), $h['subdomain_id'], "CDN64 online", "CDN64 online fuer " . $h['fqdn'] . ($v ? " pausiert." : " fortgesetzt."));
+	}
 	ok(c64o_host_out(c64o_find_host((string)$h['id'])));
 });
 
@@ -598,9 +609,10 @@ route('GET', '/cdn64o/edge/config', function() {
 	foreach(qa("SELECT host_id, listen_port, transport, target_port FROM cdn64o_mappings ORDER BY transport, listen_port") as $r) {
 		$maps[(int)$r['host_id']][] = array('listen_port' => (int)$r['listen_port'], 'transport' => $r['transport'], 'target_port' => (int)$r['target_port']);
 	}
-	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason, acl_default FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
+	foreach(qa("SELECT id, userid, fqdn, wildcard, mode, status, blocked_reason, paused, acl_default FROM cdn64o_hosts WHERE status IN ('active', 'blocked') ORDER BY fqdn") as $h) {
 		$x = array('id' => (int)$h['id'], 'name' => $h['fqdn'], 'wildcard' => (int)$h['wildcard'] === 1, 'mode' => (int)$h['mode'], 'userid' => (int)$h['userid'],
-			'tunnels' => $ht[(int)$h['id']] ?? array(), 'blocked' => $h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '');
+			'tunnels' => $ht[(int)$h['id']] ?? array(),
+			'blocked' => (int)$h['paused'] === 1 ? 'paused' : ($h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '')); // Pause: Server sperren, DNS bleibt
 		if((int)$h['mode'] === 3) { $x['target'] = c64o_target_edge((int)$h['id']); }
 		if((int)$h['mode'] === 3 AND isset($maps[(int)$h['id']])) { $x['mappings'] = $maps[(int)$h['id']]; }
 		if($h['acl_default'] !== '') { $x['acl'] = array('default' => $h['acl_default'], 'list' => $acl[(int)$h['id']] ?? array()); }
