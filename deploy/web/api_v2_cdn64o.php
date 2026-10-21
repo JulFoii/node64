@@ -725,3 +725,41 @@ route('PUT', '/cdn64o/edge/certs', function() {
 		array('f' => $f, 'b' => $blob, 'n' => date('Y-m-d H:i:s', $na), 'e' => $e['name']));
 	no_content();
 }, true);
+
+// -------------------------------------------------------------------
+//  Account-Klassen (oeffentlich, ohne Key): GET /plans fuer Node64 – Grenzen live aus user_class, damit jede
+//  Aenderung dort auf alle Nodes kommt. Preise und Anzeige wie auf der Preisseite (pricing.php); 0 = unbegrenzt bei
+//  Updates/Pings/SMS/Bandbreite, Business/Company bei Updates/Pings/SMS unbegrenzt (wie auf der Preisseite).
+// -------------------------------------------------------------------
+const PLANS_PUBLIC = array(
+	1 => array('key' => 'free', 'name' => 'Free', 'price' => 0, 'upgrade' => 'https://ipv64.net/account'),
+	6 => array('key' => 'supporter', 'name' => 'Home / Supporter', 'price' => 40, 'upgrade' => 'https://ipv64.net/account?account_class&type=supporter'),
+	4 => array('key' => 'business', 'name' => 'Business', 'price' => 100, 'upgrade' => 'https://ipv64.net/account?account_class&type=business'),
+	5 => array('key' => 'company', 'name' => 'Company', 'price' => 200, 'upgrade' => 'https://ipv64.net/account?account_class&type=company'),
+);
+route('GET', '/plans', function() {
+	$out = array();
+	foreach(PLANS_PUBLIC as $id => $p) {
+		$c = q1("SELECT * FROM user_class WHERE id = :i", array('i' => $id));
+		if($c === null) { continue; }
+		$big = in_array($id, array(4, 5), true);
+		$z = fn($v) => (int)$v > 0 ? (int)$v : null;
+		$i = fn($k) => isset($c[$k]) ? (int)$c[$k] : null;
+		$l = array(
+			'dyndns_domains' => $i('dyndns_limit'), 'own_domains' => $i('owndomain_limit'),
+			'dyndns_updates_24h' => $big ? null : $z($c['dyndns_update_limit'] ?? 0), 'dyndns_ttl_s' => $i('ttl'),
+			'healthchecks' => $i('healthcheck_limit'), 'healthcheck_pings_24h' => $big ? null : $z($c['healthcheck_update_limit'] ?? 0),
+			'sms_24h' => $big ? null : $z($c['sms_limit'] ?? 0),
+			'failover_policies' => $i('failover_policies'), 'failover_monitors' => $i('failover_monitors'), 'failover_rules' => $i('failover_rules'),
+			'offline_pages' => $i('offline_pages'),
+			'cdn_domains' => $i('cdn_domains'), 'cdn_traffic_gb' => $i('cdn_traffic'), 'cdn_bandwidth_mbit' => $z($c['cdn_bandwidth'] ?? 0), 'cdn_mappings' => $i('cdn_mappings'),
+			'cloud_routers' => $i('cloud_router'), 'vpn_gateways' => $i('vpn_gateways'), 'vpn_peers' => $i('vpn_peers'), 'vpn_traffic_gb' => $i('vpn_traffic'),
+			'dns64_clients' => $i('dns64_clients'),
+		);
+		if(isset($c['log_days'])) { $l['log_days'] = (int)$c['log_days']; } // fehlt eine Spalte, nimmt Node64 den eingebauten Wert
+		$out[] = array('id' => $id, 'key' => $p['key'], 'name' => $p['name'], 'class_name' => $c['name'], 'price_year_eur' => $p['price'],
+			'upgrade_url' => $p['upgrade'], 'limits' => (object)array_filter($l, fn($v, $k) => $v !== null || !in_array($k, array('dyndns_domains', 'own_domains', 'dyndns_ttl_s', 'healthchecks', 'failover_policies', 'failover_monitors', 'failover_rules', 'offline_pages', 'cdn_domains', 'cdn_traffic_gb', 'cdn_mappings', 'cloud_routers', 'vpn_gateways', 'vpn_peers', 'vpn_traffic_gb', 'dns64_clients'), true), ARRAY_FILTER_USE_BOTH));
+	}
+	header('Cache-Control: public, max-age=600');
+	ok($out);
+}, true);
