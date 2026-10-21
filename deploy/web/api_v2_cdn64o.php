@@ -69,10 +69,10 @@ function c64o_host_out(array $h): array {
 		'edges' => array_map('c64o_edge_out', c64o_edges()), 'traffic_month' => array('bytes_in' => (int)$tr['i'], 'bytes_out' => (int)$tr['o'], 'conns' => (int)$tr['c'], 'requests' => (int)$tr['r'], 'rejected' => (int)$tr['x']),
 		'created_via' => $h['created_via'], 'created_at' => iso($h['created_at']), 'updated_at' => iso($h['updated_at']),
 		'target' => (int)$h['mode'] === 3 ? c64o_target_out((int)$h['id']) : null, 'acl' => c64o_acl_out($h),
-		'mappings' => (int)$h['mode'] === 3 ? c64o_mappings_out((int)$h['id']) : array());
+		'mappings' => c64o_mappings_out((int)$h['id']));
 }
 
-/** Portmapper eines Namens (Modus 3). */
+/** Portmapper eines Namens (Modus 3 direkt zum Ziel, Modus 1/2 durch den Tunnel zu einem Stream der Node). */
 function c64o_mappings_out(int $hostId): array {
 	return array_map(fn($m) => array('id' => (int)$m['id'], 'name' => $m['name'], 'listen_port' => (int)$m['listen_port'], 'transport' => $m['transport'],
 		'target_port' => (int)$m['target_port']), qa("SELECT * FROM cdn64o_mappings WHERE host_id = :h ORDER BY listen_port, transport", array('h' => $hostId)));
@@ -485,12 +485,12 @@ route('PUT', '/cdn64o/hosts/{id}/acl', function($p) {
 	ok(c64o_acl_out(c64o_find_host((string)$h['id'])));
 });
 
-/** GET|POST /cdn64o/hosts/{id}/mappings {name, transport: tcp|udp, target_port, listen_port?}: Portmapper (nur Modus 3). */
+/** GET|POST /cdn64o/hosts/{id}/mappings {name, transport: tcp|udp, target_port, listen_port?}: Portmapper (alle Modi;
+ * Modus 1/2: target_port = Port des Streams in der Node, die Server reichen durch den Tunnel). */
 route('GET', '/cdn64o/hosts/{id}/mappings', function($p) { ok(c64o_mappings_out((int)c64o_find_host($p['id'])['id'])); });
 route('POST', '/cdn64o/hosts/{id}/mappings', function($p) {
 	global $CLASS;
 	$h = c64o_find_host($p['id']);
-	if((int)$h['mode'] !== 3) { fail(409, 'not_mode_3', 'Port mappings are only available in mode 3.'); }
 	$tr = in_str('transport', false, 3, 'tcp');
 	if(!in_array($tr, array('tcp', 'udp'), true)) { fail(422, 'invalid_field', "Field 'transport' must be tcp or udp.", array('field' => 'transport')); }
 	$tp = in_int('target_port', true, 1, 65535);
@@ -614,7 +614,7 @@ route('GET', '/cdn64o/edge/config', function() {
 			'tunnels' => $ht[(int)$h['id']] ?? array(),
 			'blocked' => (int)$h['paused'] === 1 ? 'paused' : ($h['status'] === 'blocked' ? ($h['blocked_reason'] ?: 'blocked') : '')); // Pause: Server sperren, DNS bleibt
 		if((int)$h['mode'] === 3) { $x['target'] = c64o_target_edge((int)$h['id']); }
-		if((int)$h['mode'] === 3 AND isset($maps[(int)$h['id']])) { $x['mappings'] = $maps[(int)$h['id']]; }
+		if(isset($maps[(int)$h['id']])) { $x['mappings'] = $maps[(int)$h['id']]; } // Modus 1/2: durch den Tunnel
 		if($h['acl_default'] !== '') { $x['acl'] = array('default' => $h['acl_default'], 'list' => $acl[(int)$h['id']] ?? array()); }
 		$hosts[] = $x;
 		$users[(int)$h['userid']] = true;
