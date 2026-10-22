@@ -142,13 +142,13 @@ if($o === null) {
 $l = $o['lists'];
 ?>
 	<div class="row">
-		<?php foreach(array(array(hss_t('Sensoren aktiv (7 Tage)', 'Active sensors (7 days)'), hss_num($o['sensors']['active_7d']) . ' <small class="text-muted">/ ' . hss_num($o['sensors']['online']) . ' online</small>'),
-			array(hss_t('Beitragende Accounts (7 Tage)', 'Contributing accounts (7 days)'), hss_num($o['threshold']['active_accounts_7d'])),
-			array(hss_t('Angriffe 24 h', 'Attacks 24 h'), hss_num($o['attacks_24h']['events'])),
-			array(hss_t('Angreifer-IPs 24 h', 'Attacker IPs 24 h'), hss_num($o['attacks_24h']['sources'])),
-			array(hss_t('v64 Blocklist (live)', 'v64 Blocklist (live)'), hss_num($l['v64'] ?? 0))) as [$label, $val]) { ?>
-		<div class="col-6 col-md pb-3"><div class="card h-100"><div class="card-body p-2 text-center">
-			<div class="small text-muted"><?php echo hss_h($label); ?></div><div class="h5 mb-0"><?php echo $val; ?></div>
+		<?php foreach(array(array(hss_t('Sensoren aktiv (7 Tage)', 'Active sensors (7 days)'), hss_num($o['sensors']['active_7d']) . ' <small class="text-muted">/ ' . hss_num($o['sensors']['online']) . ' online</small>', 'fa-satellite-dish', 'success'),
+			array(hss_t('Beitragende Accounts (7 Tage)', 'Contributing accounts (7 days)'), hss_num($o['threshold']['active_accounts_7d']), 'fa-users', 'secondary'),
+			array(hss_t('Angriffe 24 h', 'Attacks 24 h'), hss_num($o['attacks_24h']['events']), 'fa-bug', 'primary'),
+			array(hss_t('Angreifer-IPs 24 h', 'Attacker IPs 24 h'), hss_num($o['attacks_24h']['sources']), 'fa-earth-europe', 'info'),
+			array(hss_t('v64 Blocklist (live)', 'v64 Blocklist (live)'), hss_num($l['v64'] ?? 0), 'fa-ban', 'danger')) as [$label, $val, $icon, $color]) { ?>
+		<div class="col-6 col-md pb-3"><div class="card bg-light h-100" style="border-left:4px solid var(--<?php echo $color; ?>)"><div class="card-body p-2"><i class="fa-solid <?php echo $icon; ?> fa-2xl float-right pt-4 text-<?php echo $color; ?>"></i>
+			<p class="lead m-0"><?php echo hss_h($label); ?></p><p class="card-text h3"><?php echo $val; ?></p>
 		</div></div></div>
 		<?php } ?>
 	</div>

@@ -58,10 +58,10 @@ $maxDay = max(1, max($days));
 		Tagesstand für alle unter <a href="/v64_blocklists">/v64_blocklists</a>.</div></div>
 
 	<div class="row">
-		<?php foreach(array(array('Sensoren online', $online . ' / ' . count($sensors)), array('Ereignisse 24 h', hpw_num($tot['e24'])), array('Ereignisse 7 Tage', hpw_num($tot['e7'])),
-			array('Quell-IPs 24 h', hpw_num($tot['s24'])), array('Quell-IPs 7 Tage', hpw_num($tot['s7']))) as [$label, $val]) { ?>
-		<div class="col-6 col-md pb-3"><div class="card h-100"><div class="card-body p-2 text-center">
-			<div class="small text-muted"><?php echo hpw_h($label); ?></div><div class="h5 mb-0"><?php echo hpw_h($val); ?></div>
+		<?php foreach(array(array('Sensoren online', $online . ' / ' . count($sensors), 'fa-satellite-dish', 'success'), array('Ereignisse 24 h', hpw_num($tot['e24']), 'fa-bug', 'primary'), array('Ereignisse 7 Tage', hpw_num($tot['e7']), 'fa-bug', 'primary'),
+			array('Quell-IPs 24 h', hpw_num($tot['s24']), 'fa-earth-europe', 'info'), array('Quell-IPs 7 Tage', hpw_num($tot['s7']), 'fa-earth-europe', 'info')) as [$label, $val, $icon, $color]) { ?>
+		<div class="col-6 col-md pb-3"><div class="card bg-light h-100" style="border-left:4px solid var(--<?php echo $color; ?>)"><div class="card-body p-2"><i class="fa-solid <?php echo $icon; ?> fa-2xl float-right pt-4 text-<?php echo $color; ?>"></i>
+			<p class="lead m-0"><?php echo hpw_h($label); ?></p><p class="card-text h3"><?php echo hpw_h($val); ?></p>
 		</div></div></div>
 		<?php } ?>
 	</div>
