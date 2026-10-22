@@ -11647,6 +11647,109 @@
         }
       }
     },
+    "/node64/hello": {
+      "post": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Node64-Container meldet sich an (Node-Übersicht)",
+        "operationId": "post_node64_hello",
+        "description": "Wird vom Node64-Container beim Start, nach Änderungen und alle 15 Minuten aufgerufen. Header X-Node64-Node muss der node_id im Body entsprechen. Ist die Node in der Übersicht entfernt, antwortet der Server mit 403 node_removed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "node_id"
+                ],
+                "properties": {
+                  "node_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "os_arch": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "modules": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "features": {
+                    "type": "object",
+                    "properties": {
+                      "hc_sync_linked": {
+                        "type": "boolean"
+                      },
+                      "hub_node_id": {
+                        "type": "string"
+                      },
+                      "honeypot_sensor_id": {
+                        "type": "string"
+                      },
+                      "cdn64_tunnel": {
+                        "type": "string"
+                      },
+                      "dyndns": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Erfolgreich"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "description": "node_removed: Node wurde in der Node-Übersicht entfernt"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
+    "/node64/nodes": {
+      "get": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Alle Node64-Container des Accounts (Node-Übersicht)",
+        "operationId": "get_node64_nodes",
+        "responses": {
+          "200": {
+            "description": "Erfolgreich"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        }
+      }
+    },
     "/hc2/nodes": {
       "get": {
         "tags": [

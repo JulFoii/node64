@@ -5,6 +5,8 @@
  * Nutzt das Grundgeruest von api_v2.php (route, ok, fail, in_*, qp*, uid) und die Bibliothek der Portal-Seiten
  * (healthchecks2/hc2_lib.php). Feldnamen wie in der Node-API, damit Skripte gegen Node und Portal gleich aussehen.
  * Die alten /healthchecks-Pfade bleiben unveraendert.
+ * Am Ende: Node-Uebersicht von Node64 (POST /node64/hello, GET /node64/nodes; Tabelle node64_nodes), weil nur diese
+ * Datei sicher eingebunden ist.
  */
 require_once __DIR__ . '/healthchecks2/hc2_lib.php';
 
@@ -545,3 +547,68 @@ route('DELETE', '/hc2/nodes/{node_id}', function($p) {
 	}
 	ok(array('unlinked' => true, 'checks_kept_online' => $kept, 'checks_deleted' => $dropped));
 });
+
+// ---------------------------------------------------------------- Node64: eine Liste aller Nodes (nodes.php)
+// Tabelle node64_nodes in der Hauptdatenbank (deploy/sql/node64_nodes.sql), Zeiten UTC. Die Node meldet sich beim Start,
+// alle 15 Minuten und nach Aenderungen (POST /node64/hello); jede Anfrage mit X-Node64-Node frischt last_seen auf.
+
+/** Kennung einer Node (node.id: 32 Zeichen base64url; Modus ohne Oberflaeche: Sensor-UUID), sonst ''. */
+function n64_id($v, int $max = 64): string { $v = is_string($v) ? $v : ''; return preg_match('/^[A-Za-z0-9_-]{8,' . $max . '}$/', $v) ? $v : ''; }
+/** Freitext kuerzen; 4-Byte-Zeichen ersetzen (Verbindung laeuft mit SET NAMES 'utf8'). */
+function n64_text($v, int $max): string { return mb_substr(trim((string)preg_replace('/[\x{10000}-\x{10FFFF}]/u', "\u{FFFD}", is_scalar($v) ? (string)$v : '')), 0, $max); }
+function n64_out(array $n, array $hubs): array {
+	$h = $hubs[$n['hub_node_id'] !== '' ? $n['hub_node_id'] : $n['node_id']] ?? null;
+	return array('node_id' => $n['node_id'], 'name' => $n['name'], 'location' => $n['location'], 'version' => $n['version'], 'os_arch' => $n['os_arch'], 'mode' => $n['mode'] !== '' ? $n['mode'] : 'full',
+		'modules' => array_values(array_filter(explode(',', (string)$n['modules']))),
+		'features' => array('hc_sync_linked' => (int)$n['hc_linked'] === 1, 'hub_node_id' => $n['hub_node_id'] !== '' ? $n['hub_node_id'] : null, 'honeypot_sensor_id' => $n['sensor_id'] !== '' ? $n['sensor_id'] : null,
+			'cdn64_tunnel' => $n['tunnel_id'] !== '' ? $n['tunnel_id'] : null, 'dyndns' => (int)$n['dyndns'] === 1),
+		'healthchecks' => $h ? array('online' => (int)$h['online'] === 1, 'last_sync' => hc2_iso($h['last_sync'])) : null,
+		'first_seen' => hc2_iso($n['first_seen']), 'last_seen' => hc2_iso($n['last_seen']), 'removed' => $n['removed_at'] !== null, 'removed_at' => hc2_iso($n['removed_at']));
+}
+
+route('POST', '/node64/hello', function() {
+	global $AUTH;
+	$b = body(); $u = uid();
+	$nid = n64_id($b['node_id'] ?? '');
+	if ($nid === '') { fail(422, 'invalid_node_id', 'node_id must have 8 to 64 characters A-Z, a-z, 0-9, _ or -.', array('field' => 'node_id')); }
+	$hdr = (string)($_SERVER['HTTP_X_NODE64_NODE'] ?? '');
+	if ($hdr !== '' && $hdr !== $nid) { fail(422, 'node_id_mismatch', 'node_id differs from the X-Node64-Node header.', array('field' => 'node_id')); }
+	rl_enforce('node64hello:' . $u . ':' . $nid, 10, 1 / 60, 'node hello');
+	$f = is_array($b['features'] ?? null) ? $b['features'] : array();
+	$mods = array(); foreach ((is_array($b['modules'] ?? null) ? $b['modules'] : array()) as $m) { if (is_string($m) && preg_match('/^[a-z0-9_-]{1,32}$/', $m)) { $mods[$m] = true; } }
+	$sensor = strtolower((string)(is_string($f['honeypot_sensor_id'] ?? null) ? $f['honeypot_sensor_id'] : ''));
+	// entfernt: diese Node oder ihr Sensor (vor dem ersten hello nur als Sensor bekannt, node_id = Sensor-Kennung)
+	if (q1("SELECT node_id FROM node64_nodes WHERE userid = :u AND node_id IN (:n, :s) AND removed_at IS NOT NULL LIMIT 1", array('u' => $u, 'n' => $nid, 's' => $sensor !== '' ? $sensor : $nid)) !== null) {
+		fail(403, 'node_removed', 'This node was removed on ipv64.net. Allow it again in the node overview (ipv64.net/nodes.php) and enter the API key in the node again.');
+	}
+	$tunnel = is_string($f['cdn64_tunnel'] ?? null) && preg_match('/^[A-Za-z0-9_-]{1,24}$/', $f['cdn64_tunnel']) ? $f['cdn64_tunnel'] : '';
+	$p = array('u' => $u, 'n' => $nid, 'na' => n64_text($b['name'] ?? '', 100), 'l' => n64_text($b['location'] ?? '', 100), 'v' => n64_text($b['version'] ?? '', 32),
+		'o' => n64_text($b['os_arch'] ?? '', 32), 'mo' => ($b['mode'] ?? '') === 'headless' ? 'headless' : '', 'm' => mb_substr(implode(',', array_keys($mods)), 0, 255),
+		'hl' => !empty($f['hc_sync_linked']) ? 1 : 0, 'h' => n64_id($f['hub_node_id'] ?? '', 32), 's' => preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $sensor) ? $sensor : '',
+		't' => $tunnel, 'd' => !empty($f['dyndns']) ? 1 : 0, 'k' => $AUTH['key_id'] ?? null, 'ip' => client_ip());
+	q("INSERT INTO node64_nodes (userid, node_id, name, location, version, os_arch, mode, modules, hc_linked, hub_node_id, sensor_id, tunnel_id, dyndns, api_key_id, first_seen, last_seen, last_hello, last_ip)
+		VALUES (:u, :n, :na, :l, :v, :o, :mo, :m, :hl, :h, :s, :t, :d, :k, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP(), :ip)
+		ON DUPLICATE KEY UPDATE name = VALUES(name), location = VALUES(location), version = VALUES(version), os_arch = VALUES(os_arch), mode = VALUES(mode), modules = VALUES(modules),
+		hc_linked = VALUES(hc_linked), hub_node_id = VALUES(hub_node_id), sensor_id = VALUES(sensor_id), tunnel_id = VALUES(tunnel_id), dyndns = VALUES(dyndns), api_key_id = VALUES(api_key_id),
+		last_seen = VALUES(last_seen), last_hello = VALUES(last_hello), last_ip = VALUES(last_ip)", $p);
+	ok(array('ok' => true, 'removed' => false, 'node_id' => $nid));
+});
+route('GET', '/node64/nodes', function() {
+	$hubs = array();
+	try { $hubs = hc2_nodes(uid(), true); } catch (Throwable $e) { error_log('node64/nodes: ' . $e->getMessage()); } // Healthchecks-Datenbank nicht erreichbar: ohne
+	ok(array_map(fn($n) => n64_out($n, $hubs), qa("SELECT * FROM node64_nodes WHERE userid = :u ORDER BY removed_at IS NOT NULL, name, node_id", array('u' => uid()))));
+});
+
+// Jede Anfrage einer Node (X-Node64-Node) frischt ihr last_seen auf, hoechstens einmal je Minute; nach der Antwort
+// und ohne Fehler, falls die Tabelle noch fehlt.
+if (!empty($_SERVER['HTTP_X_NODE64_NODE'])) {
+	register_shutdown_function(function() {
+		global $ME, $pdo;
+		$nid = n64_id($_SERVER['HTTP_X_NODE64_NODE'] ?? '');
+		if (empty($ME['id']) || $nid === '' || !($pdo instanceof PDO)) { return; }
+		try {
+			$st = $pdo->prepare("UPDATE node64_nodes SET last_seen = UTC_TIMESTAMP() WHERE userid = :u AND node_id = :n AND removed_at IS NULL AND (last_seen IS NULL OR last_seen < UTC_TIMESTAMP() - INTERVAL 60 SECOND)");
+			if ($st) { $st->execute(array('u' => (int)$ME['id'], 'n' => $nid)); }
+		} catch (Throwable $e) { error_log('node64 last_seen: ' . $e->getMessage()); }
+	});
+}
