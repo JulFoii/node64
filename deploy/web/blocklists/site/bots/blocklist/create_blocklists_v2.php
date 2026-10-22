@@ -20,6 +20,7 @@
 //          php create_blocklists_v2.php --dry         -> nur Statistik, schreibt nichts
 //          php create_blocklists_v2.php --only=v64    -> nur die v64 Blocklist (Honeypot64, nach honeypot_score.php alle 30 min)
 //          php create_blocklists_v2.php --v64-daily   -> Tagesstand der v64 Blocklist jetzt neu schreiben
+//          php create_blocklists_v2.php --ai-refresh  -> Quellen der KI-Bot-Listen jetzt laden (sonst hoechstens alle 20 h, ai_bots.php)
 //
 // Voller Lauf schreibt zusaetzlich country_ranges.txt.gz (Herkunft fuer Honeypot64/Node64, index.json "geo")
 include("/var/www/clients/client1/web58/web/dbconnect.php");
@@ -29,11 +30,12 @@ ini_set('memory_limit', '1024M');
 $OUT = realpath(__DIR__."/../../blocklists");
 // Live-Stand der v64 Blocklist: nicht oeffentlich (ISPConfig-Ordner private/ neben web/), ausgeliefert ueber blocklists/live.php
 $LIVE = dirname(__DIR__, 3)."/private/blocklists_live";
-$dry = false; $extern = false; $only_v64 = false; $v64_daily = false;
+$dry = false; $extern = false; $only_v64 = false; $v64_daily = false; $ai_refresh = false;
 foreach($argv as $a) {
 	if($a === '--dry') { $dry = true; }
 	if($a === '--only=v64') { $only_v64 = true; }
 	if($a === '--v64-daily') { $v64_daily = true; }
+	if($a === '--ai-refresh') { $ai_refresh = true; }
 	if(str_starts_with($a, '--out=')) { $OUT = rtrim(substr($a, 6), '/'); $LIVE = $OUT."/live"; $extern = true; @mkdir($OUT, 0755, true); @mkdir($OUT."/countries", 0755, true); @mkdir($OUT."/user", 0755, true); }
 }
 if($OUT === false OR !is_dir($OUT)) { die("Ausgabeverzeichnis nicht gefunden\n"); }
@@ -440,10 +442,22 @@ foreach($region_nets as $r => $nets)
 	$index['regions'][] = ['countries' => $regionen[$r]] + index_entry($r, ucwords(str_replace("_", " ", $r)), "countries/", $v4, $v6, false);
 }
 
+// KI-Bots (ai_bots.php): IP-Liste unter "lists", User-Agent-Liste unter "data"; Quellen hoechstens alle 20 h, je Quelle letzte gute Fassung
+$ai = array(null, null);
+if(is_file(__DIR__."/ai_bots.php")) {
+	try {
+		require_once __DIR__."/ai_bots.php";
+		$ai = aib_run($OUT, $extern ? "$OUT/ai_cache" : dirname(__DIR__, 3)."/private/blocklists_ai", $ai_refresh || $extern || $dry);
+	} catch(Throwable $e) {
+		echo "KI-Bots: nicht geschrieben (".$e->getMessage().")\n";
+	}
+}
+if($ai[0] !== null) { $index['lists'][] = $ai[0]; }
 $index['lists'] = array_merge($index['lists'], $v64_index); // v64 Blocklist (Abschnitt 0), nicht in "all"
 $index['live'] = $v64_live;
 // Honeypot64 Text-Listen (bots/honeypot_lists.php) unter "data", nicht unter "lists" (dort waeren es IP-Listen)
 if(is_file(__DIR__."/../honeypot_lists_index.php")) { require_once __DIR__."/../honeypot_lists_index.php"; $index['data'] = hpl_index_entries($OUT); }
+if($ai[1] !== null) { $index['data'] = array_merge($index['data'] ?? array(), array($ai[1])); }
 write_atomic("$OUT/index.json", json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 echo "index.json: ".count($index['lists'])." Listen, ".count($index['countries'])." Laender\n";
 

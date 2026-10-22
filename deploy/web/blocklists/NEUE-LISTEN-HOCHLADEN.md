@@ -56,3 +56,39 @@ Cron bleibt wie er ist.
 - `curl -s https://ipv64.net/blocklists/index.json | head -20` zeigt JSON.
 - `curl -s https://ipv64.net/blocklists/ipv64_blocklist_cloudflare.txt | head -3` zeigt Netze.
 - Listenseite: neue Zeilen mit Beschreibung; Cloud und DoH tragen „not in All“.
+
+## KI-Bots (2026-10-22): zwei Listen, ohne SQL und ohne neuen Cron
+
+Beide Listen schreibt `create_blocklists_v2.php` im vollen Lauf über `bots/blocklist/ai_bots.php` (eingebunden, fehlt
+die Datei, läuft alles wie bisher). Quellen werden höchstens alle 20 Stunden geladen (`--ai-refresh` erzwingt es). Je
+Quelle liegt die letzte gültige Fassung in `private/blocklists_ai/` (neben `web/`); fällt eine Quelle aus oder liefert
+Unsinn, gilt die alte weiter. Liefert keine Quelle etwas, bleiben die Dateien unverändert. Kostenlos wie alle Listen,
+nicht in `all`.
+
+| ID | Inhalt | Dateien unter `blocklists/` | index.json |
+|---|---|---|---|
+| `ai_bots` | v64 AI Bots (IP): offizielle Netze der Betreiber, IPv4 + IPv6, Duplikate und enthaltene Netze entfernt (Test: 310 Netze) | `ipv64_blocklist_ai_bots.txt`, `_v4_`, `_v6_`, MikroTik `IPv64-ai_bots`, `ipv64_blocklist_ai_bots_sources.txt` (Netz `#` Quellen) | `lists`, Kategorie `ai`, je Quelle `sources` (Art, Nutzer-Abruf, Anzahl, Stand, ok/Fehler) |
+| `ai_useragents` | v64 AI Bots (User-Agent): Spiegel von ai.robots.txt (MIT), Test: 193 Kennungen, 53 Nutzer-Abrufe | `ipv64_ai_useragents.txt` (eine je Zeile), `ipv64_ai_useragents.json` (Betreiber, Zweck, Beschreibung, `user`), `ipv64_ai_robots.txt` | `data` (keine IP-Liste), Kategorie `ai` |
+
+Quellen der IP-Liste (alle `{"prefixes":[{"ipv4Prefix"|"ipv6Prefix"}]}`): OpenAI `gptbot.json`, `searchbot.json`,
+`chatgpt-user.json` (Nutzer); Perplexity `perplexitybot.json`, `perplexity-user.json` (Nutzer); Common Crawl
+`ccbot.json`; Mistral `mistralai-user-ips.json` (Nutzer); Google `user-triggered-agents.json` (Google-Agent, Nutzer).
+Prüfung: gültiges JSON, höchstens 5.000 Einträge, Netz parsebar, nicht kleiner als /16 bzw. /32, keine privaten
+Bereiche.
+
+Nicht aufgenommen: Googlebot/Google-Extended, Bingbot und Applebot/Applebot-Extended (Netze mit der normalen Suche
+geteilt; Extended ist nur ein robots.txt-Name), DuckAssistBot (`duckassistbot.json` ist dieselbe Datei wie
+`duckduckbot.json`), Amazonbot (nur HTML-Seite, dient auch Alexa), ClaudeBot, Meta, Bytespider (keine
+maschinenlesbare Liste). Über die User-Agent-Liste sind sie trotzdem erfasst.
+
+User-Agent-Liste: Kennungen nur druckbares ASCII, 3–80 Zeichen, ohne `" ' \ # ; < > { } | ^ * $`; weniger als 50
+gültige = Quelle ungültig. `user` = Funktion „AI Assistants/Agents/Coding Agents“, Name endet auf `User` oder Text
+nennt Nutzer-Prompts.
+
+Hochladen: `site/bots/blocklist/ai_bots.php` → `bots/blocklist/ai_bots.php` (neu),
+`site/bots/blocklist/create_blocklists_v2.php` → `bots/blocklist/create_blocklists_v2.php`,
+`site/v64_blocklists.php` → `v64_blocklists.php`. Danach einmal `php bots/blocklist/create_blocklists_v2.php --ai-refresh`.
+
+Prüfen: `curl -s https://ipv64.net/blocklists/ipv64_blocklist_ai_bots.txt | wc -l` (rund 300),
+`curl -s https://ipv64.net/blocklists/ipv64_ai_useragents.txt | wc -l` (rund 190), in `index.json` `ai_bots`
+unter `lists` und `ai_useragents` unter `data`.

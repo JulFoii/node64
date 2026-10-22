@@ -86,6 +86,43 @@ function bl_status(string $updated): string { $old = $updated === '' || (time() 
 					<?php
 					}
 					?>
+					<?php // KI-Bots (bots/blocklist/ai_bots.php), nicht in "all" ?>
+					<?php [$cnt, $upd] = bl_file_info('ipv64_blocklist_ai_bots.txt'); if($upd !== '') { ?>
+					<tr>
+						<td><i class="fa-solid fa-robot"></i>
+						<td>v64 AI Bots (IP) <span class="badge badge-info">AI</span> <span class="badge badge-light" title="Not part of the combined list &quot;All&quot;">not in All</span>
+						<br><small class="text-muted">Official IP ranges published by AI operators: OpenAI (GPTBot, OAI-SearchBot, ChatGPT-User), Perplexity (PerplexityBot, Perplexity-User),
+						Common Crawl (CCBot), Mistral (MistralAI-User), Google-Agent. Includes fetches on behalf of users. Ranges shared with normal search (Googlebot, Bingbot, Applebot) are not included.
+						Checked daily; if an operator is unreachable, its last good list is kept.
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_ai_bots_sources.txt" target="_blank">Networks with source</a></small>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo timeago2($upd,date("Y-m-d H:i:s",time())); ?></span>
+						<td><a href="https://ipv64.net/blocklists/ipv64_blocklist_ai_bots.txt" target="_blank" title="v64 AI Bots (IP) RAW Format">
+						<span class="badge badge-success">All</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v4_ai_bots.txt" target="_blank" title="v64 AI Bots (IP) only IPv4 RAW Format">
+						<span class="badge badge-dark">Only v4</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_blocklist_v6_ai_bots.txt" target="_blank" title="v64 AI Bots (IP) only IPv6 RAW Format">
+						<span class="badge badge-secondary">Only v6</span></a>
+					</tr>
+					<?php } [$cnt, $upd] = bl_file_info('ipv64_ai_useragents.txt'); if($upd !== '') { ?>
+					<tr>
+						<td><i class="fa-solid fa-robot"></i>
+						<td>v64 AI Bots (User-Agent) <span class="badge badge-info">AI</span> <span class="badge badge-light">User-Agent list</span>
+						<br><small class="text-muted">User agent tokens of AI crawlers, assistants and agents, mirrored daily from
+						<a href="https://github.com/ai-robots-txt/ai.robots.txt" target="_blank" rel="noopener">ai.robots.txt</a> (MIT). Text: one token per line;
+						JSON with operator, function and a flag for fetches on behalf of users; robots.txt block. Match case-insensitively in the User-Agent header (web server, reverse proxy, Node64 PROXY64).</small>
+						<td><span class="badge badge-dark" title="<?php echo $cnt;?>"><?php echo formatLargeNumber($cnt);?></span>
+						<td><?php echo bl_status($upd); ?>
+						<span class="badge badge-primary"> <?php echo timeago2($upd,date("Y-m-d H:i:s",time())); ?></span>
+						<td><a href="https://ipv64.net/blocklists/ipv64_ai_useragents.txt" target="_blank" title="One user agent token per line">
+						<span class="badge badge-success">TXT</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_ai_useragents.json" target="_blank" title="JSON with operator, function and user flag">
+						<span class="badge badge-dark">JSON</span></a>
+						<a href="https://ipv64.net/blocklists/ipv64_ai_robots.txt" target="_blank" title="robots.txt block (Disallow for all listed AI bots)">
+						<span class="badge badge-secondary">robots.txt</span></a>
+					</tr>
+					<?php } ?>
 					<?php [$cnt, $upd] = bl_file_info('ipv64_blocklist_all.txt'); ?>
 					<tr class="table-info">
 						<td><i class="fa-solid fa-crown text-warning"></i>
