@@ -25,10 +25,7 @@ if($userid == "") {
 $u = (int)$userid; $now = time();
 $d1 = gmdate('Y-m-d H:i:s', $now - 86400); $d7 = gmdate('Y-m-d H:i:s', $now - 7 * 86400); $from = gmdate('Y-m-d', $now - 6 * 86400);
 try {
-	$sensors = hpw_rows("SELECT sensor_id, version, profile, mode, last_seen, reports, disabled FROM hp_sensors WHERE userid = :u AND last_seen IS NOT NULL ORDER BY last_seen DESC", array('u' => $u));
-	$agg = array();
-	foreach(hpw_rows("SELECT sensor_id, COUNT(DISTINCT CASE WHEN last_seen >= :d1 THEN ip_bin END) s24, COUNT(DISTINCT ip_bin) s7 FROM hp_report_sources
-		WHERE userid = :u AND last_seen >= :d7 GROUP BY sensor_id", array('u' => $u, 'd1' => $d1, 'd7' => $d7)) as $x) { $agg[$x['sensor_id']] = $x; }
+	$sensors = hpw_rows("SELECT sensor_id, last_seen, disabled FROM hp_sensors WHERE userid = :u AND last_seen IS NOT NULL ORDER BY last_seen DESC", array('u' => $u));
 	$tot = hpw_rows("SELECT COUNT(DISTINCT CASE WHEN last_seen >= :d1 THEN ip_bin END) s24, COUNT(DISTINCT ip_bin) s7,
 		COALESCE(SUM(CASE WHEN last_seen >= :d2 THEN `count` ELSE 0 END), 0) e24, COALESCE(SUM(`count`), 0) e7
 		FROM hp_report_sources WHERE userid = :u AND last_seen >= :d7", array('u' => $u, 'd1' => $d1, 'd2' => $d1, 'd7' => $d7))[0];
@@ -68,20 +65,12 @@ $maxDay = max(1, max($days));
 		<?php } ?>
 	</div>
 
-	<div class="card mb-3"><div class="card-header p-2"><i class="fa-solid fa-satellite-dish text-primary"></i> Sensoren</div>
-	<div class="card-body p-0"><div class="table-responsive">
-		<table class="table table-sm mb-0 small"><thead><tr><th>Sensor</th><th>Status</th><th>Version</th><th>Profil</th><th>Letzte Meldung</th><th class="text-right">Meldungen</th><th class="text-right">Quell-IPs 24 h</th><th class="text-right">7 Tage</th></tr></thead><tbody>
-		<?php if(empty($sensors)) { echo '<tr><td colspan="8" class="text-muted p-3">Noch kein Sensor hat gemeldet. Honeypot64 in Node64 einschalten und das Melden an ipv64 erlauben (Anleitung unter node64.de/docs/honeypot/).</td></tr>'; }
-		foreach($sensors as $s) {
-			$on = strtotime($s['last_seen'] . ' UTC') >= $now - 1800;
-			$st = (int)$s['disabled'] === 1 ? '<span class="badge badge-danger">gesperrt</span>' : ($on ? '<span class="badge badge-success">online</span>' : '<span class="badge badge-secondary">offline</span>');
-			$a = $agg[$s['sensor_id']] ?? array();
-			echo '<tr><td><code title="' . hpw_h($s['sensor_id']) . '">' . hpw_h(substr($s['sensor_id'], 0, 8)) . '</code></td><td>' . $st . '</td><td>' . hpw_h($s['version']) . '</td><td>' . hpw_h($s['profile'])
-				. ($s['mode'] === 'headless' ? ' <small class="text-muted">ohne Oberfläche</small>' : '') . '</td><td>' . hpw_h(hpw_time($s['last_seen'])) . '</td><td class="text-right">' . hpw_num($s['reports'])
-				. '</td><td class="text-right">' . hpw_num($a['s24'] ?? 0) . '</td><td class="text-right">' . hpw_num($a['s7'] ?? 0) . '</td></tr>';
-		} ?>
-		</tbody></table>
-	</div></div></div>
+	<div class="card mb-3"><div class="card-body p-2 small d-flex flex-wrap align-items-center" style="gap:.5rem"><i class="fa-solid fa-satellite-dish text-primary"></i>
+		<?php $blocked = count(array_filter($sensors, fn($s) => (int)$s['disabled'] === 1));
+		if(empty($sensors)) { echo '<span class="text-muted">Noch kein Sensor hat gemeldet. Honeypot64 in Node64 einschalten und das Melden an ipv64 erlauben (Anleitung unter node64.de/docs/honeypot/).</span>'; }
+		else { echo '<span><b>' . count($sensors) . ' Sensor' . (count($sensors) === 1 ? '' : 'en') . '</b>, ' . $online . ' online' . ($blocked ? ', ' . $blocked . ' gesperrt' : '') . ' – Status, Version und Entfernen in der Node-Übersicht.</span>'; } ?>
+		<a class="btn btn-sm btn-outline-primary ml-auto" href="/nodes.php"><i class="fa-solid fa-server"></i> Zur Node-Übersicht</a>
+	</div></div>
 
 	<div class="row">
 		<div class="col-12 col-lg-4 pb-3"><div class="card h-100"><div class="card-header p-2">Top-Arten (7 Tage)</div><div class="card-body p-0">

@@ -287,13 +287,12 @@ function c64w_target_fields(?array $t): void {
 	</div>
 	<div class="col-12 col-lg-6 pb-3">
 		<div class="card"><div class="card-header p-2"><i class="fa-solid fa-network-wired text-primary"></i> Node64 tunnels</div>
-		<div class="card-body p-0">
-			<table class="table table-sm mb-0 small"><thead><tr><th>Node</th><th>Last seen</th><th>Server</th></tr></thead><tbody>
-			<?php if(empty($ov['tunnels'])) { echo '<tr><td colspan="3" class="text-muted p-3">No Node64 connected yet.</td></tr>'; }
-			foreach($ov['tunnels'] as $tn) {
-				echo '<tr><td>' . c64w_h($tn['name'] ?: $tn['id']) . ($tn['node_version'] ? ' <small class="text-muted">' . c64w_h($tn['node_version']) . '</small>' : '') . '</td><td>' . c64w_h($tn['last_seen'] ?? '–') . '</td><td>' . c64w_h($tn['last_edge'] ?? '–') . '</td></tr>';
-			} ?>
-			</tbody></table>
+		<div class="card-body p-3 small">
+			<?php // Liste der Nodes nur noch in nodes.php; hier nur die Zahl
+			$tunOn = count(array_filter((array)$ov['tunnels'], fn($tn) => !empty($tn['last_seen']) && strtotime($tn['last_seen']) >= time() - 300));
+			echo empty($ov['tunnels']) ? '<p class="text-muted mb-2">No Node64 connected yet.</p>'
+				: '<p class="mb-2"><b>' . count($ov['tunnels']) . ' tunnel' . (count($ov['tunnels']) === 1 ? '' : 's') . '</b>, ' . $tunOn . ' connected – details in the node overview.</p>'; ?>
+			<a class="btn btn-sm btn-outline-primary" href="/nodes.php"><i class="fa-solid fa-server"></i> Node overview</a>
 		</div></div>
 	</div>
 </div>
