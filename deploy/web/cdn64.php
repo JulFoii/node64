@@ -40,6 +40,7 @@ function c64w_err(array $e): string { return (string)($e['detail'] ?? 'Unknown e
 <?php
 if($userid == "") {
 	echo c64w_alert('info', 'Please log in to manage CDN64.');
+	$node64_hint = "CDN64 without port forwarding: Node64 opens the tunnel from your home network – plus health checks, DNS filter and honeypot in the same container."; $node64_hint_btn = "More about Node64"; $node64_hint_href = "/node64.php?lang=en"; include("node64_hint.php");
 	include("footer.php");
 	exit;
 }
@@ -296,5 +297,6 @@ function c64w_target_fields(?array $t): void {
 		</div></div>
 	</div>
 </div>
+<?php $node64_hint = "Modes 1 and 2 run through Node64 – the homelab container by ipv64.net with PROXY64, health checks, DNS filter and honeypot."; $node64_hint_btn = "More about Node64"; $node64_hint_href = "/node64.php?lang=en"; include("node64_hint.php"); ?>
 </div>
 <?php include("footer.php"); ?>

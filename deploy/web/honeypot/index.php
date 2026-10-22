@@ -16,7 +16,9 @@ function hpw_rows(string $sql, array $p): array { global $pdo; $st = $pdo->prepa
 <div class="container">
 <?php
 if($userid == "") {
-	echo '<div class="alert alert-info" role="alert">Bitte zuerst anmelden.</div></div>';
+	echo '<div class="alert alert-info" role="alert">Bitte zuerst anmelden.</div>';
+	$node64_hint = "Honeypot64 ist ein Modul von Node64: Fallen in deinem Heimnetz, deren Meldungen die v64 Blocklist für alle speisen."; include("../node64_hint.php");
+	echo '</div>';
 	include("../footer.php");
 	exit;
 }
@@ -105,5 +107,6 @@ $maxDay = max(1, max($days));
 		</div></div></div>
 	</div>
 	<p class="small text-muted">Online = Meldung in den letzten 30 Minuten. Gezählt werden nur öffentliche Quell-IPs; die IPs deiner eigenen Sensoren werden verworfen und nirgends angezeigt.</p>
+	<?php if(empty($sensors)) { $node64_hint = "Honeypot64 ist ein Modul von Node64: Fallen in deinem Heimnetz, deren Meldungen die v64 Blocklist für alle speisen."; include("../node64_hint.php"); } ?>
 </div>
 <?php include("../footer.php"); ?>

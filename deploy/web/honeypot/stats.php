@@ -247,6 +247,8 @@ $l = $o['lists'];
 		<div class="card-body p-0"><?php echo hss_table($o['new_paths_today'], hss_t('Heute noch keine neuen Pfade über der Schwelle.', 'No new paths above the threshold today yet.')); ?></div></div>
 <?php } ?>
 
+	<?php if(!$contributor) { $node64_hint = hss_t('Selbst mitmachen: Honeypot64 ist ein Modul von Node64, dem Homelab-Container von ipv64.net.', 'Join in: Honeypot64 is a module of Node64, the homelab container by ipv64.net.');
+		$node64_hint_btn = hss_t('Mehr zu Node64', 'More about Node64'); $node64_hint_href = $hssEn ? '/node64.php?lang=en' : '/node64.php'; include("../node64_hint.php"); } ?>
 	<p class="small text-muted"><?php echo hss_t('Stand', 'As of'); ?> <?php echo hss_h(hss_time($o['generated_at'])); ?> (<?php echo hss_t('höchstens alle 10 Minuten neu', 'refreshed at most every 10 minutes'); ?>).
 		<?php echo hss_t('Veröffentlicht werden nur Statistiken und bewertete Listen; IPs der Sensoren und meldende Accounts bleiben intern.', 'Only statistics and rated lists are published; sensor IPs and reporting accounts stay internal.'); ?>
 		API: <code>GET https://ipv64.net/api/v2/threat/stats</code></p>

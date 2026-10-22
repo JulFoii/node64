@@ -17,8 +17,9 @@ function bl_status(string $updated): string { $old = $updated === '' || (time() 
 	</div>
   </div>
 	<div class="container">
+		<?php $node64_hint = "The v64 Blocklist grows from Honeypot64 reports – run your own sensor with Node64, the homelab container by ipv64.net."; $node64_hint_btn = "More about Node64"; $node64_hint_href = "/node64.php?lang=en"; include("node64_hint.php"); ?>
 		<div class="row">
-		
+
 	  <div class="col-7">
 		<div class="card shadow-sm">
 		  <div class="card-header">

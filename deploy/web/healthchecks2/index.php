@@ -173,6 +173,7 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 		</div>
 	</form>
 	<p class="small text-muted mt-2">Pillen: letzte 30 Messungen aller Messstellen (Maus darüber zeigt Zeit, Messstelle, Grund). Pausierte Checks werden nicht gemessen.</p>
+	<?php $node64_hint = "Healthchecks auch lokal in deinem Heimnetz – mit Statusseiten und Proxmox-VE-Überwachung: Node64."; include("../node64_hint.php"); ?>
 </div>
 <?php include("../footer.php"); ?>
 <script>$(function(){ $('[data-toggle="tooltip"]').tooltip(); });</script>
