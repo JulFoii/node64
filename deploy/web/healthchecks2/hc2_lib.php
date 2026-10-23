@@ -490,7 +490,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if (isset($in['grace_seconds']) && $in['grace_seconds'] !== '') { $g = $num('grace_seconds', 600, 0, 31536000); if ($g !== 600) { $p['grace_seconds'] = $g; } }
 			break;
 	}
-	$interval = $num('interval_sec', 60, 20, 86400);
+	$interval = $num('interval_sec', 60, 5, 86400); // lokal ab 5 s; online/hybrid ab 20 s (unten nach dem Ausfuehrungsort)
 	$retryInt = $num('retry_interval_sec', 20, 5, 86400);
 	$retries = $num('retries', 1, 0, 10);
 	$cto = (float)($in['connect_timeout'] ?? 5); $cto = max(0.5, min(60, $cto));
@@ -512,6 +512,8 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 
 	// Messstellen und Bewertung
 	$execution = (string)($in['execution'] ?? 'online'); if (!in_array($execution, array('local','online','both'), true)) { $execution = 'online'; }
+	if ($execution !== 'local' && $type !== 'push' && $interval < 20) { $interval = 20; }
+	if ($retryInt > $interval) { $retryInt = $interval; }
 	// Messende Nodes (mehrere moeglich); node_id = Besitzer: bleibt, solange er gewaehlt ist
 	$oldNodes = $old ? hc2_check_nodes($old) : array();
 	if (isset($in['nodes']) && is_array($in['nodes'])) { $req = $in['nodes']; }
@@ -676,6 +678,7 @@ function hc2_testrun_status(int $userid, int $id): array {
 		$c = hc2_check($userid, $t['token']);
 		if ($c) {
 			$fields = array('execution' => $t['target_execution'], 'locations' => $t['locations']);
+			if ($t['target_execution'] !== 'local' && $c['type'] !== 'push' && (int)$c['interval_sec'] < 20) { $fields['interval_sec'] = 20; } // ipv64 misst hoechstens alle 20 s
 			if ($t['target_execution'] !== 'online') { $fields['node_id'] = $t['node_id']; $fields['nodes'] = (string)($t['nodes'] ?? '') !== '' ? $t['nodes'] : $t['node_id']; } else { $fields['nodes'] = ''; }
 			hc2_set_check($userid, $t['token'], $fields);
 		}

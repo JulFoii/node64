@@ -172,7 +172,7 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 					<div class="card-header p-2"><i class="fa-solid fa-clock"></i> Zeiten</div>
 					<div class="card-body">
 						<div class="form-row">
-							<div class="form-group col-6 col-md-3"><label>Intervall (s)</label><input class="form-control" type="number" name="interval_sec" value="<?php echo $val('interval_sec'); ?>" min="20" max="86400"></div>
+							<div class="form-group col-6 col-md-3"><label>Intervall (s)</label><input class="form-control" type="number" name="interval_sec" value="<?php echo $val('interval_sec'); ?>" min="5" max="86400"><small class="form-text text-muted">Lokal ab 5 s, online und hybrid ab 20 s.</small></div>
 							<div class="form-group col-6 col-md-3"><label>Wiederholung bei Fehler (s)</label><input class="form-control" type="number" name="retry_interval_sec" value="<?php echo $val('retry_interval_sec'); ?>" min="5"></div>
 							<div class="form-group col-6 col-md-3"><label>Verbindungs-Timeout (s)</label><input class="form-control" type="number" step="0.5" name="connect_timeout" value="<?php echo $val('connect_timeout'); ?>" min="0.5" max="60"></div>
 							<div class="form-group col-6 col-md-3"><label>Gesamt-Timeout (s)</label><input class="form-control" type="number" step="0.5" name="total_timeout" value="<?php echo $val('total_timeout'); ?>" min="1" max="120"></div>
