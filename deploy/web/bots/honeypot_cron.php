@@ -20,6 +20,7 @@ const HPC_JOBS = array(
 	'lists'   => array('17', '*/6',   'honeypot_lists.php',                '', null),
 	'pwrange' => array('27', '*/6',   'honeypot_passwords.php',            '', null), // H6: Passwortpruefung (hp_pw_range)
 	'cleanup' => array('40', '3',     'honeypot_cleanup.php',              '', null),
+	'unlock'  => array('*/5', '*',    'limits_unlock.php',                 '', null), // Limits nach Klassenaenderung freigeben
 );
 
 function hpc_match(string $spec, int $v): bool {
