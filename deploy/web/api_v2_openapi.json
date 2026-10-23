@@ -17644,7 +17644,7 @@
           },
           "type": {
             "type": "string",
-            "description": "ipv64_mail, ipv64_sms, app, telegram, discord, ntfy, gotify, pushover, webhook, smtp"
+            "description": "ipv64_mail, ipv64_sms, app, telegram, discord, slack, teams, matrix, ntfy, gotify, pushover, webhook, smtp"
           },
           "type_label": {
             "type": "string",

@@ -715,6 +715,13 @@ function hc2_channel_types(): array {
 			array('key' => 'silent', 'label' => 'Lautlos senden', 'kind' => 'bool'))),
 		'discord' => array('label' => 'Discord', 'icon' => 'fa-comments', 'fields' => array(
 			array('key' => 'webhook_url', 'label' => 'Webhook-URL', 'required' => true, 'secret' => true, 'kind' => 'password'), array('key' => 'username', 'label' => 'Anzeigename (optional)', 'kind' => 'text'))),
+		'slack' => array('label' => 'Slack', 'icon' => 'fa-hashtag', 'hint' => 'In Slack eine App mit „Incoming Webhooks“ anlegen, für den Kanal einen Webhook hinzufügen und die URL (https://hooks.slack.com/services/…) eintragen.', 'fields' => array(
+			array('key' => 'webhook_url', 'label' => 'Webhook-URL', 'required' => true, 'secret' => true, 'kind' => 'password'))),
+		'teams' => array('label' => 'Microsoft Teams', 'icon' => 'fa-people-group', 'hint' => 'Im Teams-Kanal „Workflows“ öffnen, Vorlage „Bei Empfang einer Webhookanforderung in einem Kanal posten“ wählen und die angezeigte URL eintragen (die alten Office-365-Connectoren gibt es seit Mai 2026 nicht mehr).', 'fields' => array(
+			array('key' => 'webhook_url', 'label' => 'Workflow-URL', 'required' => true, 'secret' => true, 'kind' => 'password'))),
+		'matrix' => array('label' => 'Matrix', 'icon' => 'fa-comment-dots', 'hint' => 'Eigenes Bot-Konto anlegen, in den Raum einladen und dessen Zugriffstoken (Element: Einstellungen → Hilfe & Info) sowie Raum-ID (!abc:matrix.org) oder Alias (#raum:matrix.org) eintragen.', 'fields' => array(
+			array('key' => 'server', 'label' => 'Homeserver', 'required' => true, 'kind' => 'url', 'default' => 'https://matrix.org'), array('key' => 'token', 'label' => 'Zugriffstoken des Bot-Kontos', 'required' => true, 'secret' => true, 'kind' => 'password'),
+			array('key' => 'room', 'label' => 'Raum-ID oder Alias, z. B. !abc123:matrix.org oder #alarme:matrix.org', 'required' => true, 'kind' => 'text'))),
 		'ntfy' => array('label' => 'ntfy', 'icon' => 'fa-bullhorn', 'fields' => array(
 			array('key' => 'server', 'label' => 'Server', 'required' => true, 'kind' => 'url', 'default' => 'https://ntfy.sh'), array('key' => 'topic', 'label' => 'Topic', 'required' => true, 'kind' => 'text'),
 			array('key' => 'token', 'label' => 'Zugriffs-Token (optional)', 'secret' => true, 'kind' => 'password'), array('key' => 'user', 'label' => 'Benutzer (optional)', 'kind' => 'text'), array('key' => 'password', 'label' => 'Passwort (optional)', 'secret' => true, 'kind' => 'password'),
@@ -772,6 +779,9 @@ function hc2_channel_config(string $type, array $in, ?array $old): array {
 		if ($v === '' && !empty($f['required'])) { $err[] = $f['label'] . ' fehlt.'; }
 		if ($v !== '' && ($f['kind'] ?? '') === 'email' && !filter_var($v, FILTER_VALIDATE_EMAIL)) { $err[] = $f['label'] . ' ist keine gültige E-Mail-Adresse.'; }
 		if ($v !== '' && ($f['kind'] ?? '') === 'url' && !preg_match('#^https?://#i', $v)) { $err[] = $f['label'] . ' muss mit http:// oder https:// beginnen.'; }
+		if ($v !== '' && $k === 'webhook_url' && in_array($type, array('slack', 'teams', 'discord'), true) && !preg_match('#^https://[^/\s]+/#i', $v)) { $err[] = $f['label'] . ' muss eine https-Adresse sein.'; }
+		if ($type === 'matrix' && $k === 'room' && $v !== '' && !preg_match('/^[!#][^:\s]+:\S+$/', $v)) { $err[] = 'Raum bitte als Raum-ID (!abc:matrix.org) oder Alias (#raum:matrix.org) angeben.'; }
+		if ($type === 'matrix' && $k === 'server') { $v = rtrim($v, '/'); }
 		if ($type === 'ipv64_sms' && $k === 'number') {
 			$plus = strpos($v, '+') === 0; $v = preg_replace('/[^0-9]/', '', $v);
 			if (!$plus && strpos($v, '0') === 0 && strpos($v, '00') !== 0) { $err[] = 'Mobilnummer bitte mit Ländervorwahl angeben, z. B. +49 177 1234567.'; }
