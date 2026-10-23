@@ -1,0 +1,4 @@
+# Nur unsubscribe.php und preview.php sind Seiten; lib.php, cron.php und settings.php nicht direkt aufrufbar
+<FilesMatch "^(lib|cron|settings)\.php$|\.on$">
+	Require all denied
+</FilesMatch>

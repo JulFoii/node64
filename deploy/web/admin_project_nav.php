@@ -42,7 +42,7 @@ $n64nav = array(
 		array('fa-code', 'API v2 Doku', 'https://ipv64.net/api_v2_docs'),
 	),
 	'Mails' => array(
-		array('fa-envelope-open-text', 'Wochenbericht – Vorschau und Testmail', 'https://ipv64.net/weekly_report_preview.php'),
+		array('fa-envelope-open-text', 'Wochenbericht – Vorschau und Testmail', 'https://ipv64.net/weekly_report/preview.php'),
 	),
 );
 ?>

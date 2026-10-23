@@ -1,11 +1,11 @@
 <?php
 /**
- * IPv64.net – Wochenbericht verschicken. Stuendlich ueber honeypot_cron.php (Job "weekly"), nur Kommandozeile:
+ * IPv64.net – Wochenbericht verschicken. Stuendlich ueber bots/honeypot_cron.php (Job "weekly"), nur Kommandozeile:
  *
- *   php weekly_report.php                       faellige Berichte dieser Woche senden (6–21 Uhr)
- *   php weekly_report.php --dry                 nur zeigen, wer jetzt dran waere
- *   php weekly_report.php --test=<id> --to=<mail>   Bericht von Account <id> sofort an <mail> (Test, ohne Protokoll)
- *   php weekly_report.php --stats               Verteilung ueber die Woche und Stand dieser Woche
+ *   php cron.php                            faellige Berichte dieser Woche senden (6–21 Uhr)
+ *   php cron.php --dry                      nur zeigen, wer jetzt dran waere
+ *   php cron.php --test=<id> --to=<mail>    Bericht von Account <id> sofort an <mail> (Test, ohne Protokoll)
+ *   php cron.php --stats                    Verteilung ueber die Woche und Stand dieser Woche
  *
  * Verteilung: jeder Account hat einen festen Termin (wr_slot: Wochentag und Stunde 6–21 Uhr, gleichmaessig verteilt).
  * Ein Lauf schickt allen mit eingeschaltetem Bericht, deren Termin in dieser Woche erreicht ist und die noch keinen
@@ -13,13 +13,13 @@
  * bekommen keine Mail (Eintrag ok=2), damit niemand leere Berichte erhaelt. Fehlgeschlagene Mails werden in den
  * naechsten Laeufen bis zu dreimal wiederholt; nach 10 Fehlern am Stueck bricht ein Lauf ab (Mailserver gestoert).
  *
- * Scharf erst mit der Datei bots/weekly_report.on (leer genuegt): bis dahin verschickt der Cron nichts, Vorschau,
+ * Scharf erst mit der Datei weekly_report/send.on (leer genuegt): bis dahin verschickt der Cron nichts, Vorschau,
  * --test und --dry gehen trotzdem.
  */
 if (php_sapi_name() !== 'cli') { exit; }
 include(__DIR__ . '/../dbconnect.php');
-if (!class_exists('PHPMailer\PHPMailer\PHPMailer') && is_file(__DIR__ . '/vendor/autoload.php')) { require __DIR__ . '/vendor/autoload.php'; }
-require_once __DIR__ . '/../weekly_report_lib.php';
+if (!class_exists('PHPMailer\PHPMailer\PHPMailer') && is_file(__DIR__ . '/../bots/vendor/autoload.php')) { require __DIR__ . '/../bots/vendor/autoload.php'; }
+require_once __DIR__ . '/lib.php';
 
 const WR_RUN_MAX = 400;
 
@@ -45,7 +45,7 @@ if (isset($opt['stats'])) {
 	exit(0);
 }
 
-if (!is_file(__DIR__ . '/weekly_report.on') && !isset($opt['dry'])) { echo "nicht eingeschaltet (bots/weekly_report.on fehlt)
+if (!is_file(__DIR__ . '/send.on') && !isset($opt['dry'])) { echo "nicht eingeschaltet (weekly_report/send.on fehlt)
 "; exit(0); }
 $slotNow = wr_slot_now($now);
 if ($slotNow === null) { echo "ausserhalb der Versandzeit\n"; exit(0); }

@@ -21,7 +21,7 @@ const HPC_JOBS = array(
 	'pwrange' => array('27', '*/6',   'honeypot_passwords.php',            '', null), // H6: Passwortpruefung (hp_pw_range)
 	'cleanup' => array('40', '3',     'honeypot_cleanup.php',              '', null),
 	'unlock'  => array('*/5', '*',    'limits_unlock.php',                 '', null), // Limits nach Klassenaenderung freigeben
-	'weekly'  => array('5', '*',      'weekly_report.php',                 '', null), // Wochenbericht, verteilt ueber die Woche (6–21 Uhr)
+	'weekly'  => array('5', '*',      '../weekly_report/cron.php',         '', null), // Wochenbericht, verteilt ueber die Woche (6–21 Uhr)
 );
 
 function hpc_match(string $spec, int $v): bool {

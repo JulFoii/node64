@@ -5,12 +5,12 @@
  *   POST send=1          denselben Bericht als Testmail an die eigene Adresse schicken
  * Zeigt dazu die Verteilung ueber die Woche und den Stand dieser Woche.
  */
-include(__DIR__ . '/header.php');
-require_once __DIR__ . '/weekly_report_lib.php';
+include('../header.php');
+require_once __DIR__ . '/lib.php';
 $h = function($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); };
 if (!isset($account) || (string)($account['admin'] ?? '0') !== '1') {
 	echo '<div class="container"><div class="alert alert-warning mt-3">Nur für Admins.</div></div>';
-	include(__DIR__ . '/footer.php');
+	include('../footer.php');
 	exit;
 }
 if (empty($_SESSION['wr_csrf'])) { $_SESSION['wr_csrf'] = bin2hex(random_bytes(16)); }
@@ -67,4 +67,4 @@ $slot = wr_slot($uid); $days = array('Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So');
 		</div>
 	</div>
 </div>
-<?php include(__DIR__ . '/footer.php'); ?>
+<?php include('../footer.php'); ?>

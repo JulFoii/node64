@@ -3,11 +3,11 @@
  * IPv64.net – Wochenbericht: einmal pro Woche eine Mail je Account mit dem Stand seiner Dienste (Domains/DynDNS,
  * Healthchecks 2.0, CDN64, Cloud Router, Konto). Abschaltbar in den Kontoeinstellungen (users.weekly_report, Standard
  * an) und per Ein-Klick-Abmeldung (List-Unsubscribe). Verteilt ueber die Woche: jeder Account hat einen festen Termin
- * (Wochentag und Stunde zwischen 6 und 21 Uhr), der Cron (bots/weekly_report.php ueber honeypot_cron.php, stuendlich)
+ * (Wochentag und Stunde zwischen 6 und 21 Uhr), der Cron (weekly_report/cron.php ueber bots/honeypot_cron.php, stuendlich)
  * schickt allen, deren Termin in dieser Woche erreicht ist und die noch nichts bekommen haben.
  *
- * Genutzt von: bots/weekly_report.php (Versand), weekly_report_preview.php (Admin: Vorschau und Testmail),
- * weekly_report_unsubscribe.php (Abmeldung), account_mail_prefs.php (Schalter in den Kontoeinstellungen).
+ * Alles im Ordner weekly_report/: cron.php (Versand), preview.php (Admin: Vorschau und Testmail), unsubscribe.php
+ * (Abmeldung ohne Anmeldung), settings.php (Schalter in den Kontoeinstellungen, von account.php eingebunden).
  * Voraussetzung: dbconnect.php ist eingebunden ($pdo, send_mail mit 9. Parameter, hc2_pdo fuer Healthchecks 2.0).
  */
 
@@ -46,7 +46,7 @@ function wr_token(PDO $pdo, int $userid): string {
 }
 
 function wr_unsubscribe_url(string $token, int $userid, string $kind = 'report'): string {
-	return WR_BASE . '/weekly_report_unsubscribe.php?u=' . $userid . '&k=' . $kind . '&t=' . $token;
+	return WR_BASE . '/weekly_report/unsubscribe.php?u=' . $userid . '&k=' . $kind . '&t=' . $token;
 }
 
 /** Bytes lesbar (MB/GB/TB, Dezimalkomma bei de). */

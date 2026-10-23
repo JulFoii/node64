@@ -2,7 +2,7 @@
 /**
  * IPv64.net – Karte „E-Mails von IPv64.net“ in den Kontoeinstellungen: Wochenbericht (an/aus, Sprache) und Newsletter.
  * Wird von account.php im Bereich ?accountsettings eingebunden (eigene Zeile, z. B. vor „Data privacy“):
- *     <?php include __DIR__ . '/account_mail_prefs.php'; ?>
+ *     <?php include __DIR__ . '/weekly_report/settings.php'; ?>
  * Erwartet $pdo und $account aus header.php. Speichert selbst (POST mit mail_prefs=1, eigenes CSRF-Token).
  */
 if (!isset($account) || !is_array($account) || empty($account['id'])) { return; }

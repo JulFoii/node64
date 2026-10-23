@@ -6,7 +6,7 @@
  *                                                  (RFC 8058: POST mit List-Unsubscribe=One-Click)
  * Der Token ist users.report_token (zufaellig, nur dafuer) – nicht der DynDNS-Update-Key.
  */
-include(__DIR__ . '/dbconnect.php');
+include(__DIR__ . '/../dbconnect.php');
 
 $uid = (int)($_GET['u'] ?? 0);
 $kind = ($_GET['k'] ?? 'report') === 'newsletter' ? 'newsletter' : 'report';
