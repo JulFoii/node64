@@ -40,8 +40,11 @@ function hc2_mail_html(string $subject, string $text, string $kind, string $lang
 	$e = function(string $s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); };
 	$de = $lang !== 'en';
 	$k = strtolower($kind);
-	if (preg_match('/fail|down|error|limit/', $k)) { $color = '#d63939'; $status = $de ? 'Störung' : 'Problem'; }
-	elseif (preg_match('/(^|_)(up|ok|recovered)$/', $k)) { $color = '#2fb344'; $status = $de ? 'Wieder in Ordnung' : 'Recovered'; }
+	// Balken passend zum Betreff (wie internal/notify/mail.go mailStatus der Node)
+	if (preg_match('/(^|_)(up|ok|recovered)$|flapping_end|degraded_end|rechecked|summary_up|threshold_ok/', $k)) { $color = '#2fb344'; $status = $de ? 'Wieder in Ordnung' : 'Recovered'; }
+	elseif ($k === 'degraded') { $color = '#f59f00'; $status = $de ? 'Teilweise gestört' : 'Partially down'; }
+	elseif (preg_match('/flapping_start|quota|threshold$|expiry|dyndns_limit|unchecked/', $k)) { $color = '#f59f00'; $status = $de ? 'Achtung' : 'Warning'; }
+	elseif (preg_match('/fail|down|error|limit|reminder|summary|blocked|honeypot_(watch|login)|dns64_(upstream|lists|cert)$/', $k)) { $color = '#d63939'; $status = $de ? 'Störung' : 'Problem'; }
 	else { $color = '#4299e1'; $status = $de ? 'Hinweis' : 'Notice'; }
 	$rows = ''; $paras = '';
 	foreach (preg_split('/\r?\n/', trim($text)) as $line) {
