@@ -12,6 +12,9 @@
  * Eintrag in weekly_report_log haben – hoechstens WR_RUN_MAX je Lauf (Rest im naechsten Lauf). Accounts ohne Dienste
  * bekommen keine Mail (Eintrag ok=2), damit niemand leere Berichte erhaelt. Fehlgeschlagene Mails werden in den
  * naechsten Laeufen bis zu dreimal wiederholt; nach 10 Fehlern am Stueck bricht ein Lauf ab (Mailserver gestoert).
+ *
+ * Scharf erst mit der Datei bots/weekly_report.on (leer genuegt): bis dahin verschickt der Cron nichts, Vorschau,
+ * --test und --dry gehen trotzdem.
  */
 if (php_sapi_name() !== 'cli') { exit; }
 include(__DIR__ . '/../dbconnect.php');
@@ -42,6 +45,8 @@ if (isset($opt['stats'])) {
 	exit(0);
 }
 
+if (!is_file(__DIR__ . '/weekly_report.on') && !isset($opt['dry'])) { echo "nicht eingeschaltet (bots/weekly_report.on fehlt)
+"; exit(0); }
 $slotNow = wr_slot_now($now);
 if ($slotNow === null) { echo "ausserhalb der Versandzeit\n"; exit(0); }
 if ((int)($pdo->query("SELECT GET_LOCK('weekly_report', 0)")->fetchColumn()) !== 1) { echo "laeuft bereits\n"; exit(0); }
