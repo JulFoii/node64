@@ -57,8 +57,12 @@ function c64o_event(int $hostId, int $u, string $kind, string $msg = ''): void {
 
 function c64o_tunnel_out(array $t): array {
 	return array('id' => $t['id'], 'name' => $t['name'], 'node_id' => $t['node_id'], 'status' => $t['status'], 'created_at' => iso($t['created_at']),
-		'last_seen' => iso($t['last_seen']), 'last_edge' => $t['last_edge'] ?: null, 'node_version' => $t['node_version'] ?: null);
+		'last_seen' => iso($t['last_seen']), 'last_edge' => $t['last_edge'] ?: null, 'node_version' => $t['node_version'] ?: null,
+		'sessions' => c64o_sessions($GLOBALS['CLASS'] ?? array()));
 }
+
+/** Parallele Tunnel-Verbindungen je Server fuer eine Klasse (user_class.cdn_tunnel_sessions: Business/Company mehrere). */
+function c64o_sessions(array $class): int { return max(1, min(8, (int)($class['cdn_tunnel_sessions'] ?? 1))); }
 
 function c64o_host_out(array $h): array {
 	$tun = array_column(qa("SELECT tunnel_id FROM cdn64o_host_tunnels WHERE host_id = :h ORDER BY priority, tunnel_id", array('h' => $h['id'])), 'tunnel_id');
@@ -598,8 +602,11 @@ route('GET', '/cdn64o/edge/config', function() {
 	q("UPDATE cdn64o_edges set last_seen = NOW() WHERE id = :i", array('i' => $self['id'])); // Lebenszeichen alle 10 s (G6)
 	if($steady) { c64o_edge_watch(); }
 	$tunnels = array();
+	$cls = array(); // Klasse je Account (parallele Verbindungen)
 	foreach(qa("SELECT id, userid, token_hash, status FROM cdn64o_tunnels ORDER BY id") as $t) {
-		$tunnels[] = array('id' => $t['id'], 'token_sha256' => $t['token_hash'], 'userid' => (int)$t['userid'], 'blocked' => $t['status'] !== 'active');
+		$u = (int)$t['userid'];
+		if(!isset($cls[$u])) { $cls[$u] = q1("SELECT c.* FROM users u JOIN user_class c ON c.id = u.user_class WHERE u.id = :u", array('u' => $u)) ?? array(); }
+		$tunnels[] = array('id' => $t['id'], 'token_sha256' => $t['token_hash'], 'userid' => $u, 'blocked' => $t['status'] !== 'active', 'sessions' => c64o_sessions($cls[$u]));
 	}
 	$ht = array();
 	foreach(qa("SELECT host_id, tunnel_id FROM cdn64o_host_tunnels ORDER BY host_id, priority, tunnel_id") as $r) { $ht[(int)$r['host_id']][] = $r['tunnel_id']; }
@@ -773,12 +780,13 @@ route('GET', '/plans', function() {
 			'failover_policies' => $i('failover_policies'), 'failover_monitors' => $i('failover_monitors'), 'failover_rules' => $i('failover_rules'),
 			'offline_pages' => $i('offline_pages'),
 			'cdn_domains' => $i('cdn_domains'), 'cdn_traffic_gb' => $i('cdn_traffic'), 'cdn_bandwidth_mbit' => $z($c['cdn_bandwidth'] ?? 0), 'cdn_mappings' => $i('cdn_mappings'),
+			'cdn_tunnel_sessions' => isset($c['cdn_tunnel_sessions']) ? c64o_sessions($c) : null,
 			'cloud_routers' => $i('cloud_router'), 'vpn_gateways' => $i('vpn_gateways'), 'vpn_peers' => $i('vpn_peers'), 'vpn_traffic_gb' => $i('vpn_traffic'),
 			'dns64_clients' => $i('dns64_clients'),
 		);
 		if(isset($c['log_days'])) { $l['log_days'] = (int)$c['log_days']; } // fehlt eine Spalte, nimmt Node64 den eingebauten Wert
 		$out[] = array('id' => $id, 'key' => $p['key'], 'name' => $p['name'], 'class_name' => $c['name'], 'price_year_eur' => $p['price'],
-			'upgrade_url' => $p['upgrade'], 'limits' => (object)array_filter($l, fn($v, $k) => $v !== null || !in_array($k, array('dyndns_domains', 'own_domains', 'dyndns_ttl_s', 'healthchecks', 'failover_policies', 'failover_monitors', 'failover_rules', 'offline_pages', 'cdn_domains', 'cdn_traffic_gb', 'cdn_mappings', 'cloud_routers', 'vpn_gateways', 'vpn_peers', 'vpn_traffic_gb', 'dns64_clients'), true), ARRAY_FILTER_USE_BOTH));
+			'upgrade_url' => $p['upgrade'], 'limits' => (object)array_filter($l, fn($v, $k) => $v !== null || !in_array($k, array('dyndns_domains', 'own_domains', 'dyndns_ttl_s', 'healthchecks', 'failover_policies', 'failover_monitors', 'failover_rules', 'offline_pages', 'cdn_domains', 'cdn_traffic_gb', 'cdn_mappings', 'cdn_tunnel_sessions', 'cloud_routers', 'vpn_gateways', 'vpn_peers', 'vpn_traffic_gb', 'dns64_clients'), true), ARRAY_FILTER_USE_BOTH));
 	}
 	header('Cache-Control: public, max-age=600');
 	ok($out);

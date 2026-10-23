@@ -176,3 +176,7 @@ CREATE TABLE IF NOT EXISTS `cdn64o_mappings` (
 -- und Statistik bleiben. Unabhaengig von der Traffic-Sperre (status/blocked_reason).
 ALTER TABLE `cdn64o_hosts` ADD COLUMN IF NOT EXISTS `paused` tinyint(1) NOT NULL DEFAULT 0 AFTER `blocked_reason`;
 ALTER TABLE `cdn64o_hosts` ADD COLUMN IF NOT EXISTS `paused_at` datetime NULL DEFAULT NULL AFTER `paused`;
+
+-- Parallele Tunnel-Verbindungen je Server (Business/Company): die Node baut so viele auf, die Server verteilen darauf.
+ALTER TABLE `user_class` ADD COLUMN IF NOT EXISTS `cdn_tunnel_sessions` int(3) NOT NULL DEFAULT 1;
+UPDATE `user_class` SET `cdn_tunnel_sessions` = 4 WHERE `id` IN (4, 5);
