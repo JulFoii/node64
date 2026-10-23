@@ -212,15 +212,16 @@ if($cur !== null AND (int)$cur['mode'] === 3) { // Modus 1/2 verwaltet die Node
 /** Felder fuer das Ziel (Modus 3). */
 function c64w_target_fields(?array $t): void {
 	global $accountclass;
+	static $fn = 0; $fn++; // eindeutige IDs, falls Bearbeiten und Hinzufuegen auf einer Seite stehen
 	$maxCache = (int)($accountclass['cdn_cache_size'] ?? 0);
 	$t = $t ?? array('source' => 'records', 'target' => '', 'port' => 443, 'scheme' => 'https', 'verify_tls' => false, 'prefer_ipv6' => true, 'frontend' => 2, 'cache_mb' => 0, 'cache_minutes' => 10);
 	?>
 	<div class="form-group mb-2"><label class="mb-1">Target</label>
-		<div class="custom-control custom-radio"><input type="radio" id="src_r" name="source" value="records" class="custom-control-input" <?php echo $t['source'] === 'records' ? 'checked' : ''; ?>>
-			<label class="custom-control-label" for="src_r">The current A/AAAA records of the name (DynDNS keeps them up to date)</label></div>
-		<div class="custom-control custom-radio"><input type="radio" id="src_f" name="source" value="fixed" class="custom-control-input" <?php echo $t['source'] === 'fixed' ? 'checked' : ''; ?>>
-			<label class="custom-control-label" for="src_f">Fixed: public IP address or host name</label></div>
-		<input type="text" name="target" class="form-control form-control-sm mt-1" placeholder="2001:db8::10 or server.example.org" value="<?php echo c64w_h($t['target'] ?? ''); ?>">
+		<div class="custom-control custom-radio"><input type="radio" id="src_r<?php echo $fn; ?>" name="source" value="records" class="custom-control-input" <?php echo $t['source'] === 'records' ? 'checked' : ''; ?> onchange="var f=this.closest('.form-group').querySelector('input[name=target]');f.disabled=this.value!=='fixed';if(!f.disabled){f.focus();}">
+			<label class="custom-control-label" for="src_r<?php echo $fn; ?>">The current A/AAAA records of the name (DynDNS keeps them up to date)</label></div>
+		<div class="custom-control custom-radio"><input type="radio" id="src_f<?php echo $fn; ?>" name="source" value="fixed" class="custom-control-input" <?php echo $t['source'] === 'fixed' ? 'checked' : ''; ?> onchange="var f=this.closest('.form-group').querySelector('input[name=target]');f.disabled=this.value!=='fixed';if(!f.disabled){f.focus();}">
+			<label class="custom-control-label" for="src_f<?php echo $fn; ?>">Fixed: public IP address or host name</label></div>
+		<input type="text" name="target" class="form-control form-control-sm mt-1" placeholder="2001:db8::10 or server.example.org" value="<?php echo c64w_h($t['target'] ?? ''); ?>"<?php echo $t['source'] === 'fixed' ? '' : ' disabled'; ?>><?php /* nur bei „Fixed“ frei; gesperrt wird es nicht gesendet und nur bei fixed gelesen */ ?>
 		<?php if(!empty($t['addrs'])) { echo '<small class="text-muted">Currently: ' . c64w_h(implode(', ', $t['addrs'])) . '</small>'; } ?>
 	</div>
 	<div class="form-row">
