@@ -41,6 +41,9 @@ $n64nav = array(
 		array('fa-shield', 'IPv64 Secure', 'https://ipv64.net/v64_secure'),
 		array('fa-code', 'API v2 Doku', 'https://ipv64.net/api_v2_docs'),
 	),
+	'Mails' => array(
+		array('fa-envelope-open-text', 'Wochenbericht – Vorschau und Testmail', 'https://ipv64.net/weekly_report_preview.php'),
+	),
 );
 ?>
 			<li class="nav-item dropdown text-dark">
