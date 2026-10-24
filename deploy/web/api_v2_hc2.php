@@ -450,6 +450,28 @@ route('POST', '/hc2/channels/{id}/send', function($p) {
 	ok(array('sent' => true, 'duplicate' => false, 'sms_left' => $type === 'sms' ? hc2_sms_left(uid()) : null));
 });
 
+// Bestaetigung von E-Mail-/SMS-Kanaelen per Code (wie die Benachrichtigungsseite des Portals), z. B. aus Node64.
+route('POST', '/hc2/channels/{id}/verify/send', function($p) {
+	$ch = hc2_channel(uid(), (int)$p['id']); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
+	if ((int)$ch['verified'] === 1) { ok(array('sent' => false, 'verified' => true)); }
+	rl_enforce('hc2verify:' . uid(), 5, 5 / 3600, 'verification codes');
+	$code = (string)random_int(100000, 999999);
+	hc2_pdo()->prepare("UPDATE hc2_channels SET verify_key = :k, verify_expires = UTC_TIMESTAMP(3) + INTERVAL 15 MINUTE WHERE id = :i AND userid = :u")->execute(array('k' => $code, 'i' => (int)$ch['id'], 'u' => uid()));
+	$r = hc2_hub_call('/v1/portal/channel-test', array('userid' => uid(), 'channel_id' => (int)$ch['id'], 'kind' => 'verify', 'code' => $code, 'lang' => $ch['lang']));
+	if (empty($r['ok'])) { fail(502, 'delivery_failed', (string)($r['error'] ?? 'unknown error')); }
+	ok(array('sent' => true, 'verified' => false, 'expires_in_seconds' => 900));
+});
+route('POST', '/hc2/channels/{id}/verify', function($p) {
+	$ch = hc2_channel(uid(), (int)$p['id']); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
+	if ((int)$ch['verified'] === 1) { ok(hc2_channel_out($ch)); }
+	rl_enforce('hc2verifycheck:' . uid(), 10, 10 / 3600, 'verification attempts');
+	$code = preg_replace('/[^0-9]/', '', (string)(in_str('code', true, 12) ?? ''));
+	$st = hc2_pdo()->prepare("SELECT verify_key, verify_expires FROM hc2_channels WHERE id = :i AND userid = :u AND deleted_at IS NULL"); $st->execute(array('i' => (int)$ch['id'], 'u' => uid())); $row = $st->fetch(PDO::FETCH_ASSOC);
+	if (!$row || !$row['verify_key'] || $code === '' || !hash_equals((string)$row['verify_key'], $code) || $row['verify_expires'] <= gmdate('Y-m-d H:i:s')) { fail(422, 'invalid_code', 'Code wrong or expired.'); }
+	hc2_pdo()->prepare("UPDATE hc2_channels SET verified = 1, verify_key = NULL, verify_expires = NULL WHERE id = :i")->execute(array('i' => (int)$ch['id']));
+	hc2_log_change(uid(), 'channel', (string)$ch['id'], 'upsert', 'api');
+	ok(hc2_channel_out(hc2_channel(uid(), (int)$ch['id'])));
+});
 route('POST', '/hc2/channels/{id}/test', function($p) {
 	$ch = hc2_channel(uid(), (int)$p['id']); if (!$ch) { fail(404, 'not_found', 'Channel not found.'); }
 	if (!(int)$ch['verified']) { fail(409, 'not_verified', 'Confirm the channel in the portal first.'); }

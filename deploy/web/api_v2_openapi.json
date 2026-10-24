@@ -13073,6 +13073,95 @@
           }
         }
       }
+    },
+    "/hc2/channels/{id}/verify/send": {
+      "post": {
+        "tags": [
+          "Healthchecks 2.0"
+        ],
+        "summary": "Bestätigungscode senden",
+        "description": "Schickt einen 6-stelligen Code an die E-Mail-Adresse bzw. Handynummer des Kanals (15 Minuten gültig, höchstens 5 je Stunde). Schon bestätigte Kanäle: verified true, nichts gesendet.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Nummer",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Channel not found"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/hc2/channels/{id}/verify": {
+      "post": {
+        "tags": [
+          "Healthchecks 2.0"
+        ],
+        "summary": "Kanal mit Code bestätigen",
+        "description": "Bestätigt den Kanal mit dem Code aus /verify/send; danach stellt ipv64 über ihn zu. Falscher oder abgelaufener Code: 422 invalid_code.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Nummer",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          },
+          {
+            "$ref": "#/components/parameters/ActAs"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Channel not found"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "123456"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
