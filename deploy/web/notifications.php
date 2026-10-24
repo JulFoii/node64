@@ -21,7 +21,6 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 			$name = mb_substr(trim((string)($_POST['name'] ?? '')), 0, 100);
 			if ($name === '') { $errors[] = 'Name fehlt.'; }
 			if (!isset($types[$type])) { $errors[] = 'Unbekannter Kanaltyp.'; }
-			if ($type === 'ipv64_sms' && $acc['sms_limit'] <= 0 && !$edit) { $errors[] = 'SMS sind in deiner Account-Klasse nicht enthalten.'; }
 			$cfg = $errors ? array('config_enc' => '{}', 'errors' => array()) : hc2_channel_config($type, $_POST, $edit);
 			$errors = array_merge($errors, $cfg['errors']);
 			if (!$errors) {
@@ -120,7 +119,7 @@ $fv = function(string $k) use ($edit) { return hc2_h($_POST['f_' . $k] ?? ($edit
 		<div class="col-lg-7">
 			<div class="card shadow-sm mb-3">
 				<div class="card-header p-2 d-flex align-items-center"><span><i class="fa-solid fa-bell"></i> Kanäle</span>
-					<div class="dropdown ml-auto"><button class="btn btn-sm btn-primary dropdown-toggle" data-toggle="dropdown"><i class="fa-solid fa-plus"></i> Neuer Kanal</button><div class="dropdown-menu dropdown-menu-right"><?php foreach ($types as $k => $t) { if ($k === 'ipv64_sms' && $acc['sms_limit'] <= 0) { echo '<a class="dropdown-item text-muted" href="/pricing" title="SMS sind in deiner Account-Klasse nicht enthalten"><i class="fa-solid ' . $t['icon'] . ' fa-fw"></i> ' . hc2_h($t['label']) . ' <small>(nicht in deiner Klasse – Tarife)</small></a>'; continue; } echo '<a class="dropdown-item" href="/notifications.php?new=' . $k . '"><i class="fa-solid ' . $t['icon'] . ' fa-fw"></i> ' . hc2_h($t['label']) . '</a>'; } ?></div></div></div>
+					<div class="dropdown ml-auto"><button class="btn btn-sm btn-primary dropdown-toggle" data-toggle="dropdown"><i class="fa-solid fa-plus"></i> Neuer Kanal</button><div class="dropdown-menu dropdown-menu-right"><?php foreach ($types as $k => $t) { echo '<a class="dropdown-item" href="/notifications.php?new=' . $k . '"><i class="fa-solid ' . $t['icon'] . ' fa-fw"></i> ' . hc2_h($t['label']) . '</a>'; } ?></div></div></div>
 				<div class="table-responsive"><table class="table table-sm mb-0">
 					<thead><tr><th>Name</th><th>Typ</th><th>Status</th><th>Zuletzt</th><th></th></tr></thead><tbody>
 					<?php if (!$channels) { echo '<tr><td colspan="5" class="text-muted p-3">Noch keine Kanäle. Ohne Kanal gehen keine Benachrichtigungen raus.</td></tr>'; } ?>
@@ -190,7 +189,7 @@ $fv = function(string $k) use ($edit) { return hc2_h($_POST['f_' . $k] ?? ($edit
 					</form>
 				</div>
 			</div>
-			<div class="card shadow-sm mb-3"><div class="card-body small text-muted"><i class="fa-solid fa-circle-info"></i> SMS: <?php echo $acc['sms_limit'] > 0 ? $acc['sms_limit'] . ' pro Tag in deiner Klasse (' . hc2_h($acc['class_name']) . ')' : 'in deiner Klasse nicht enthalten'; ?>. Kanäle einer Node (<i class="fa-solid fa-house"></i>) sendet die Node selbst; ipv64.net gibt ihr den Auftrag.</div></div>
+			<div class="card shadow-sm mb-3"><div class="card-body small text-muted"><i class="fa-solid fa-circle-info"></i> SMS: <?php echo $acc['sms_limit'] > 0 ? $acc['sms_limit'] . ' pro Tag' : 'unbegrenzt'; ?> in deiner Klasse (<?php echo hc2_h($acc['class_name']); ?>). Kanäle einer Node (<i class="fa-solid fa-house"></i>) sendet die Node selbst; ipv64.net gibt ihr den Auftrag.</div></div>
 		</div>
 	</div>
 </div>

@@ -101,7 +101,7 @@ function hc2_account(int $userid): array {
 	$a = $st->fetch(PDO::FETCH_ASSOC) ?: array('id' => $userid, 'email' => '', 'user_class' => 1, 'hc2' => 0, 'healthcheck_limit' => 0, 'hc_locations' => 1, 'sms_limit' => 0);
 	$names = array(1 => 'Standard', 2 => 'VIP', 3 => 'Premium', 4 => 'Business', 5 => 'Company', 6 => 'Supporter');
 	$a['class_name'] = $names[(int)$a['user_class']] ?? ('Klasse ' . $a['user_class']);
-	$a['healthcheck_limit'] = (int)$a['healthcheck_limit']; $a['hc_locations'] = max(1, (int)$a['hc_locations']); $a['sms_limit'] = (int)$a['sms_limit'];
+	$a['healthcheck_limit'] = (int)$a['healthcheck_limit']; $a['hc_locations'] = max(1, (int)$a['hc_locations']); $a['sms_limit'] = (int)$a['sms_limit']; // 0 = unbegrenzt (Business/Company)
 	$a['checks_per_day'] = (int)($a['healthcheck_update_limit'] ?? 0); // Tageskontingent Online-Messungen + Pushes, 0 = unbegrenzt
 	return $cache[$userid] = $a;
 }

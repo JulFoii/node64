@@ -343,7 +343,6 @@ function hc2_channel_save(?array $old): array {
 	$b = body(); $types = hc2_channel_types(); $acc = hc2_account(uid());
 	$type = $old ? $old['type'] : (string)($b['type'] ?? '');
 	if (!isset($types[$type])) { fail(422, 'invalid_type', 'type must be one of ' . implode(', ', array_keys($types)) . '.', array('field' => 'type')); }
-	if ($type === 'ipv64_sms' && !$old && $acc['sms_limit'] <= 0) { fail(403, 'not_in_plan', 'SMS channels are not included in your plan.'); }
 	$name = in_str('name', !$old, 100) ?? $old['name'];
 	$in = array(); foreach ((array)($b['config'] ?? array()) as $k => $v) { $in['f_' . $k] = is_bool($v) ? ($v ? '1' : '') : (string)$v; }
 	if ($old) { foreach ($old['config'] as $k => $v) { if (!array_key_exists('f_' . $k, $in) && !in_array($k, $old['has_secret'], true)) { $in['f_' . $k] = $v === 'true' ? '1' : $v; } } }
@@ -391,6 +390,7 @@ route('DELETE', '/hc2/channels/{id}', function($p) {
 // doppelte event_id innerhalb von 24 h wird nicht erneut verschickt.
 const HC2_API_SEND_TYPES = array('ipv64_mail' => 'mail', 'ipv64_sms' => 'sms', 'app' => 'app');
 const HC2_API_SEND_PER_DAY = 200;
+/** SMS heute noch uebrig; null = unbegrenzt (user_class.sms_limit 0 wie in api_v2.php, z. B. Business/Company). */
 function hc2_sms_left(int $userid): ?int {
 	$limit = hc2_account($userid)['sms_limit'];
 	if ($limit <= 0) { return null; }
