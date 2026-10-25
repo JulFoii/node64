@@ -1,9 +1,11 @@
 # nginx-Site fuer einen hub-Server. Platzhalter __HOST__ wird vom Setup ersetzt.
 # Nur /v1/* geht an den hub (127.0.0.1:9000), alles andere 404. TLS von certbot.
+# Limits je IP (Zonen in /etc/nginx/conf.d/hub-limits.conf, hub-harden.sh): andere hubs sind ausgenommen.
 server {
     listen 80;
     listen [::]:80;
     server_name __HOST__;
+    limit_req zone=hub_misc burst=20 nodelay;
     location /.well-known/acme-challenge/ { root /var/www/html; }
     location / { return 301 https://$host$request_uri; }
 }
@@ -20,9 +22,11 @@ server {
 
     client_max_body_size 8m;
     access_log /var/log/nginx/hub.access.log;
+    limit_conn hub_conn 300; # gleichzeitige Verbindungen je IP (viele Nodes hinter einem CGNAT moeglich)
 
     # WebSocket der Nodes
     location /v1/ws {
+        limit_req zone=hub_req burst=20 nodelay;
         proxy_pass http://127.0.0.1:9000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -34,10 +38,11 @@ server {
         proxy_send_timeout 120s;
     }
     # Infoseite und Logo
-    location = / { proxy_pass http://127.0.0.1:9000; proxy_set_header Host $host; }
-    location /static/ { proxy_pass http://127.0.0.1:9000; proxy_set_header Host $host; }
+    location = / { limit_req zone=hub_misc burst=10 nodelay; proxy_pass http://127.0.0.1:9000; proxy_set_header Host $host; }
+    location /static/ { limit_req zone=hub_misc burst=20 nodelay; proxy_pass http://127.0.0.1:9000; proxy_set_header Host $host; }
     # HTTPS-Endpunkte (Link, Abgleich, Push, Health)
     location /v1/ {
+        limit_req zone=hub_req burst=60 nodelay;
         proxy_pass http://127.0.0.1:9000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -45,5 +50,6 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 60s;
     }
-    location / { return 404; }
+    # alles andere (Scanner: .env, wp-login …) – 404 und stark gebremst (nicht per return: das liefe vor dem Limit)
+    location / { limit_req zone=hub_misc burst=5 nodelay; root /nonexistent; log_not_found off; }
 }
