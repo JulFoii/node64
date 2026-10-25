@@ -731,6 +731,10 @@ function hc2_channel_types(): array {
 		'pushover' => array('label' => 'Pushover', 'icon' => 'fa-bell', 'fields' => array(
 			array('key' => 'user_key', 'label' => 'User-Key', 'required' => true, 'secret' => true, 'kind' => 'password'), array('key' => 'app_token', 'label' => 'App-Token', 'required' => true, 'secret' => true, 'kind' => 'password'), array('key' => 'device', 'label' => 'Gerät (optional)', 'kind' => 'text'),
 			array('key' => 'priority_down', 'label' => 'Priorität bei Störung', 'kind' => 'select', 'options' => array('-2','-1','0','1','2'), 'default' => '1'), array('key' => 'priority_up', 'label' => 'Priorität bei Entwarnung', 'kind' => 'select', 'options' => array('-2','-1','0','1','2'), 'default' => '0'))),
+		'secntfy' => array('label' => 'SecNtfy (verschlüsselt)', 'icon' => 'fa-user-shield', 'hint' => 'Ende-zu-Ende verschlüsselte Push-Nachrichten: Titel und Text werden mit dem Schlüssel deines Geräts verschlüsselt. Geräte-Token (NTFY-DEVICE-…) aus der SecNtfy-App eintragen. Lange Meldungen kommen bei SecNtfy gekürzt an (Text höchstens 150 Zeichen).', 'fields' => array(
+			array('key' => 'device_key', 'label' => 'Geräte-Token (NTFY-DEVICE-…)', 'required' => true, 'secret' => true, 'kind' => 'password'),
+			array('key' => 'server', 'label' => 'Server', 'required' => true, 'kind' => 'url', 'default' => 'https://api.secntfy.app'),
+			array('key' => 'critical', 'label' => 'Störungen als kritischen Alarm senden (kommt auch im Lautlos-Modus durch)', 'kind' => 'bool'))),
 		'webhook' => array('label' => 'Webhook', 'icon' => 'fa-link', 'fields' => array(
 			array('key' => 'url', 'label' => 'URL', 'required' => true, 'kind' => 'url'), array('key' => 'method', 'label' => 'Methode', 'kind' => 'select', 'options' => array('POST','PUT','GET'), 'default' => 'POST'),
 			array('key' => 'headers', 'label' => 'Zusätzliche Header (eine je Zeile: Name: Wert)', 'kind' => 'textarea', 'secret' => true), array('key' => 'body', 'label' => 'Eigener Body (leer = JSON-Standard)', 'kind' => 'textarea'),
@@ -782,6 +786,8 @@ function hc2_channel_config(string $type, array $in, ?array $old): array {
 		if ($v !== '' && $k === 'webhook_url' && in_array($type, array('slack', 'teams', 'discord'), true) && !preg_match('#^https://[^/\s]+/#i', $v)) { $err[] = $f['label'] . ' muss eine https-Adresse sein.'; }
 		if ($type === 'matrix' && $k === 'room' && $v !== '' && !preg_match('/^[!#][^:\s]+:\S+$/', $v)) { $err[] = 'Raum bitte als Raum-ID (!abc:matrix.org) oder Alias (#raum:matrix.org) angeben.'; }
 		if ($type === 'matrix' && $k === 'server') { $v = rtrim($v, '/'); }
+		if ($type === 'secntfy' && $k === 'server') { $v = rtrim($v, '/'); }
+		if ($type === 'secntfy' && $k === 'device_key' && $v !== '' && !preg_match('/^NTFY-DEVICE-[^\x00-\x20\x7f]+$/', $v)) { $err[] = 'Geräte-Token muss mit NTFY-DEVICE- beginnen.'; }
 		if ($type === 'ipv64_sms' && $k === 'number') {
 			$plus = strpos($v, '+') === 0; $v = preg_replace('/[^0-9]/', '', $v);
 			if (!$plus && strpos($v, '0') === 0 && strpos($v, '00') !== 0) { $err[] = 'Mobilnummer bitte mit Ländervorwahl angeben, z. B. +49 177 1234567.'; }
