@@ -15,7 +15,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 		switch ($a) {
 			case 'pause': hc2_set_check($uid, $T, array('paused' => 1)); hc2_flash('warning', 'Check pausiert.'); break;
 			case 'resume': hc2_set_check($uid, $T, array('paused' => 0)); hc2_flash('success', 'Check fortgesetzt.'); break;
-			case 'delete': hc2_delete_check($uid, $T); hc2_flash('success', 'Check gelöscht.'); hc2_redirect(HC2_BASE . '/');
+			case 'delete': $fw = hc2_failover_warning(hc2_failover_uses($uid, array($T))); hc2_delete_check($uid, $T); hc2_flash($fw !== '' ? 'warning' : 'success', 'Check gelöscht.' . ($fw !== '' ? ' ' . $fw : '')); hc2_redirect(HC2_BASE . '/');
 			case 'run':
 				if ($c['execution'] !== 'online' && hc2_check_nodes($c)) { foreach (hc2_check_nodes($c) as $rn) { hc2_command($rn, 'run_check', array('token' => $T)); } hc2_flash('info', count(hc2_check_nodes($c)) > 1 ? 'Sofortige Prüfung an ' . count(hc2_check_nodes($c)) . ' Nodes gegeben.' : 'Sofortige Prüfung an die Node gegeben.'); }
 				else { hc2_flash('info', 'Online-Checks werden im Intervall geprüft; die nächste Messung folgt in Kürze.'); }
@@ -60,10 +60,12 @@ if ($c['execution'] === 'both') {
 			<a class="btn btn-sm btn-outline-secondary" href="<?php echo HC2_BASE; ?>/move.php?tokens=<?php echo hc2_h($T); ?>" title="Ausführungsort ändern"><i class="fa-solid fa-right-left"></i> Umhängen</a>
 			<?php if ((int)$c['paused']) { ?><button class="btn btn-sm btn-outline-success" name="action" value="resume"><i class="fa-solid fa-play"></i> Fortsetzen</button><?php } else { ?><button class="btn btn-sm btn-outline-secondary" name="action" value="pause"><i class="fa-solid fa-pause"></i> Pausieren</button><?php } ?>
 			<?php if ($c['type'] !== 'push') { ?><button class="btn btn-sm btn-outline-secondary" name="action" value="run" title="Jetzt prüfen"><i class="fa-solid fa-rotate"></i></button><?php } ?>
-			<button class="btn btn-sm btn-outline-danger" name="action" value="delete" onclick="return confirm('Check „<?php echo hc2_h($c['name']); ?>“ mit allen Messdaten löschen?');"><i class="fa-solid fa-trash"></i></button>
+			<?php $foUses = hc2_failover_uses($uid, array($T))[$T] ?? array(); ?>
+			<button class="btn btn-sm btn-outline-danger" name="action" value="delete" onclick="return confirm(<?php echo hc2_h(json_encode('Check „' . $c['name'] . '“ mit allen Messdaten löschen?' . ($foUses ? "\n\nEr ist Monitor in DNS Failover: " . implode(', ', $foUses) . '. Die Policy zählt ihn danach nicht mehr.' : ''), JSON_UNESCAPED_UNICODE)); ?>);"><i class="fa-solid fa-trash"></i></button>
 		</form>
 	</div>
 	<div class="text-muted small mb-3"><?php if ($c['target'] !== '') { echo '<code>' . hc2_h($c['target']) . '</code> · '; } ?>alle <?php echo (int)$c['interval_sec']; ?> s<?php if ($c['description'] !== '' && $c['description'] !== null) { echo ' · ' . nl2br(hc2_h($c['description'])); } if ($parent) { echo ' · abhängig von <a href="' . HC2_BASE . '/check.php?token=' . hc2_h($parent['token']) . '">' . hc2_h($parent['name']) . '</a>'; } ?></div>
+	<?php if ($foUses) { echo '<div class="alert alert-info small"><i class="fa-solid fa-arrows-split-up-and-left"></i> Monitor in DNS Failover: <a href="/dns_failover">' . hc2_h(implode(', ', $foUses)) . '</a>. Pausieren oder Löschen wirkt sich dort aus – die Policy zählt den Check dann weder als online noch als gestört.</div>'; } ?>
 	<?php if ($diag !== '') { echo '<div class="alert alert-info"><i class="fa-solid fa-stethoscope"></i> ' . hc2_h($diag) . '</div>'; } ?>
 	<?php if ($state === 'quota') { echo '<div class="alert alert-secondary"><i class="fa-solid fa-hourglass-half"></i> <strong>Tageskontingent aufgebraucht.</strong> ipv64 misst diesen Check bis Mitternacht nicht mehr, danach wieder automatisch. Letzte Messung ' . hc2_ago($c['last_check_at'] ?? $c['state_since']) . '. <a href="/account?account_class">Mehr Messungen pro Tag</a></div>'; }
 	elseif ($state === 'unchecked') { echo '<div class="alert alert-warning"><i class="fa-solid fa-hourglass-half"></i> <strong>Wird nicht überwacht.</strong> ' . hc2_h((string)$c['last_message']) . ' – ob der Dienst gerade erreichbar ist, ist unbekannt.</div>'; } ?>

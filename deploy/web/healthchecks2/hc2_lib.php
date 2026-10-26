@@ -595,6 +595,31 @@ function hc2_set_check(int $userid, string $token, array $fields): void {
 	hc2_pdo()->prepare("UPDATE hc2_checks SET " . implode(', ', $set) . ", updated_by = 'portal' WHERE token = :token AND userid = :userid AND deleted_at IS NULL")->execute($fields);
 	hc2_log_change($userid, 'check', $token, 'upsert', 'portal');
 }
+/** DNS-Failover-Policies, die Checks als Monitor nutzen: token => Namen der Policies. Nur fuer die Warnung beim
+ *  Loeschen – geloescht wird trotzdem, die Policy zaehlt den Monitor danach weder online noch offline. Leer, solange
+ *  DNS Failover die neuen Healthchecks nicht nutzt (FAILOVER_HC2 in failover_hc2_lib.php). */
+function hc2_failover_uses(int $userid, array $tokens): array {
+	if (!defined('FAILOVER_HC2')) { @include_once(__DIR__ . '/../failover_hc2_lib.php'); }
+	$pdo = $GLOBALS['pdo'] ?? null;
+	if (!defined('FAILOVER_HC2') || !FAILOVER_HC2 || !$pdo instanceof PDO || !$tokens) { return array(); }
+	try {
+		$in = implode(',', array_fill(0, count($tokens), '?'));
+		$st = $pdo->prepare("SELECT m.healthtoken, p.name FROM dns_failover_monitors m JOIN dns_failover_policies p ON p.failover_hash = m.failover_hash
+			WHERE m.userid = ? AND m.healthtoken IN ($in) ORDER BY p.name");
+		$st->execute(array_merge(array($userid), array_values($tokens)));
+		$out = array();
+		foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $out[$r['healthtoken']][] = (string)$r['name']; }
+		return $out;
+	} catch (Throwable $e) {
+		return array();
+	}
+}
+/** Text der Warnung: welche Policies einen geloeschten Check als Monitor hatten ('' = keine). */
+function hc2_failover_warning(array $uses): string {
+	$names = array(); foreach ($uses as $list) { foreach ($list as $n) { $names[$n] = 1; } }
+	if (!$names) { return ''; }
+	return 'Achtung: Monitor in DNS Failover (' . implode(', ', array_keys($names)) . '). Die Policy zählt ihn jetzt weder als online noch als gestört – bitte dort einen anderen Healthcheck als Monitor eintragen.';
+}
 function hc2_delete_check(int $userid, string $token): void {
 	hc2_log_change($userid, 'check', $token, 'delete', 'portal'); // setzt deleted_at
 	hc2_pdo()->prepare("UPDATE hc2_incidents SET ended_at = UTC_TIMESTAMP(3) WHERE userid = :u AND token = :t AND ended_at IS NULL")->execute(array('u' => $userid, 't' => $token));

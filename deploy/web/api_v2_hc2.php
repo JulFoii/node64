@@ -249,7 +249,13 @@ route('PATCH', '/hc2/checks/{token}', function($p) {
 	ok(hc2_check_out(hc2_find($old['token']), true));
 });
 
-route('DELETE', '/hc2/checks/{token}', function($p) { $c = hc2_find($p['token']); hc2_delete_check(uid(), $c['token']); no_content(); });
+route('DELETE', '/hc2/checks/{token}', function($p) {
+	$c = hc2_find($p['token']);
+	$uses = hc2_failover_uses(uid(), array($c['token']))[$c['token']] ?? array(); // Monitor in DNS Failover: nur warnen, nicht sperren
+	hc2_delete_check(uid(), $c['token']);
+	if ($uses) { header('Warning: 299 ipv64.net "check was a monitor in DNS failover: ' . str_replace('"', "'", implode(', ', $uses)) . '"'); }
+	no_content();
+});
 route('POST', '/hc2/checks/{token}/pause', function($p) { $c = hc2_find($p['token']); if (!(int)$c['paused']) { hc2_set_check(uid(), $c['token'], array('paused' => 1)); } ok(hc2_check_out(hc2_find($c['token']))); });
 route('POST', '/hc2/checks/{token}/resume', function($p) { $c = hc2_find($p['token']); if ((int)$c['paused']) { hc2_set_check(uid(), $c['token'], array('paused' => 0)); } ok(hc2_check_out(hc2_find($c['token']))); });
 route('POST', '/hc2/checks/{token}/run', function($p) {

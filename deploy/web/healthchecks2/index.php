@@ -13,7 +13,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 	$action = (string)($_POST['action'] ?? '');
 	// Knopf in einer Zeile: "aktion:token" gilt nur fuer diesen Check
 	if (preg_match('/^(run|pause|resume):([A-Za-z0-9]{20,50})$/', (string)($_POST['one'] ?? ''), $om)) { $action = $om[1]; $tokens = array($om[2]); }
-	$n = 0;
+	$n = 0; $foWarn = $action === 'delete' ? hc2_failover_warning(hc2_failover_uses($uid, $tokens)) : '';
 	try {
 		foreach ($tokens as $t) {
 			$c = hc2_check($uid, $t); if (!$c) { continue; }
@@ -36,7 +36,7 @@ if (hc2_is_post() && hc2_csrf_ok()) {
 			}
 		}
 		if ($action === 'move' && $tokens) { hc2_redirect(HC2_BASE . '/move.php?tokens=' . implode(',', $tokens)); }
-		if (in_array($action, array('pause','resume','delete','tag','untag'), true)) { hc2_flash('success', $n . ' Check(s) geändert.'); }
+		if (in_array($action, array('pause','resume','delete','tag','untag'), true)) { hc2_flash($foWarn !== '' ? 'warning' : 'success', $n . ' Check(s) geändert.' . ($foWarn !== '' ? ' ' . $foWarn : '')); }
 		if ($action === 'run') { hc2_flash('info', $n . ' Check(s) an die Nodes zur sofortigen Prüfung gegeben' . ($n < count($tokens) ? '; Online-, Push- und pausierte Checks werden im Intervall geprüft.' : '.')); }
 	} catch (Throwable $e) { error_log('hc2 index: ' . $e->getMessage()); hc2_flash('danger', 'Aktion fehlgeschlagen.'); }
 	hc2_redirect(HC2_BASE . '/' . (!empty($_SERVER['QUERY_STRING']) ? '?' . $_SERVER['QUERY_STRING'] : ''));
