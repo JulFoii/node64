@@ -19,6 +19,9 @@
  * Je Account und IP hoechstens ein Treffer je 24 h, ausser die IP wird neu gelistet; nach 24 h nur bei neuer Sichtung
  * (hp_scores.last_seen spaeter als beim letzten Treffer). Passt eine IP mehrfach, gewinnt DynDNS, dann das kleinste Netz.
  * Hoechstens HPW_PER_RUN Treffer je Account und Lauf (gelistete und hohe Werte zuerst, der Rest folgt im naechsten Lauf).
+ * Nie gemeldet: Server von ipv64 und CDN (hp_scores.reason infra/cdn, die Bewertung kennzeichnet sie auch unter der
+ * Schwelle). Je Treffer speichert der Lauf Details (hp_watch_alerts.details, JSON): wie oft, wo und wie die IP in den
+ * letzten 14 Tagen aufgefallen ist – nur Anzahlen, Dienste, Ports, Arten und Regeln, nie Sensoren, Accounts oder Inhalte.
  * Mail: je Account eine Mail je Lauf an die Account-Adresse mit allen noch nicht gemeldeten Treffern der letzten 24 h.
  * Fristen: Treffer nach 90 Tagen loeschen.
  */
@@ -54,10 +57,12 @@ function hpw_stream(PDO $pdo, string $sql, array $p, callable $fn): void {
 }
 
 $lb = hpr_dt($now - HPW_LOOKBACK);
-$cols = "s.ip_bin, s.ip, s.score, s.kinds, s.first_seen, s.last_seen, s.listed, s.listed_since";
+$cols = "s.ip_bin, s.ip, s.score, s.kinds, s.first_seen, s.last_seen, s.listed, s.listed_since, s.reason, s.accounts, s.sensors, s.events, s.lists";
 $when = "(s.last_seen >= :lb1 OR (s.listed = 1 AND s.listed_since >= :lb2))";
 $cand = array(); // "userid|bin" -> Treffer (bester Treffer je Account und IP)
-$add = function(int $u, array $s, string $source, ?int $net, string $cidr, string $label, int $prio) use (&$cand) {
+$nInfra = 0;
+$add = function(int $u, array $s, string $source, ?int $net, string $cidr, string $label, int $prio) use (&$cand, &$nInfra) {
+	if($s['reason'] === 'infra' OR $s['reason'] === 'cdn') { $nInfra++; return; } // eigene Server und CDN: keine Fruehwarnung
 	$k = $u . '|' . $s['ip_bin'];
 	if(isset($cand[$k]) AND $cand[$k]['prio'] >= $prio) { return; }
 	$cand[$k] = array('u' => $u, 's' => $s, 'source' => $source, 'net' => $net, 'cidr' => $cidr, 'label' => $label, 'prio' => $prio);
@@ -136,7 +141,7 @@ foreach(array_chunk(array_keys($byUser), 500) as $chunk) {
 unset($byUser);
 
 $users = array_unique(array_map(fn($c) => $c['u'], $new));
-printf("Treffer in Netzen: %d, bei DynDNS-IPs: %d (geteilte IPs ohne Nachweis: %d)\n", $nNet, $nDyn, $nShared);
+printf("Treffer in Netzen: %d, bei DynDNS-IPs: %d (geteilte IPs ohne Nachweis: %d, Infrastruktur/CDN ausgelassen: %d)\n", $nNet, $nDyn, $nShared, $nInfra);
 printf("Neue Treffer: %d fuer %d Accounts; uebersprungen: schon gemeldet %d, Account nicht aktiv %d, Obergrenze je Lauf %d (folgen im naechsten Lauf)\n",
 	count($new), count($users), $skipped['repeat'], $skipped['inactive'], $skipped['per_run']);
 if($dry) {
@@ -145,7 +150,14 @@ if($dry) {
 	exit(0);
 }
 
-// ---------------------------------------------------------------- 4. Schreiben (ein Zeitstempel je Lauf, eine Transaktion)
+// ---------------------------------------------------------------- 4. Details je IP (vor der Transaktion)
+$det = array(); // bin -> JSON
+foreach($new as $c) {
+	$s = $c['s'];
+	if(!isset($det[$s['ip_bin']])) { $det[$s['ip_bin']] = hpl_watch_details($pdo, $s, $now); }
+}
+
+// ---------------------------------------------------------------- 5. Schreiben (ein Zeitstempel je Lauf, eine Transaktion)
 // created_at = Zeit des Schreibens (nicht des Laufbeginns), damit die API ohne since kaum einen Stand nach laufenden Treffern meldet
 $ins = hpr_dt(time());
 $pdo->beginTransaction();
@@ -155,10 +167,10 @@ try {
 		foreach($chunk as $c) {
 			$s = $c['s'];
 			array_push($vals, $c['u'], $s['ip'], bin2hex($s['ip_bin']), $c['net'], $c['source'], $c['cidr'], mb_substr($c['label'], 0, 255), (int)$s['listed'], (int)$s['score'],
-				$s['kinds'], $s['first_seen'], $s['last_seen'], $ins);
+				$s['kinds'], $s['first_seen'], $s['last_seen'], $det[$s['ip_bin']], $ins);
 		}
-		hpr_q($pdo, "INSERT INTO hp_watch_alerts (userid, ip, ip_bin, network_id, source, cidr, label, listed, score, kinds, first_seen, last_seen, created_at) VALUES "
-			. implode(',', array_fill(0, count($chunk), '(?,?,UNHEX(?),?,?,?,?,?,?,?,?,?,?)')), $vals);
+		hpr_q($pdo, "INSERT INTO hp_watch_alerts (userid, ip, ip_bin, network_id, source, cidr, label, listed, score, kinds, first_seen, last_seen, details, created_at) VALUES "
+			. implode(',', array_fill(0, count($chunk), '(?,?,UNHEX(?),?,?,?,?,?,?,?,?,?,?,?)')), $vals);
 	}
 	$pdo->commit();
 } catch(Throwable $e) {
@@ -167,7 +179,7 @@ try {
 	exit(1);
 }
 
-// ---------------------------------------------------------------- 5. Mail je Account (alle noch nicht gemeldeten Treffer der letzten 24 h)
+// ---------------------------------------------------------------- 6. Mail je Account (alle noch nicht gemeldeten Treffer der letzten 24 h)
 $mailed = 0; $mailFail = 0;
 foreach(hpr_all($pdo, "SELECT DISTINCT userid FROM hp_watch_alerts WHERE mailed_at IS NULL AND created_at >= :d", array('d' => hpr_dt($now - 86400))) as $x) {
 	$u = (int)$x['userid'];
@@ -178,8 +190,9 @@ foreach(hpr_all($pdo, "SELECT DISTINCT userid FROM hp_watch_alerts WHERE mailed_
 	$n = count($rows); $lines = array();
 	foreach(array_slice($rows, 0, HPW_MAIL_MAX) as $r) {
 		$where = $r['source'] === 'dyndns' ? 'DynDNS ' . $r['label'] : $r['cidr'] . ($r['label'] !== '' ? ' (' . $r['label'] . ')' : '');
+		$why = hpl_details_text(json_decode((string)($r['details'] ?? ''), true), false);
 		$lines[] = '- ' . $r['ip'] . ' – ' . $where . ' – ' . ((int)$r['listed'] === 1 ? 'gelistet / listed' : 'gesehen / seen') . ', ' . $r['kinds']
-			. "\n  " . HPR_URL . '?ip=' . rawurlencode($r['ip']);
+			. ($why !== '' ? "\n  " . $why : '') . "\n  " . HPR_URL . '?ip=' . rawurlencode($r['ip']);
 	}
 	if($n > HPW_MAIL_MAX) { $lines[] = '… und ' . ($n - HPW_MAIL_MAX) . ' weitere / and ' . ($n - HPW_MAIL_MAX) . ' more'; }
 	$subj = $n === 1 ? "Honeypot64 Frühwarnung: {$rows[0]['ip']} ist als Angreifer aufgefallen" : "Honeypot64 Frühwarnung: $n Adressen sind als Angreifer aufgefallen";
@@ -200,6 +213,6 @@ foreach(hpr_all($pdo, "SELECT DISTINCT userid FROM hp_watch_alerts WHERE mailed_
 }
 echo "Mails: $mailed gesendet" . ($mailFail ? ", $mailFail fehlgeschlagen (naechster Lauf versucht es erneut)" : '') . "\n";
 
-// ---------------------------------------------------------------- 6. Fristen
+// ---------------------------------------------------------------- 7. Fristen
 $del = hpr_q($pdo, "DELETE FROM hp_watch_alerts WHERE created_at < :d", array('d' => hpr_dt($now - HPW_KEEP_DAYS * 86400)))->rowCount();
 echo "Treffer aelter als " . HPW_KEEP_DAYS . " Tage geloescht: $del\n";

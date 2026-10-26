@@ -19210,6 +19210,80 @@
             "type": "string",
             "format": "date-time",
             "example": "2026-10-20T12:12:03Z"
+          },
+          "details": {
+            "type": "object",
+            "nullable": true,
+            "description": "Warum die IP aufgefallen ist (letzte 14 Tage): Anzahlen und je Herkunft, Dienst, Port, Art und Regel – nie Sensoren, Accounts oder Inhalte. null bei älteren Treffern (vor Einführung der Details).",
+            "properties": {
+              "accounts": {
+                "type": "integer",
+                "description": "meldende Accounts"
+              },
+              "sensors": {
+                "type": "integer"
+              },
+              "events": {
+                "type": "integer"
+              },
+              "lists": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "example": [
+                  "v64",
+                  "ssh"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "description": "Grund der Bewertung, z. B. threshold, customer_ip, allowlist"
+              },
+              "seen": {
+                "type": "array",
+                "description": "höchstens 8 Zeilen, die häufigsten zuerst",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "honeypot",
+                        "log",
+                        "syslog"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "example": "ssh"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "example": 22
+                    },
+                    "kind": {
+                      "type": "string",
+                      "example": "ssh:bruteforce"
+                    },
+                    "rule": {
+                      "type": "string",
+                      "description": "Regel des Log-Sensors, sonst leer"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "sensors": {
+                      "type": "integer"
+                    },
+                    "last": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },

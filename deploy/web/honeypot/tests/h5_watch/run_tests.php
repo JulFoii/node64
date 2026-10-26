@@ -172,6 +172,13 @@ score('47.7.7.7', 0, 40);                      // DynDNS von 4 Accounts (geteilt
 score('45.9.9.20', 0, 20);                     // DynDNS Account 2
 for($i = 1; $i <= 106; $i++) { score('46.6.0.' . $i, 0, 10 + $i % 50); } // Netz mit Nachweis (VIP): jede Sichtung
 score('46.6.1.1', 1, 95);                      // dito, gelistet -> zuerst
+score('46.6.1.2', 0, 30);                      // dito, aber Server von ipv64 (reason infra) -> nie
+exec_sql("UPDATE hp_scores SET reason = 'infra' WHERE ip = '46.6.1.2'");
+// Rohdaten fuer die Details (warum die IP aufgefallen ist): zwei Sensoren per Honeypot, einer per Log
+foreach(array(array('S1', 'honeypot', 'ssh', 22, 'ssh:bruteforce', '', 7), array('S2', 'honeypot', 'ssh', 22, 'ssh:bruteforce', '', 3), array('S3', 'log', 'http', 443, 'http:bruteforce', 'nginx/auth', 4)) as $rs) {
+	exec_sql("INSERT INTO hp_report_sources (day, report_ref, userid, sensor_id, ip, ip_bin, kind, service, port, `count`, first_seen, last_seen, source, rule, detail)
+		VALUES (UTC_DATE(), 1, 9, ?, '45.1.1.1', UNHEX('2D010101'), ?, ?, ?, ?, ?, ?, ?, ?, 'sni=geheim.example')", array($rs[0], $rs[4], $rs[2], $rs[3], $rs[6], utc(-7200), utc(-3600), $rs[1], $rs[5]));
+}
 
 $out = cron('--dry');
 check('--dry: Zahlen, nichts geschrieben, keine Mail', str_contains($out, 'DRY RUN') AND (int)one("SELECT COUNT(*) n FROM hp_watch_alerts")['n'] === 0 AND mails() === array(), $out);
@@ -193,6 +200,12 @@ check('DynDNS-Treffer (nicht gelistet): source dyndns, network_id NULL, Domain, 
 check('DynDNS IPv6 -> /128', ($a1['2a0b:4d07:1::9'][0]['cidr'] ?? '') === '2a0b:4d07:1::9/128' AND $a1['2a0b:4d07:1::9'][0]['label'] === 'nas.home.ipv64.net');
 check('IP in DynDNS und Netz: ein Treffer, DynDNS gewinnt', count($a1['45.1.1.50'] ?? array()) === 1 AND $a1['45.1.1.50'][0]['source'] === 'dyndns' AND $a1['45.1.1.50'][0]['label'] === 'office.ipv64.net');
 check('IPv6-Netz-Treffer', ($a1['2a0b:4d07::5'][0]['network_id'] ?? 0) == $n6['id'] AND $a1['2a0b:4d07::5'][0]['kinds'] === 'http:exploit:traversal');
+$det = json_decode((string)($a1['45.1.1.1'][0]['details'] ?? ''), true);
+check('Details: Anzahlen aus hp_scores, Herkunft/Dienst/Port/Art/Regel aus den Rohdaten, haeufigste zuerst', is_array($det) AND $det['sensors'] === 2 AND $det['accounts'] === 2
+	AND $det['lists'] === array('v64', 'ssh') AND count($det['seen']) === 2 AND $det['seen'][0]['origin'] === 'honeypot' AND $det['seen'][0]['count'] === 10 AND $det['seen'][0]['sensors'] === 2
+	AND $det['seen'][1]['origin'] === 'log' AND $det['seen'][1]['rule'] === 'nginx/auth' AND $det['seen'][1]['port'] === 443, $det);
+check('Details verraten keine Sensoren (keine Kennung, kein Inhalt)', !str_contains((string)$a1['45.1.1.1'][0]['details'], 'S1') AND !str_contains((string)$a1['45.1.1.1'][0]['details'], 'geheim'), $a1['45.1.1.1'][0]['details'] ?? '');
+check('Server von ipv64 (reason infra): kein Treffer', (int)one("SELECT COUNT(*) n FROM hp_watch_alerts WHERE ip = '46.6.1.2'")['n'] === 0);
 check('nicht: nur gesehen ohne Nachweis, 16-Byte-IP zwischen IPv4-Grenzen, deaktiviert, CDN, alt', !isset($a1['45.1.1.2']) AND !isset($a1['2d01:101:500::1']) AND !isset($a1['45.9.9.10']) AND !isset($a1['45.9.9.11']) AND !isset($a1['45.1.1.3']));
 check('geteilte DynDNS-IP (4 Accounts) ohne Nachweis, inaktiver Account nichts', (int)one("SELECT COUNT(*) n FROM hp_watch_alerts WHERE userid IN (3, 5, 6, 7, 8)")['n'] === 0);
 $a2 = alerts(2);
@@ -202,7 +215,8 @@ $m = mails();
 check('2 Mails (je Account eine, gebuendelt)', count($m) === 2, array_column($m, 'to'));
 $m1 = array_values(array_filter($m, fn($x) => $x['to'] === 'a@test.invalid'))[0] ?? array();
 check('Mail Account 1: Betreff mit Anzahl, alle IPs, Netz/Domain, Link IP-Auskunft und Seite', str_contains($m1['subject'] ?? '', '5 Adressen') AND str_contains($m1['text'], '45.1.1.1') AND str_contains($m1['text'], 'DynDNS home.ipv64.net')
-	AND str_contains($m1['text'], '45.1.1.0/24 (Büro)') AND str_contains($m1['text'], 'honeypot/ip.php?ip=45.1.1.1') AND str_contains($m1['text'], 'honeypot/watch.php') AND str_contains($m1['text'], 'gelistet'), $m1);
+	AND str_contains($m1['text'], '45.1.1.0/24 (Büro)') AND str_contains($m1['text'], 'honeypot/ip.php?ip=45.1.1.1') AND str_contains($m1['text'], 'honeypot/watch.php') AND str_contains($m1['text'], 'gelistet')
+	AND str_contains($m1['text'], 'Honeypot ssh/22 ssh:bruteforce ×10 · Log http/443 http:bruteforce (nginx/auth) ×4 – 2 Sensoren, 2 Accounts'), $m1);
 $m2 = array_values(array_filter($m, fn($x) => $x['to'] === 'b@test.invalid'))[0] ?? array();
 check('Mail Account 2: hoechstens 25 IPs, Rest als Anzahl', str_contains($m2['text'] ?? '', 'und 75 weitere') AND substr_count($m2['text'], 'honeypot/ip.php?ip=') === 25, substr($m2['text'] ?? '', -300));
 check('mailed_at gesetzt', (int)one("SELECT COUNT(*) n FROM hp_watch_alerts WHERE mailed_at IS NULL")['n'] === 0);
@@ -225,7 +239,7 @@ $d = $r['j']['data'] ?? array();
 $ids1 = array_map('intval', array_column(alerts(1), 'id'));
 check('200, 5 Treffer, aelteste zuerst (created_at, id)', $r['code'] === 200 AND count($d['alerts'] ?? array()) === 5 AND array_column($d['alerts'], 'id') === $ids1, code($r));
 $x = $d['alerts'][0] ?? array();
-check('Felder des Vertrags (+ label)', array_keys($x) === array('id', 'ip', 'cidr', 'network_id', 'source', 'label', 'listed', 'score', 'kinds', 'first_seen', 'last_seen', 'created_at'), array_keys($x));
+check('Felder des Vertrags (+ label, details)', array_keys($x) === array('id', 'ip', 'cidr', 'network_id', 'source', 'label', 'listed', 'score', 'kinds', 'first_seen', 'last_seen', 'created_at', 'details'), array_keys($x));
 $byIp = array_column($d['alerts'] ?? array(), null, 'ip');
 $x = $byIp['45.1.1.1'] ?? array();
 check('Netz-Treffer: Typen', is_int($x['id'] ?? null) AND $x['network_id'] === (int)$n1['id'] AND $x['source'] === 'network' AND $x['listed'] === true AND $x['score'] === 80 AND $x['kinds'] === array('ssh:bruteforce')

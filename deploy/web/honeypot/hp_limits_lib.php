@@ -119,7 +119,43 @@ function hpl_dyndns(PDO $pdo, int $uid): array {
 /** Treffer fuer API und Seite (Vertrag GET /threat/watch/alerts; label zusaetzlich: Netzname bzw. Domain). */
 function hpl_alert_out(array $r): array {
 	$day = fn($s) => ($t = hpr_ts($s)) === null ? null : gmdate('Y-m-d', $t);
+	$det = isset($r['details']) && $r['details'] !== null ? json_decode((string)$r['details'], true) : null;
 	return array('id' => (int)$r['id'], 'ip' => $r['ip'], 'cidr' => $r['cidr'], 'network_id' => $r['network_id'] === null ? null : (int)$r['network_id'],
 		'source' => $r['source'], 'label' => (string)$r['label'], 'listed' => (int)$r['listed'] === 1, 'score' => (int)$r['score'], 'kinds' => hpr_csv($r['kinds']),
-		'first_seen' => $day($r['first_seen']), 'last_seen' => $day($r['last_seen']), 'created_at' => hpr_iso($r['created_at']));
+		'first_seen' => $day($r['first_seen']), 'last_seen' => $day($r['last_seen']), 'created_at' => hpr_iso($r['created_at']),
+		'details' => is_array($det) ? $det : null);
+}
+
+/**
+ * Details eines Treffers (Fruehwarnung) als JSON: warum die IP aufgefallen ist. Aus hp_scores (Anzahl Accounts,
+ * Sensoren, Ereignisse, Listen, Grund) und hp_report_sources der letzten 14 Tage, gruppiert nach Herkunft (honeypot,
+ * log, syslog), Dienst, Port, Art und Regel (hoechstens 8 Zeilen, die haeufigsten zuerst). Nie Sensor-Kennungen,
+ * Accounts, Hostnamen oder Inhalte (Pfade, Zugangsdaten) – die Fruehwarnung darf keine Sensoren verraten.
+ */
+function hpl_watch_details(PDO $pdo, array $s, int $now): string {
+	$seen = array();
+	try {
+		foreach(hpr_all($pdo, "SELECT source, service, port, kind, rule, SUM(`count`) n, COUNT(DISTINCT sensor_id) sensors, MAX(last_seen) last
+			FROM hp_report_sources WHERE ip_bin = :b AND last_seen >= :d GROUP BY source, service, port, kind, rule ORDER BY n DESC LIMIT 8",
+			array('b' => $s['ip_bin'], 'd' => hpr_dt($now - 14 * 86400))) as $r) {
+			$seen[] = array('origin' => (string)$r['source'], 'service' => (string)$r['service'], 'port' => (int)$r['port'], 'kind' => (string)$r['kind'],
+				'rule' => (string)$r['rule'], 'count' => (int)$r['n'], 'sensors' => (int)$r['sensors'], 'last' => hpr_iso($r['last']));
+		}
+	} catch(Throwable $e) { /* Details sind Beiwerk: der Treffer zaehlt auch ohne */ }
+	return json_encode(array('accounts' => (int)($s['accounts'] ?? 0), 'sensors' => (int)($s['sensors'] ?? 0), 'events' => (int)($s['events'] ?? 0),
+		'lists' => hpr_csv($s['lists'] ?? ''), 'reason' => (string)($s['reason'] ?? ''), 'seen' => $seen), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
+/** Details als eine Zeile Text (Mail, Seite): "Honeypot ssh/22 ssh_brute ×123 · Log http/443 ×4 – 3 Sensoren, 2 Accounts". */
+function hpl_details_text(?array $d, bool $en): string {
+	if(!$d) { return ''; }
+	$origin = array('honeypot' => 'Honeypot', 'log' => 'Log', 'syslog' => 'Syslog');
+	$parts = array();
+	foreach((array)($d['seen'] ?? array()) as $x) {
+		$p = ($origin[$x['origin'] ?? ''] ?? (string)($x['origin'] ?? '')) . ' ' . strtolower((string)($x['service'] ?? '')) . (!empty($x['port']) ? '/' . (int)$x['port'] : '')
+			. ' ' . (string)($x['kind'] ?? '') . (!empty($x['rule']) ? ' (' . $x['rule'] . ')' : '') . ' ×' . (int)($x['count'] ?? 0);
+		$parts[] = trim(preg_replace('/\s+/', ' ', $p));
+	}
+	$sum = (int)($d['sensors'] ?? 0) . ($en ? ' sensors, ' : ' Sensoren, ') . (int)($d['accounts'] ?? 0) . ($en ? ' accounts' : ' Accounts');
+	return ($parts ? implode(' · ', $parts) . ' – ' : '') . $sum;
 }

@@ -46,8 +46,9 @@ const HPS_CHUNK       = 500;         // Zeilen je INSERT
 const HPS_CHANGES_KEEP = 30 * 86400; // H6: Aenderungs-Feed (hp_list_changes)
 
 // Infrastruktur von ipv64, die nie gelistet wird (zusaetzlich zu hp_allowlist source=infra und den Server-Tabellen
-// cdn_server, vpn_gw_server, dns64_server). Netze als CIDR, z. B. '203.0.113.0/24'.
-const HPS_INFRA_NETS = array();
+// cdn_server, vpn_gw_server, dns64_server, cdn64o_edges). Netze als CIDR, z. B. '203.0.113.0/24'.
+// Healthchecks-hubs hc-srv01/hc-srv02 (pruefen fremde Ziele, auch Honeypots).
+const HPS_INFRA_NETS = array('188.245.6.138/32', '2a01:4f8:c014:46b::1/128', '178.105.50.207/32', '2a01:4f8:1c1f:b393::1/128');
 
 $dry = in_array('--dry', $argv, true);
 $now = time();
@@ -326,9 +327,10 @@ if($acc !== null) { $finish(); }
 
 $cand = array();
 foreach($out as $i => $x) { if($x['cand']) { $cand[$x['bin']] = $i; } }
-$reason = array(); // bin -> Grund
+$reason = array(); // bin -> Grund (gelistet bzw. nicht gelistet trotz Schwelle)
+$soft = array();   // bin -> infra/cdn fuer IPs unter der Schwelle (nur Kennzeichnung: die Fruehwarnung meldet sie nicht)
 $warn = array();
-if($cand) {
+if($out) {
 	// Freigaben, Infrastruktur, CDN aus hp_allowlist (Teil Freigaben; hier nur lesend)
 	$ranges = array();
 	try {
@@ -342,7 +344,7 @@ if($cand) {
 	} catch(Throwable $e) { $warn[] = 'hp_release_requests nicht lesbar (' . $e->getMessage() . ')'; }
 	// Infrastruktur: Konstante und Server-Tabellen
 	$infra = array_values(array_filter(array_map('hps_net', HPS_INFRA_NETS)));
-	foreach(array('cdn_server', 'vpn_gw_server', 'dns64_server') as $tbl) {
+	foreach(array('cdn_server', 'vpn_gw_server', 'dns64_server', 'cdn64o_edges') as $tbl) {
 		try {
 			foreach(hps_q("SELECT ipv4, ipv6 FROM `$tbl`")->fetchAll(PDO::FETCH_ASSOC) as $x) {
 				foreach(array($x['ipv4'], $x['ipv6']) as $ip) { if(($n = hps_net((string)$ip)) !== null) { $infra[] = $n; } }
@@ -361,10 +363,12 @@ if($cand) {
 		$bin = filter_var($ip, FILTER_VALIDATE_IP) ? inet_pton($ip) : false;
 		if($bin !== false AND isset($cand[$bin])) { $customer[$bin] = true; }
 	};
-	try { hps_stream("SELECT content ip FROM subdomain_records WHERE type IN ('A', 'AAAA') AND deactivated = 0", array(), $checkCustomer); }
-	catch(Throwable $e) { $warn[] = 'subdomain_records nicht lesbar'; }
-	try { hps_stream("SELECT ip FROM vpn_public_ips WHERE deleted = 0", array(), $checkCustomer); }
-	catch(Throwable $e) { $warn[] = 'vpn_public_ips nicht lesbar'; }
+	if($cand) {
+		try { hps_stream("SELECT content ip FROM subdomain_records WHERE type IN ('A', 'AAAA') AND deactivated = 0", array(), $checkCustomer); }
+		catch(Throwable $e) { $warn[] = 'subdomain_records nicht lesbar'; }
+		try { hps_stream("SELECT ip FROM vpn_public_ips WHERE deleted = 0", array(), $checkCustomer); }
+		catch(Throwable $e) { $warn[] = 'vpn_public_ips nicht lesbar'; }
+	}
 
 	foreach($cand as $bin => $i) {
 		$why = null;
@@ -380,6 +384,15 @@ if($cand) {
 		if($why === null AND isset($customer[$bin])) { $why = 'customer_ip'; } // TODO H5: Kunden warnen (Fruehwarnung), Pruefung durch Dennis
 		$reason[$bin] = $why ?? 'threshold';
 	}
+	foreach($out as $x) {
+		if($x['cand']) { continue; }
+		$bin = $x['bin'];
+		foreach($ranges as $r) {
+			if(($r['source'] === 'infra' OR $r['source'] === 'cdn') AND strlen($r['ip_start']) === strlen($bin) AND strcmp($bin, $r['ip_start']) >= 0 AND strcmp($bin, $r['ip_end']) <= 0) { $soft[$bin] = $r['source']; break; }
+		}
+		if(!isset($soft[$bin]) AND hps_in_nets($bin, $infra)) { $soft[$bin] = 'infra'; }
+		if(!isset($soft[$bin]) AND hps_in_nets($bin, $cdn)) { $soft[$bin] = 'cdn'; }
+	}
 }
 
 // ---------------------------------------------------------------- 5. Schreiben
@@ -387,9 +400,9 @@ if($cand) {
 $stat = array('ips' => count($out), 'listed' => 0, 'v64' => 0, 'research' => 0, 'threshold' => 0, 'customer_ip' => 0, 'allowlist' => 0, 'infra' => 0, 'cdn' => 0);
 $rowsOut = array();
 foreach($out as $x) {
-	$why = $x['cand'] ? $reason[$x['bin']] : '';
+	$why = $x['cand'] ? $reason[$x['bin']] : ($soft[$x['bin']] ?? '');
 	$listed = $why === 'threshold' ? 1 : 0;
-	if($why !== '') { $stat[$why]++; }
+	if($why !== '' AND $x['cand']) { $stat[$why]++; }
 	if($listed) { $stat['listed']++; if(in_array('v64', $x['lists'], true)) { $stat['v64']++; } if(in_array('research', $x['lists'], true)) { $stat['research']++; } }
 	$rowsOut[] = array(bin2hex($x['bin']), inet_ntop($x['bin']), $x['family'], $x['score'], min(65535, $x['accounts']), $x['eff'], $x['strong'], $x['sensors'], $x['events'],
 		$x['kinds'], $listed ? implode(',', $x['lists']) : '', gmdate('Y-m-d H:i:s', $x['first']), gmdate('Y-m-d H:i:s', $x['last']), $listed, $listed ? $run : null, $why, $run);
@@ -399,6 +412,7 @@ printf("Aktive Accounts (7 Tage): %d, Gruppen (14 Tage): %d, Schwelle: %s%s\n", 
 printf("Sensoren: %d, halbes Vertrauen neu: %d, wenig bestaetigt: %d, ohne Vertrauen: %d\n", count($trust), $lowTrust['new'], $lowTrust['unconfirmed'], $lowTrust['none']);
 printf("IPs bewertet: %d, gelistet: %d (v64 %d, research %d), nicht gelistet trotz Schwelle: Kunde %d, Freigabe %d, Infrastruktur %d, CDN %d; uebersprungen: Sensor %d, nicht oeffentlich %d\n",
 	$stat['ips'], $stat['listed'], $stat['v64'], $stat['research'], $stat['customer_ip'], $stat['allowlist'], $stat['infra'], $stat['cdn'], $skipped['sensor'], $skipped['not_public']);
+if($soft) { echo "Unter der Schwelle als Infrastruktur/CDN gekennzeichnet (keine Fruehwarnung): " . count($soft) . "\n"; }
 foreach($warn as $w) { echo "Warnung: $w\n"; }
 if($stat['customer_ip'] > 0) { echo "Hinweis: {$stat['customer_ip']} IPs von ipv64-Kunden nicht gelistet (reason customer_ip) - TODO: Kunden warnen\n"; }
 if($dry) { echo "*** DRY RUN, nichts geschrieben ***\n"; exit(0); }

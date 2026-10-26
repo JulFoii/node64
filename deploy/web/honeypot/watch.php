@@ -135,14 +135,14 @@ try {
 	<div class="card-body p-2">
 		<?php if($alerts) { ?>
 		<div class="table-responsive"><table class="table table-sm mb-0 small"><thead><tr>
-			<th><?php echo hpv_t('Zeit', 'Time'); ?></th><th>IP</th><th><?php echo hpv_t('Quelle', 'Source'); ?></th><th><?php echo hpv_t('Status', 'Status'); ?></th><th><?php echo hpv_t('Arten', 'Kinds'); ?></th><th><?php echo hpv_t('Gesehen', 'Seen'); ?></th>
+			<th><?php echo hpv_t('Zeit', 'Time'); ?></th><th>IP</th><th><?php echo hpv_t('Quelle', 'Source'); ?></th><th><?php echo hpv_t('Status', 'Status'); ?></th><th><?php echo hpv_t('Arten und Details', 'Kinds and details'); ?></th><th><?php echo hpv_t('Gesehen', 'Seen'); ?></th>
 		</tr></thead><tbody>
 		<?php foreach($alerts as $a) { ?>
 			<tr><td><?php echo hpv_h(hpv_time($a['created_at'])); ?></td>
 			<td><a href="ip.php?<?php echo hpv_h(http_build_query($hpvEn ? array('ip' => $a['ip'], 'lang' => 'en') : array('ip' => $a['ip']))); ?>"><code><?php echo hpv_h($a['ip']); ?></code></a></td>
 			<td><?php echo $a['source'] === 'dyndns' ? 'DynDNS ' . hpv_h($a['label']) : '<code>' . hpv_h($a['cidr']) . '</code> ' . hpv_h($a['label']); ?></td>
 			<td><?php echo $a['listed'] ? '<span class="badge badge-danger">' . hpv_t('gelistet', 'listed') . '</span>' : '<span class="badge badge-warning">' . hpv_t('gesehen', 'seen') . '</span>'; ?> <small class="text-muted"><?php echo (int)$a['score']; ?>/100</small></td>
-			<td><?php echo hpv_h(implode(', ', $a['kinds'])); ?></td>
+			<td><?php echo hpv_h(implode(', ', $a['kinds'])); if(($why = hpl_details_text($a['details'], $hpvEn)) !== '') { echo '<div class="text-muted">' . hpv_h($why) . '</div>'; } ?></td>
 			<td><?php echo hpv_h($a['first_seen'] . ($a['last_seen'] !== $a['first_seen'] ? ' – ' . $a['last_seen'] : '')); ?></td></tr>
 		<?php } ?>
 		</tbody></table></div>
