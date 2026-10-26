@@ -130,7 +130,8 @@ $lim = $full ? HPS_TOP_FULL : HPS_TOP_PUBLIC;
 		<?php if($contributor) { echo hss_t('Danke für deinen Beitrag! Deine Sensoren und dein Beitrag:', 'Thanks for contributing! Your sensors and your contribution:') . ' <a href="/honeypot/">/honeypot/</a>'; }
 		else { echo hss_t('Selbst beitragen: Honeypot64 in Node64 einschalten (Anleitung unter', 'Contribute yourself: enable Honeypot64 in Node64 (guide at') . ' <a href="https://node64.de/docs/honeypot/" target="_blank" rel="noopener">node64.de/docs/honeypot/</a>)'
 			. hss_t(', eigene Sensoren unter', ', your sensors at') . ' <a href="/honeypot/">/honeypot/</a>. ' . hss_t('Beitragende bekommen den Live-Stand der Listen.', 'Contributors get the live lists.'); } ?>
-		· <?php echo hss_t('IP prüfen:', 'Check an IP:'); ?> <a href="/honeypot/ip.php<?php echo $hssEn ? '?lang=en' : ''; ?>">/honeypot/ip.php</a></div></div>
+		· <?php echo hss_t('IP prüfen:', 'Check an IP:'); ?> <a href="/honeypot/ip.php<?php echo $hssEn ? '?lang=en' : ''; ?>">/honeypot/ip.php</a>
+		· <i class="fa-solid fa-earth-europe text-danger"></i> <a href="/honeypot/live.php<?php echo $hssEn ? '?lang=en' : ''; ?>"><?php echo hss_t('Live-Karte', 'Live map'); ?></a></div></div>
 
 <?php
 if($msg !== '') { echo '<div class="alert alert-warning" role="alert">' . hss_h($msg) . '</div>'; }

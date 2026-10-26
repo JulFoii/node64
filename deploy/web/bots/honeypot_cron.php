@@ -23,6 +23,7 @@ const HPC_JOBS = array(
 	'unlock'  => array('*/5', '*',    'limits_unlock.php',                 '', null), // Limits nach Klassenaenderung freigeben
 	'weekly'  => array('5', '*',      '../weekly_report/cron.php',         '', null), // Wochenbericht, verteilt ueber die Woche (6–21 Uhr)
 	'cdn64old' => array('23', '*',    'cdn64_orphans.php',                 '', null), // CDN64: Tunnel 14 Tage ohne Verbindung entfernen
+	'live'    => array('*/2', '*',    'honeypot_live.php',                 '', null), // Live-Karte: honeypot/live.json (letzte Stunde)
 );
 
 function hpc_match(string $spec, int $v): bool {
