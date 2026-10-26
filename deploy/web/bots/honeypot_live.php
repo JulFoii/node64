@@ -9,9 +9,10 @@
  * Liest die gemeldeten Quellen der letzten 60 Minuten (hp_report_sources, Index last_seen; hoechstens 3000 Zeilen) und
  * schreibt honeypot/live.json (statisch: Besucher der Seite loesen nie SQL aus). Je Eintrag: Zeit, Quelle maskiert
  * (IPv4 /24, IPv6 /48), Land der Quelle, Land des Sensors (nie Sensor, Account oder IP), Art, Dienst, Port, Anzahl.
+ * Ziel-Land: eingestellter Standort des Sensors (hp_sensors.country, aus der Meldung), sonst Land der IP der Meldung.
  * Keine Zugangsdaten. Weggelassen: Quellen, die selbst Sensor-IPs sind, und IPs, die die Bewertung als Infrastruktur,
  * CDN, Freigabe oder Kunden-IP kennzeichnet (hp_scores.reason). Laender aus blocklists/country_ranges.txt.gz in einem
- * Durchlauf (sortierte Bereiche, wenig Speicher). Die Meldungen kommen alle 10 Minuten: die Karte ist zeitversetzt.
+ * Durchlauf (sortierte Bereiche, wenig Speicher; Standort nach DB-IP, Luecken aus den RIR-Daten). Die Meldungen kommen alle 10 Minuten: die Karte ist zeitversetzt.
  */
 if(php_sapi_name() !== 'cli') { exit; }
 include(__DIR__ . "/../dbconnect.php");
@@ -25,8 +26,8 @@ $dry = in_array('--dry', $argv ?? array(), true);
 $now = time();
 $q = function(string $sql, array $a = array()) use ($pdo): PDOStatement { $st = $pdo->prepare($sql); $st->execute($a); return $st; };
 
-$rows = $q("SELECT s.ip, s.ip_bin, s.kind, s.service, s.port, s.`count` n, s.last_seen, s.source, r.ip sensor_ip
-	FROM hp_report_sources s JOIN hp_reports r ON r.id = s.report_ref AND r.day = s.day
+$rows = $q("SELECT s.ip, s.ip_bin, s.kind, s.service, s.port, s.`count` n, s.last_seen, s.source, r.ip sensor_ip, se.country sensor_cc
+	FROM hp_report_sources s JOIN hp_reports r ON r.id = s.report_ref AND r.day = s.day LEFT JOIN hp_sensors se ON se.sensor_id = r.sensor_id
 	WHERE s.last_seen >= :d ORDER BY s.last_seen DESC LIMIT " . HPL_ROWS, array('d' => gmdate('Y-m-d H:i:s', $now - HPL_MINUTES * 60)))->fetchAll(PDO::FETCH_ASSOC);
 
 // Sensor-IPs (nie als Angreifer zeigen) und Kennzeichen der Bewertung
@@ -53,7 +54,7 @@ foreach($rows as $r) {
 	if(isset($sensor[$b]) OR isset($skip[$b])) { $skipped++; continue; }
 	$from = $cc[$b] ?? null;
 	$sb = @inet_pton((string)$r['sensor_ip']);
-	$to = $sb !== false ? ($cc[$sb] ?? null) : null;
+	$to = preg_match('/^[A-Z]{2}$/', (string)$r['sensor_cc']) ? $r['sensor_cc'] : ($sb !== false ? ($cc[$sb] ?? null) : null);
 	if($from === null OR $to === null) { continue; }
 	$src = hpl_mask((string)$r['ip']);
 	$k = $src . '|' . $from . '|' . $to . '|' . $r['kind'] . '|' . $r['service'] . '|' . $r['port'];

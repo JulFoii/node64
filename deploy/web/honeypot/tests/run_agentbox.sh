@@ -33,6 +33,7 @@ cp "$HERE/footer_stub.php" "$STAGE/hp2test/web/footer.php"
 cp "$HERE/run_tests.php" "$HERE/fresh_report.php" "$HERE/sample_report.json" "$HERE/setup.sql" "$STAGE/hp2test/tests/"
 cp "$SQL/honeypot.sql" "$STAGE/hp2test/sql/"
 cp "$SQL/honeypot_h4_stats.sql" "$STAGE/hp2test/sql/"   # Zaehlung je Account (seit H4 Teil der Annahme)
+cp "$SQL/honeypot_sensor_country.sql" "$STAGE/hp2test/sql/"   # Standort des Sensors (Live-Karte)
 
 ssh agentbox 'rm -rf /tmp/hp2test'
 scp -q -r "$STAGE/hp2test" agentbox:/tmp/
@@ -54,6 +55,7 @@ docker exec -i hp2test-db mysql -uroot -php2test ipv64 < /tmp/hp2test/tests/setu
 docker exec -i hp2test-db mysql -uroot -php2test ipv64 < /tmp/hp2test/sql/honeypot.sql
 docker exec -i hp2test-db mysql -uroot -php2test ipv64 < /tmp/hp2test/sql/honeypot.sql   # mehrfach ausfuehrbar
 docker exec -i hp2test-db mysql -uroot -php2test ipv64 < /tmp/hp2test/sql/honeypot_h4_stats.sql
+docker exec -i hp2test-db mysql -uroot -php2test ipv64 < /tmp/hp2test/sql/honeypot_sensor_country.sql
 echo "--- Tabellen"; docker exec hp2test-db mysql -uroot -php2test ipv64 -N -e "SHOW TABLES LIKE 'hp\_%'" | tr '\n' ' '; echo
 docker run -d --name hp2test-php --network hp2test-net -e HP2TEST=1 -v /tmp/hp2test:/w -w /w/web hp2test-php:latest php -S 0.0.0.0:8080 -t /w/web >/dev/null
 sleep 1

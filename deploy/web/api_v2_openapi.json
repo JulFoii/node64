@@ -18293,6 +18293,11 @@
                   "module",
                   "headless"
                 ]
+              },
+              "country": {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$",
+                "description": "eingestellter Standort des Sensors (ISO 3166-1 alpha-2), nur fuer die Live-Karte; fehlt = automatisch"
               }
             }
           },

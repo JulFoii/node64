@@ -191,7 +191,8 @@ $l = $o['lists'];
 				. '" style="height:.7rem;border-radius:3px;width:' . $w . '%;background:hsl(' . $hue . ',80%,50%)"></div></td><td class="text-right">' . hss_num($x['ips'])
 				. '</td><td class="text-right">' . hss_num($x['events']) . '</td></tr>';
 		} ?>
-		</tbody></table></div><?php } ?></div></div>
+		</tbody></table></div><?php } ?>
+		<p class="small text-muted px-2 py-1 mb-0"><?php echo hss_t('IP-Länderdaten:', 'IP country data:'); ?> <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP.com</a></p></div></div>
 
 	<div class="card mb-3"><div class="card-header p-2"><i class="fa-solid fa-list text-primary"></i> <?php echo hss_t('Listen', 'Lists'); ?>
 		<small class="text-muted">– <?php echo hss_t('frei, Lizenz CC BY 4.0, ohne Gewähr', 'free, license CC BY 4.0, provided as is'); ?></small></div>

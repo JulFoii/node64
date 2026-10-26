@@ -29,7 +29,7 @@
  *     (allowlist), IPs von ipv64-Kunden (aktuelle A/AAAA-Records, oeffentliche VPN-IPs: customer_ip, nur markiert).
  *   - H6: jede Aenderung der gelisteten IPs (neu, nicht mehr gelistet, andere Listen) kommt in derselben Transaktion nach
  *     hp_list_changes (Aenderungs-Feed GET /threat/feed, api_v2_threat_feed.php), Frist 30 Tage.
- *   - Herkunft: hp_scores.country (ISO 3166-1, NULL = unbekannt) aus blocklists/country_ranges.txt.gz (RIR-Daten).
+ *   - Herkunft: hp_scores.country (ISO 3166-1, NULL = unbekannt) aus blocklists/country_ranges.txt.gz (Standort nach DB-IP, Luecken RIR).
  */
 if(php_sapi_name() !== 'cli') { exit; }
 include("/var/www/clients/client1/web58/web/dbconnect.php");
@@ -170,7 +170,7 @@ function hps_sublists(string $kind): array {
 function hps_age(int $ts, int $now): float { $d = max(0, $now - $ts) / 86400; return $d <= 1 ? 1.0 : max(0.25, 1 - 0.75 * ($d - 1) / 13); }
 
 /**
- * Herkunft: blocklists/country_ranges.txt.gz (create_blocklists_v2.php, taeglich aus den RIR-Daten) einmal laden.
+ * Herkunft: blocklists/country_ranges.txt.gz (create_blocklists_v2.php, taeglich: DB-IP Lite, Luecken aus den RIR-Daten) einmal laden.
  * Rueckgabe je Adresslaenge (4/16 Byte) drei parallele, nach Anfang sortierte Listen [Anfang, Ende, Land] oder null.
  */
 function hps_geo_load(string $file): ?array {

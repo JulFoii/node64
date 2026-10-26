@@ -91,6 +91,7 @@ check('Antwort in 1 s', $r['ms'] < 1000, $r['ms'] . ' ms');
 
 $sen = one("SELECT * FROM hp_sensors WHERE sensor_id = ?", array($A));
 check('Sensor angelegt mit last_ip', $sen AND $sen['last_ip'] === SENSOR_IP AND (int)$sen['reports'] === 1 AND $sen['profile'] === 'standard' AND $sen['mode'] === 'headless', $sen);
+check('ohne sensor.country: Standort automatisch (NULL)', $sen AND $sen['country'] === null, $sen);
 $rep = one("SELECT * FROM hp_reports WHERE report_id = ?", array($repA['report_id']));
 check('hp_reports: sources 3, rejected 13, ip', $rep AND (int)$rep['sources'] === 3 AND (int)$rep['rejected'] === 13 AND $rep['ip'] === SENSOR_IP, $rep);
 $src = all("SELECT ip, LENGTH(ip_bin) l, HEX(ip_bin) h, kind, service, port, `count`, detail FROM hp_report_sources WHERE report_ref = ? ORDER BY id", array($rep['id']));
@@ -114,7 +115,7 @@ $r = post(report($A, time() - 1));
 check('zweite Meldung sofort 429', $r['code'] === 429, code($r));
 check('Retry-After gesetzt', isset($r['h']['retry-after']) AND (int)$r['h']['retry-after'] > 0 AND (int)$r['h']['retry-after'] <= 120, $r['h']);
 $db->prepare("UPDATE hp_sensors SET last_seen = last_seen - INTERVAL 3 MINUTE WHERE sensor_id = ?")->execute(array($A));
-$repA2 = report($A, time() - 1, function($r) { $r['period']['start'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($r['period']['start']) + 1); $r['report_id'] = $r['sensor']['id'] . '-' . strtotime($r['period']['start']); return $r; });
+$repA2 = report($A, time() - 1, function($r) { $r['period']['start'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($r['period']['start']) + 1); $r['report_id'] = $r['sensor']['id'] . '-' . strtotime($r['period']['start']); $r['sensor']['country'] = 'SG'; return $r; });
 $r = post($repA2, K1, array(), true);
 check('gzip 202', $r['code'] === 202 AND ($r['j']['data']['accepted'] ?? 0) === 3, code($r));
 $cr = one("SELECT `count` FROM hp_samples_creds WHERE service = 'ssh' AND username = 'root' AND password = '123456'");
@@ -122,6 +123,7 @@ check('Tagessumme Zugangsdaten addiert (10 + 9)', (int)$cr['count'] === 19, $cr)
 $dl = one("SELECT SUM(events) e FROM hp_daily WHERE sensor_id = ? AND kind = 'ssh:bruteforce'", array($A));
 check('Tagessumme hp_daily addiert (17 + 17)', (int)$dl['e'] === 34, $dl);
 check('Ueberlappung vermerkt', (int)one("SELECT overlap FROM hp_reports WHERE report_id = ?", array($repA2['report_id']))['overlap'] === 1);
+check('sensor.country SG gespeichert (Live-Karte)', one("SELECT country FROM hp_sensors WHERE sensor_id = ?", array($A))['country'] === 'SG');
 
 // ---------------------------------------------------------------- Zeitformate
 echo "Zeitformate\n";

@@ -412,16 +412,30 @@ foreach($laender as $land)
 echo "Laender: $geschrieben Dateisaetze geschrieben\n";
 
 // Herkunft: country_ranges.txt.gz (gzip-Text, "#"-Kopf, je Zeile "<CC> <erste IP> <letzte IP>", IPv4 dann IPv6, sortiert)
-$t0 = microtime(true); $geo4 = 0; $geo6 = 0;
-$geo_txt = geo_lines($geo[4], 4, $geo4).geo_lines($geo[6], 16, $geo6);
-unset($geo);
+// nach Standort aus DB-IP Lite, Luecken aus den RIR-Daten (geo_dbip.php); ohne gueltige DB-IP-Datei nur RIR (Land des Inhabers)
+$t0 = microtime(true); $geo4 = 0; $geo6 = 0; $geo_db = null;
+if(is_file(__DIR__."/geo_dbip.php")) {
+	require_once __DIR__."/geo_dbip.php";
+	$geo_db = gdb_build($extern ? "$OUT/geo_cache" : dirname(__DIR__, 3)."/private/geo", !$dry, $geo);
+}
+if($geo_db !== null) {
+	$geo_txt = $geo_db['txt']; $geo4 = $geo_db['n4']; $geo6 = $geo_db['n6'];
+	$geo_head = "# Source: ".GDB_SOURCE." (".$geo_db['file'].", ".$geo_db['filled']." gap ranges from RIR), location of the address\n"
+		."# License: ".GDB_LICENSE.", attribution required: IP country data by DB-IP.com (https://db-ip.com)\n";
+	$geo_meta = ['source' => GDB_SOURCE, 'license' => GDB_LICENSE, 'attribution' => GDB_ATTRIBUTION];
+} else {
+	$geo_txt = geo_lines($geo[4], 4, $geo4).geo_lines($geo[6], 16, $geo6);
+	$geo_head = "# Source: RIR delegated-extended statistics (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC), same data as the country lists\n";
+	$geo_meta = ['source' => 'RIR delegated-extended statistics'];
+}
+unset($geo, $geo_db);
 if($geo4 + $geo6 > 0) {
 	$geo_gz = gzencode("# IPv64.net country ranges - ".gmdate("Y-m-d H:i")." UTC - https://ipv64.net/v64_blocklists\n"
-		."# Source: RIR delegated-extended statistics (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC), same data as the country lists\n"
+		.$geo_head
 		."# Format: <CC> <first IP> <last IP> (ISO 3166-1 alpha-2), IPv4 then IPv6, sorted ascending, adjacent ranges merged\n"
 		."# Ranges: ".($geo4 + $geo6)." (IPv4 $geo4, IPv6 $geo6)\n".$geo_txt, 9);
 	write_atomic("$OUT/country_ranges.txt.gz", $geo_gz);
-	$index['geo'] = ['file' => 'country_ranges.txt.gz', 'updated' => date('c'), 'ranges' => $geo4 + $geo6];
+	$index['geo'] = ['file' => 'country_ranges.txt.gz', 'updated' => date('c'), 'ranges' => $geo4 + $geo6] + $geo_meta;
 	printf("%-22s %6d Bereiche (v4 %6d, v6 %6d), %d KB gz, %.1f s\n", "Herkunft", $geo4 + $geo6, $geo4, $geo6, strlen($geo_gz) / 1024, microtime(true) - $t0);
 	unset($geo_gz);
 } elseif(is_file("$OUT/index.json")) {

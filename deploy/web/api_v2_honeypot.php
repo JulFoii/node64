@@ -151,6 +151,8 @@ function hp_parse(array $b, int $now): array {
 	if(!is_string($ver) OR !preg_match('/^[0-9A-Za-z][0-9A-Za-z.+_~-]{0,31}$/', $ver)) { hp_bad('sensor.version', "Field 'sensor.version' is invalid."); }
 	if(!in_array($s['profile'] ?? null, HP_PROFILES, true)) { hp_bad('sensor.profile', "Field 'sensor.profile' must be one of " . implode(', ', HP_PROFILES) . "."); }
 	if(!in_array($s['mode'] ?? null, HP_MODES, true)) { hp_bad('sensor.mode', "Field 'sensor.mode' must be one of " . implode(', ', HP_MODES) . "."); }
+	// Standort (nur Live-Karte): fehlt oder ungueltig = automatisch, die Meldung wird deshalb nicht abgewiesen
+	$cc = (is_string($s['country'] ?? null) AND preg_match('/^[A-Z]{2}$/', $s['country']) AND $s['country'] !== 'ZZ') ? $s['country'] : null;
 
 	$p = $b['period'] ?? null;
 	if(!is_array($p)) { hp_bad('period', "Field 'period' must be an object."); }
@@ -251,7 +253,7 @@ function hp_parse(array $b, int $now): array {
 		if(!is_string($key) OR !preg_match(HP_FP_RE, $key)) { $rej['invalid_fingerprint'] = ($rej['invalid_fingerprint'] ?? 0) + 1; continue; }
 		$samples['fingerprints'][] = array('hash' => hash('sha256', $key, true), 'key' => $key, 'count' => $cnt);
 	}
-	return array('report_id' => $rid, 'sensor' => array('id' => $sid, 'version' => $ver, 'profile' => $s['profile'], 'mode' => $s['mode']),
+	return array('report_id' => $rid, 'sensor' => array('id' => $sid, 'version' => $ver, 'profile' => $s['profile'], 'mode' => $s['mode'], 'country' => $cc),
 		'start' => $start, 'end' => $end, 'dropped' => $dropped, 'sources' => $out, 'samples' => $samples, 'rejected' => $rej);
 }
 
@@ -360,9 +362,9 @@ function hp_store(array $r, int $bytes, int $now): array {
 		foreach($pl as $sha => $c) { $con[] = array('payload', $sday, $sha, $u, $c); }
 		hp_insert("INSERT INTO hp_sample_contrib (kind, day, key_hash, userid, cnt)", '(?,?,UNHEX(?),?,?)', $con, 'ON DUPLICATE KEY UPDATE cnt = cnt + VALUES(cnt)');
 
-		q("UPDATE hp_sensors set version = :v, profile = :p, mode = :m, last_seen = :t, last_ip = :ip, last_report_id = :r, reports = reports + 1,
+		q("UPDATE hp_sensors set version = :v, profile = :p, mode = :m, country = :cc, last_seen = :t, last_ip = :ip, last_report_id = :r, reports = reports + 1,
 			last_period_end = IF(last_period_end IS NULL OR last_period_end < :pe, :pe2, last_period_end) WHERE sensor_id = :s",
-			array('v' => $r['sensor']['version'], 'p' => $r['sensor']['profile'], 'm' => $r['sensor']['mode'], 't' => hp_dt($now), 'ip' => $ip,
+			array('v' => $r['sensor']['version'], 'p' => $r['sensor']['profile'], 'm' => $r['sensor']['mode'], 'cc' => $r['sensor']['country'], 't' => hp_dt($now), 'ip' => $ip,
 				'r' => $r['report_id'], 'pe' => hp_dt($r['end']), 'pe2' => hp_dt($r['end']), 's' => $sid));
 		$pdo->commit();
 	} catch(Throwable $e) {

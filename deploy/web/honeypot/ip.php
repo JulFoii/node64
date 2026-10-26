@@ -218,7 +218,7 @@ $langLink = function(bool $en): string {
 				echo empty($r['ports']) ? '–' : implode(', ', array_map(fn($p) => hpi_h($p['port']) . ' <small class="text-muted">' . hpi_h($p['service']) . '</small>', $r['ports'])); ?></td></tr>
 			<tr><th><?php echo hpi_t('Listen', 'Lists'); ?></th><td><?php echo 'v64' . (empty($r['lists']) ? '' : ' · ' . implode(' · ', array_map(fn($l) => 'v64_' . hpi_h($l), $r['lists']))); ?></td></tr>
 			<?php if($r['country'] !== null OR $r['asn'] !== null) { ?>
-			<tr><th><?php echo hpi_t('Herkunft', 'Origin'); ?></th><td><?php echo hpi_h(trim(($r['country'] ?? '') . ($r['asn'] !== null ? ' · AS' . $r['asn'] : ''), ' ·')); ?></td></tr>
+			<tr><th><?php echo hpi_t('Herkunft', 'Origin'); ?></th><td><?php echo hpi_h(trim(($r['country'] ?? '') . ($r['asn'] !== null ? ' · AS' . $r['asn'] : ''), ' ·')); ?><?php if($r['country'] !== null) { ?> <small class="text-muted">(<?php echo hpi_t('IP-Länderdaten:', 'IP country data:'); ?> <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP.com</a>)</small><?php } ?></td></tr>
 			<?php } ?>
 		</tbody></table>
 	<?php } elseif($r['status'] === 'released' OR $r['status'] === 'allowlisted') { ?>
