@@ -127,6 +127,11 @@ function hc2_check_input(?array $old): array {
 	if (isset($pin['json_rules'])) { $f['json_rules'] = $pin['json_rules']; } // Liste aus {path, op, value} oder Textform
 	foreach (array('record_type','resolver','server','expect','values','min_ttl') as $k) { if ($f['type'] === 'dns' && isset($pin[$k])) { $f['dns_' . $k] = $pin[$k]; } }
 	if ($f['type'] === 'dns' && !empty($pin['dnssec'])) { $f['dns_dnssec'] = '1'; }
+	if ($f['type'] === 'whois') { // Parameter des WHOIS-Checks (source, min_days, contains)
+		if (isset($pin['source'])) { $f['whois_source'] = (string)$pin['source']; }
+		if (isset($pin['min_days'])) { $f['whois_min_days'] = (string)(int)$pin['min_days']; }
+		if (isset($pin['contains']) && is_array($pin['contains'])) { $f['whois_contains'] = implode("\n", array_map('strval', $pin['contains'])); }
+	}
 	if (array_key_exists('follow_redirects', $pin)) { $f['follow_redirects_present'] = 1; if ($pin['follow_redirects']) { $f['follow_redirects'] = '1'; } } elseif (!$old) { $f['follow_redirects'] = '1'; }
 	if (isset($pin['headers']) && is_array($pin['headers'])) { $lines = array(); foreach ($pin['headers'] as $k => $v) { $lines[] = $k . ': ' . $v; } $f['headers'] = implode("\n", $lines); }
 	$map = array('interval_seconds' => array('interval_sec', 60), 'retry_interval_seconds' => array('retry_interval_sec', 20), 'retries' => array('retries', 1), 'stabilize' => array('stabilize', 3), 'repeat_minutes' => array('repeat_minutes', 0));

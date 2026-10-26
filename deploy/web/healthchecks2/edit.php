@@ -18,7 +18,8 @@ $f = array('type' => 'http', 'name' => '', 'target' => '', 'interval_sec' => 60,
 	'execution' => 'online', 'node_id' => (string)($_GET['node'] ?? ''), 'nodes' => isset($_GET['node']) ? array((string)$_GET['node']) : array_slice(array_keys($nodes), 0, 1), 'locations' => array_slice(array_keys($locs), 0, $acc['hc_locations']), 'policy' => 'all',
 	'method' => 'GET', 'accept_status' => '200-299', 'follow_redirects' => 1, 'max_redirects' => 5, 'keyword' => '', 'keyword_absent' => 0, 'basic_user' => '', 'basic_password' => '', 'headers' => '', 'body' => '', 'insecure_tls' => 0, 'cert_min_days' => 14,
 	'count' => 3, 'max_loss_percent' => 0, 'max_latency_ms' => 0, 'port' => '', 'send' => '', 'expect' => '', 'tls' => 0, 'min_days' => 14, 'server_name' => '', 'skip_chain' => 0, 'skip_hostname' => 0, 'period_seconds' => 3600, 'grace_seconds' => 600, 'docker_host' => '',
-	'json_rules' => '', 'json_any' => 0, 'dns_record_type' => 'A', 'dns_resolver' => 'system', 'dns_server' => '', 'dns_expect' => 'any', 'dns_values' => '', 'dns_dnssec' => 0, 'dns_min_ttl' => 0);
+	'json_rules' => '', 'json_any' => 0, 'dns_record_type' => 'A', 'dns_resolver' => 'system', 'dns_server' => '', 'dns_expect' => 'any', 'dns_values' => '', 'dns_dnssec' => 0, 'dns_min_ttl' => 0,
+	'whois_source' => 'auto', 'whois_min_days' => 14, 'whois_contains' => '');
 if ($f['node_id'] !== '' && isset($nodes[$f['node_id']])) { $f['execution'] = 'local'; }
 $src = $old ?: $cloneOf;
 if ($src) {
@@ -33,6 +34,7 @@ if ($src) {
 		elseif ($k === 'expect' && $src['type'] === 'port') { $f['expect'] = $v; }
 		elseif ($k === 'host' && $src['type'] === 'docker') { $f['docker_host'] = $v; }
 		elseif ($k === 'json_rules' && is_array($v)) { $f['json_rules'] = hc2_json_rules_text($v); }
+		elseif ($src['type'] === 'whois' && in_array($k, array('source', 'min_days', 'contains'), true)) { $f['whois_' . $k] = $k === 'contains' && is_array($v) ? implode("\n", $v) : $v; }
 		elseif ($src['type'] === 'dns' && in_array($k, array('record_type', 'resolver', 'server', 'expect', 'values', 'dnssec', 'min_ttl'), true)) { $f['dns_' . ($k === 'min_ttl' ? 'min_ttl' : $k)] = $k === 'values' ? implode("\n", (array)$v) : (is_bool($v) ? ($v ? 1 : 0) : $v); }
 		else { $f[$k] = is_bool($v) ? ($v ? 1 : 0) : $v; }
 	}
@@ -147,6 +149,14 @@ $others = array_filter(hc2_checks($uid), function($c) use ($old) { return !$old 
 							<div class="form-group col-md-6" data-type="cert"><label>Servername (SNI, optional)</label><input class="form-control" name="server_name" value="<?php echo $val('server_name'); ?>"></div>
 							<div class="form-group col-12" data-type="tcp"><div class="custom-control custom-checkbox"><input class="custom-control-input" type="checkbox" id="tls" name="tls" value="1"<?php echo $chk('tls'); ?>><label class="custom-control-label" for="tls">TLS-Handshake nach dem Verbinden</label></div></div>
 							<div class="form-group col-12" data-type="cert"><div class="custom-control custom-checkbox custom-control-inline"><input class="custom-control-input" type="checkbox" id="skip_chain" name="skip_chain" value="1"<?php echo $chk('skip_chain'); ?>><label class="custom-control-label" for="skip_chain">Kette nicht prüfen (private CA)</label></div><div class="custom-control custom-checkbox custom-control-inline"><input class="custom-control-input" type="checkbox" id="skip_hostname" name="skip_hostname" value="1"<?php echo $chk('skip_hostname'); ?>><label class="custom-control-label" for="skip_hostname">Hostname nicht prüfen</label></div></div>
+						</div>
+						<!-- WHOIS / RDAP -->
+						<div class="form-row" data-type="whois">
+							<div class="form-group col-12"><small class="form-text text-muted mt-0">Ziel: Domain (Ablauf, Registrar, Status, Nameserver), IP-Adresse oder Netz bzw. AS-Nummer (Netzname, Route/CIDR, Organisation, Land, Stadt). Abfrage höchstens stündlich.</small></div>
+							<div class="form-group col-md-4"><label>Quelle</label><select class="custom-select" name="whois_source"><?php foreach (array('auto' => 'Automatisch (RDAP, sonst WHOIS)', 'rdap' => 'Nur RDAP', 'whois' => 'Nur WHOIS (Port 43)') as $wk => $wl) { echo '<option value="' . $wk . '"' . ((string)$f['whois_source'] === $wk ? ' selected' : '') . '>' . $wl . '</option>'; } ?></select></div>
+							<div class="form-group col-md-4"><label>Domain: warnen ab Resttagen</label><input class="form-control" type="number" name="whois_min_days" value="<?php echo $val('whois_min_days'); ?>" min="0" max="3650"><small class="form-text text-muted">0 = erst bei Ablauf</small></div>
+							<div class="form-group col-12"><label>Erwartete Angaben (optional, je Zeile eine)</label><textarea class="form-control text-monospace" name="whois_contains" rows="3" placeholder="nameserver: ns1.ipv64.net&#10;country: DE&#10;registrar: DENIC"><?php echo $val('whois_contains'); ?></textarea>
+								<small class="form-text text-muted">„Text“ oder „Feld: Text“ (registrar, nameserver, status, org, country, city, netname, cidr, asn). Fehlt eine Angabe, gilt der Check als gestört.</small></div>
 						</div>
 						<!-- Docker -->
 						<div class="form-row" data-type="docker">

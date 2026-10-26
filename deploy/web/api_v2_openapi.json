@@ -16529,7 +16529,8 @@
               "port",
               "cert",
               "push",
-              "docker"
+              "docker",
+              "whois"
             ]
           },
           "target": {
@@ -17072,7 +17073,8 @@
               "port",
               "cert",
               "push",
-              "docker"
+              "docker",
+              "whois"
             ]
           },
           "target": {

@@ -183,7 +183,7 @@ function hc2_locations(): array {
 // ---------------------------------------------------------------- Checks: Definitionen
 
 function hc2_types(): array {
-	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'json' => 'JSON (API)', 'dns' => 'DNS', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat', 'docker' => 'Docker-Container');
+	return array('http' => 'HTTP(S)', 'keyword' => 'Schlüsselwort', 'json' => 'JSON (API)', 'dns' => 'DNS', 'icmp' => 'Ping (ICMP)', 'tcp' => 'TCP', 'port' => 'Port', 'cert' => 'Zertifikat', 'push' => 'Push / Heartbeat', 'docker' => 'Docker-Container', 'whois' => 'WHOIS / RDAP');
 }
 function hc2_states(): array {
 	return array('up' => array('OK', 'success'), 'down' => array('Gestört', 'danger'), 'degraded' => array('Teilweise gestört', 'warning'), 'flapping' => array('Instabil', 'warning'),
@@ -214,6 +214,8 @@ function hc2_reason_text(?string $r): string {
 		'too_many_redirects' => 'Zu viele Weiterleitungen', 'banner_mismatch' => 'Banner passt nicht', 'latency_high' => 'Latenz zu hoch', 'no_address_for_family' => 'Keine Adresse für IP-Version',
 		'cert_hostname_mismatch' => 'Zertifikat passt nicht zum Namen', 'push_reported_down' => 'Push meldet Störung', 'container_missing' => 'Container fehlt',
 		'container_stopped' => 'Container gestoppt', 'container_paused' => 'Container pausiert', 'container_restarting' => 'Container startet neu',
+		'whois_failed' => 'WHOIS-Abfrage fehlgeschlagen', 'whois_not_found' => 'Domain nicht registriert', 'whois_expiring' => 'Domain läuft bald ab',
+		'whois_expired' => 'Domain abgelaufen', 'whois_mismatch' => 'WHOIS-Angabe fehlt',
 		'container_unhealthy' => 'Container ungesund', 'docker_unavailable' => 'Docker nicht erreichbar', 'dependency_down' => 'Abhängigkeit gestört', 'internal_error' => 'Interner Fehler',
 		'json_invalid' => 'Keine gültige JSON-Antwort', 'json_mismatch' => 'JSON-Bedingung nicht erfüllt', 'dns_mismatch' => 'DNS-Antwort passt nicht', 'dns_nxdomain' => 'Name existiert nicht', 'dnssec_failed' => 'DNSSEC nicht validiert',
 		'unchecked' => 'Nicht überwacht', 'quota_exhausted' => 'Tageskontingent aufgebraucht');
@@ -236,7 +238,7 @@ function hc2_target_badge(array $c): string {
 	$t = hc2_target_display($c);
 	$style = 'display:inline-flex;align-items:center;max-width:100%;padding:.2rem .55rem;border:1px solid #dee2e6;border-radius:50rem;background:#f8f9fa;font-weight:normal;font-size:.8rem';
 	if ($t === '') { return '<span class="badge" style="' . $style . '"><i class="fa-solid fa-circle-down text-muted mr-1"></i> Push / Heartbeat</span>'; }
-	$icon = array('tcp' => 'fa-plug', 'port' => 'fa-plug', 'icmp' => 'fa-tower-broadcast', 'cert' => 'fa-shield-halved', 'docker' => 'fa-box', 'dns' => 'fa-signs-post')[$c['type']] ?? 'fa-bullseye';
+	$icon = array('tcp' => 'fa-plug', 'port' => 'fa-plug', 'icmp' => 'fa-tower-broadcast', 'cert' => 'fa-shield-halved', 'docker' => 'fa-box', 'dns' => 'fa-signs-post', 'whois' => 'fa-address-card')[$c['type']] ?? 'fa-bullseye';
 	$cls = 'text-muted'; $short = $t;
 	if ($c['type'] === 'dns') { $short = strtoupper((string)(hc2_check_params($c)['record_type'] ?? 'A')) . ' ' . rtrim($t, '.'); }
 	if (in_array($c['type'], array('http', 'keyword', 'json'), true)) {
@@ -484,6 +486,20 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 			if (!preg_match('/^\/?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/', $target)) { $err[] = 'Containername oder -ID fehlt (Buchstaben, Ziffern, _ . -).'; }
 			if (($h = trim((string)($in['docker_host'] ?? ''))) !== '') { if (!preg_match('#^(unix|tcp|https?)://#', $h)) { $err[] = 'Docker-Host muss mit unix://, tcp:// oder http(s):// beginnen.'; } else { $p['host'] = $h; } }
 			break;
+		case 'whois':
+			// Domain, IP/Netz oder AS-Nummer; Auskunft per RDAP, sonst WHOIS (Port 43) – wie im Container (internal/checks/whois.go)
+			$target = trim($target);
+			$wIp = explode('/', $target, 2);
+			$wOk = (bool)preg_match('/^(AS)?\d{1,10}$/i', $target)
+				|| (filter_var($wIp[0], FILTER_VALIDATE_IP) !== false && (!isset($wIp[1]) || ctype_digit($wIp[1])))
+				|| (bool)preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}\.?$/i', $target);
+			if (!$wOk) { $err[] = 'Ziel: Domain, IP-Adresse/Netz oder AS-Nummer (z. B. example.de, 203.0.113.0/24, AS3320).'; }
+			$srcw = (string)($in['whois_source'] ?? 'auto'); if (in_array($srcw, array('rdap', 'whois'), true)) { $p['source'] = $srcw; }
+			if (($wd = $num('whois_min_days', 14, 0, 3650)) !== 14) { $p['min_days'] = $wd; }
+			$rules = array(); foreach (preg_split('/\r?\n/', (string)($in['whois_contains'] ?? '')) as $rl) { $rl = trim($rl); if ($rl !== '') { $rules[] = mb_substr($rl, 0, 200); } }
+			if (count($rules) > 20) { $err[] = 'Höchstens 20 erwartete Angaben.'; }
+			if ($rules) { $p['contains'] = array_slice($rules, 0, 20); }
+			break;
 		case 'push':
 			$target = '';
 			if (($ps = $num('period_seconds', 3600, 20, 31536000)) !== 3600) { $p['period_seconds'] = $ps; }
@@ -513,6 +529,7 @@ function hc2_validate_check(array $in, int $userid, ?array $old): array {
 	// Messstellen und Bewertung
 	$execution = (string)($in['execution'] ?? 'online'); if (!in_array($execution, array('local','online','both'), true)) { $execution = 'online'; }
 	if ($execution !== 'local' && $type !== 'push' && $interval < 20) { $interval = 20; }
+	if ($type === 'whois') { $interval = max(3600, $interval); $retryInt = max(600, $retryInt); } // WHOIS/RDAP-Server begrenzen Abfragen (wie Node und hub)
 	if ($retryInt > $interval) { $retryInt = $interval; }
 	// Messende Nodes (mehrere moeglich); node_id = Besitzer: bleibt, solange er gewaehlt ist
 	$oldNodes = $old ? hc2_check_nodes($old) : array();
