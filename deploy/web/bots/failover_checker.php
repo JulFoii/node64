@@ -4,6 +4,7 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) { exit("laeuft bereits\n"); }
 
 include("/var/www/clients/client1/web58/web/dbconnect.php");
 include("/var/www/clients/client1/web58/web/bots/cdn_functions.php");
+include("/var/www/clients/client1/web58/web/failover_hc2_lib.php"); //Monitore: alte oder neue Healthchecks (Schalter FAILOVER_HC2)
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -59,9 +60,7 @@ foreach($policies as $policy)
 		$monitors = $statement->fetchAll();
 		foreach($monitors as $monitor)
 		{	$i++;
-			$statement = $pdo->prepare("SELECT id,status FROM healthchecks WHERE healthtoken = :healthtoken");
-			$result = $statement->execute(array('healthtoken' => $monitor["healthtoken"]));
-			$hc = $statement->fetch() ?: array('status' => ''); //Healthcheck geloescht: zaehlt weder online noch offline
+			$hc = failover_check($pdo, (int)$policy["userid"], (string)$monitor["healthtoken"]) ?: array('status' => ''); //Healthcheck geloescht: zaehlt weder online noch offline
 			if($hc["status"] == "1" AND $monitor["negate"] == 1){$all++;}
 			if($hc["status"] == "4" AND $monitor["negate"] == 0){$all++;}
 		}
@@ -202,9 +201,7 @@ foreach($policies as $policy)
 		$monitors = $statement->fetchAll();
 		foreach($monitors as $monitor)
 		{	$i++;
-			$statement = $pdo->prepare("SELECT id,status FROM healthchecks WHERE healthtoken = :healthtoken");
-			$result = $statement->execute(array('healthtoken' => $monitor["healthtoken"]));
-			$hc = $statement->fetch() ?: array('status' => ''); //Healthcheck geloescht: zaehlt weder online noch offline
+			$hc = failover_check($pdo, (int)$policy["userid"], (string)$monitor["healthtoken"]) ?: array('status' => ''); //Healthcheck geloescht: zaehlt weder online noch offline
 			if($hc["status"] == "1" AND $monitor["negate"] == 0){$all++;}
 			if($hc["status"] == "4" AND $monitor["negate"] == 1){$all++;}
 		}
