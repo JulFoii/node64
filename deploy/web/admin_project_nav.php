@@ -8,7 +8,15 @@
 if (!isset($account) || !is_array($account) || (string)($account['admin'] ?? '0') !== '1') {
 	return;
 }
+// Admin-Bereich: Anmeldungen "als Nutzer" wegraeumen, sobald der Admin zurueck ist (admin_lib.php)
+if (is_file(__DIR__ . '/admin_lib.php') && isset($pdo)) {
+	require_once __DIR__ . '/admin_lib.php';
+	adm_cleanup_links($pdo);
+}
 $n64nav = array(
+	'Admin' => array(
+		array('fa-user-shield', 'Nutzer verwalten', 'https://ipv64.net/admin'),
+	),
 	'Node64' => array(
 		array('fa-cube', 'Node64 – Vorstellungsseite', 'https://ipv64.net/node64.php'),
 		array('fa-network-wired', 'Meine Nodes (Übersicht)', 'https://ipv64.net/nodes'),
