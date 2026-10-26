@@ -83,10 +83,18 @@ usort($list, function($a, $b) use ($sort, $stateOf, $rank, $desc) {
 	}
 	return $desc ? -$r : $r;
 });
+// Untergruppen in „Proxmox VE“ und „Docker“: je System bzw. Docker-Host (Name setzt die Node in params.system, live)
+$subOf = function(array $c) use ($nodes): string {
+	if (!in_array($c['group_name'], array('Proxmox VE', 'Docker'), true) || !in_array($c['type'], array('proxmox', 'docker'), true)) { return ''; }
+	$sys = trim((string)(hc2_check_params($c)['system'] ?? ''));
+	$nid = hc2_check_nodes($c)[0] ?? ''; $node = isset($nodes[$nid]) ? (string)$nodes[$nid]['name'] : '';
+	if ($c['type'] === 'proxmox') { return $sys !== '' ? $sys : ($node !== '' ? 'Node ' . $node : 'Proxmox VE'); }
+	return $sys !== '' ? $sys . ($node !== '' ? ' · ' . $node : '') : ($node !== '' ? 'Node ' . $node : 'Docker');
+};
 if ($allGroups) {
 	$order = array(); $i = 0; foreach (array_keys($allGroups) as $g) { $order[$g] = $i++; }
 	$pos = array(); foreach ($list as $k => $c) { $pos[$c['token']] = $k; }
-	usort($list, function($a, $b) use ($order, $pos) { $ga = $order[$a['group_name']] ?? PHP_INT_MAX; $gb = $order[$b['group_name']] ?? PHP_INT_MAX; return $ga <=> $gb ?: $pos[$a['token']] <=> $pos[$b['token']]; });
+	usort($list, function($a, $b) use ($order, $pos, $subOf) { $ga = $order[$a['group_name']] ?? PHP_INT_MAX; $gb = $order[$b['group_name']] ?? PHP_INT_MAX; return $ga <=> $gb ?: strcasecmp($subOf($a), $subOf($b)) ?: $pos[$a['token']] <=> $pos[$b['token']]; });
 }
 $pills = hc2_pills_many(array_column($list, 'token'), 30, $nodes);
 $used = hc2_online_used($uid); $limit = $acc['healthcheck_limit'];
@@ -148,10 +156,20 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked});"></th><th>Zustand</th><th>Name</th><th>Ziel</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
 				<tbody>
 				<?php if (!$list) { echo '<tr><td colspan="9" class="text-muted p-3">Keine Checks' . ($all ? ' für diesen Filter' : '') . '. <a href="' . HC2_BASE . '/edit.php">Ersten Check anlegen</a>' . ($nodes ? '' : ' oder eine <a href="/link.php">Node verknüpfen</a>') . '.</td></tr>'; } ?>
-				<?php $lastGroup = null; foreach ($list as $c) { $s = $stateOf($c);
-					if ($allGroups && $c['group_name'] !== $lastGroup) { $lastGroup = $c['group_name']; $gUp = 0; $gDown = 0; $gOther = 0; foreach ($list as $x) { if ($x['group_name'] === $lastGroup) { $xs = $stateOf($x); if ($xs === 'up') { $gUp++; } elseif ($xs === 'down') { $gDown++; } else { $gOther++; } } }
-						echo '<tr class="table-light"><td colspan="9" class="py-1"><i class="fa-solid fa-layer-group text-primary"></i> <strong>' . hc2_h($lastGroup !== '' ? $lastGroup : 'Ohne Gruppe') . '</strong> <span class="ml-2 small">' . ($gUp ? '<span class="badge badge-success">' . $gUp . '</span> ' : '') . ($gDown ? '<span class="badge badge-danger">' . $gDown . '</span> ' : '') . ($gOther ? '<span class="badge badge-secondary">' . $gOther . '</span>' : '') . '</span></td></tr>'; } ?>
-				<tr>
+				<?php $lastGroup = null; $lastSub = null; $gKey = ''; $sKey = ''; $gn = 0; $sn = 0;
+				$cnt = function(array $rows) use ($stateOf): string { $u = 0; $d = 0; $o = 0; foreach ($rows as $x) { $xs = $stateOf($x); if ($xs === 'up') { $u++; } elseif ($xs === 'down') { $d++; } else { $o++; } }
+					return ($u ? '<span class="badge badge-success">' . $u . '</span> ' : '') . ($d ? '<span class="badge badge-danger">' . $d . '</span> ' : '') . ($o ? '<span class="badge badge-secondary">' . $o . '</span>' : ''); };
+				foreach ($list as $c) { $s = $stateOf($c);
+					if ($allGroups && $c['group_name'] !== $lastGroup) { $lastGroup = $c['group_name']; $lastSub = null; $sKey = ''; $gKey = 'g' . (++$gn);
+						$gName = $lastGroup !== '' ? $lastGroup : 'Ohne Gruppe';
+						echo '<tr class="table-light hc2-grp" data-grp="' . $gKey . '" data-name="' . hc2_h($gName) . '"><td colspan="9" class="py-1" style="cursor:pointer"><i class="fa-solid fa-chevron-down hc2-chev text-muted mr-1"></i><i class="fa-solid fa-layer-group text-primary"></i> <strong>' . hc2_h($gName) . '</strong> <span class="ml-2 small">' . $cnt(array_filter($list, function($x) use ($lastGroup) { return $x['group_name'] === $lastGroup; })) . '</span></td></tr>';
+					}
+					$sub = $allGroups ? $subOf($c) : '';
+					if ($sub !== '' && $sub !== $lastSub) { $lastSub = $sub; $sKey = $gKey . 's' . (++$sn); $g0 = $lastGroup;
+						echo '<tr class="hc2-sub" data-g="' . $gKey . '" data-grp="' . $sKey . '" data-parent="' . $gKey . '" data-name="' . hc2_h(($lastGroup !== '' ? $lastGroup : 'Ohne Gruppe') . ' / ' . $sub) . '"><td colspan="9" class="py-1 pl-4" style="cursor:pointer"><i class="fa-solid fa-chevron-down hc2-chev text-muted mr-1"></i><i class="fa-solid ' . ($c['type'] === 'docker' ? 'fa-box' : 'fa-server') . ' text-secondary"></i> <strong>' . hc2_h($sub) . '</strong> <span class="ml-2 small">' . $cnt(array_filter($list, function($x) use ($g0, $sub, $subOf) { return $x['group_name'] === $g0 && $subOf($x) === $sub; })) . '</span></td></tr>';
+					} elseif ($sub === '') { $sKey = ''; }
+				?>
+				<tr<?php if ($gKey !== '') { echo ' data-g="' . $gKey . '"' . ($sKey !== '' ? ' data-s="' . $sKey . '"' : ''); } ?>>
 					<td><input type="checkbox" name="tokens[]" value="<?php echo hc2_h($c['token']); ?>"></td>
 					<td><?php echo hc2_state_badge($s); if ($c['last_reason'] && $s !== 'up' && $s !== 'paused') { echo '<br><small class="text-muted">' . hc2_h(hc2_reason_text($c['last_reason'])) . '</small>'; } ?></td>
 					<td><a class="font-weight-bold" href="<?php echo HC2_BASE; ?>/check.php?token=<?php echo hc2_h($c['token']); ?>"><?php echo hc2_h($c['name']); ?></a>
@@ -176,4 +194,30 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 	<?php $node64_hint = "Healthchecks auch lokal in deinem Heimnetz – mit Statusseiten und Proxmox-VE-Überwachung: Node64."; include("../node64_hint.php"); ?>
 </div>
 <?php include("../footer.php"); ?>
-<script>$(function(){ $('[data-toggle="tooltip"]').tooltip(); });</script>
+<script>$(function(){ $('[data-toggle="tooltip"]').tooltip(); });
+// Gruppen und Untergruppen auf-/zuklappen (Zustand im Browser gemerkt)
+(function () {
+	var key = 'hc2_closed', closed = {};
+	try { closed = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { closed = {}; }
+	var heads = document.querySelectorAll('tr[data-grp]');
+	function isClosed(k) { var h = document.querySelector('tr[data-grp="' + k + '"]'); return !!(h && h.classList.contains('hc2-closed')); }
+	function apply() {
+		document.querySelectorAll('tr[data-g]').forEach(function (tr) {
+			var hide = isClosed(tr.getAttribute('data-g')) || (tr.hasAttribute('data-s') && isClosed(tr.getAttribute('data-s')));
+			tr.style.display = hide ? 'none' : '';
+		});
+		heads.forEach(function (h) { var i = h.querySelector('.hc2-chev'); if (i) { i.style.transform = h.classList.contains('hc2-closed') ? 'rotate(-90deg)' : ''; } });
+	}
+	heads.forEach(function (h) {
+		var name = h.getAttribute('data-name');
+		if (closed[name]) { h.classList.add('hc2-closed'); }
+		h.addEventListener('click', function () {
+			h.classList.toggle('hc2-closed');
+			if (h.classList.contains('hc2-closed')) { closed[name] = 1; } else { delete closed[name]; }
+			try { localStorage.setItem(key, JSON.stringify(closed)); } catch (e) {}
+			apply();
+		});
+	});
+	apply();
+})();
+</script>
