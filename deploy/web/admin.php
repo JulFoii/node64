@@ -2,7 +2,8 @@
 /**
  * IPv64.net – Admin: Nutzer verwalten (eine Seite, nur fuer Admins, users.admin = 1 aus der Datenbank).
  * Suche nach ID, E-Mail oder Domain; je Nutzer Profil, Statistik, Domains, Log; Klasse und Laufzeit, Sperren,
- * Freischalten, Sitzungen beenden, 2FA zuruecksetzen, Domains loeschen, Account loeschen, Login als Nutzer.
+ * Freischalten, Sitzungen beenden, 2FA zuruecksetzen, Traffic zuruecksetzen (CDN alt/neu, Cloud Router), Domains
+ * loeschen, Account loeschen, Login als Nutzer.
  * Alle Aktionen per POST mit CSRF-Token aus der Sitzung, im Admin-Protokoll (admin_audit) und neutral im Log des
  * Nutzers. Logik: admin_lib.php.
  */
@@ -38,7 +39,7 @@ if(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 		$bad('Sitzung abgelaufen, bitte Seite neu laden.');
 	} elseif($target === null) {
 		$bad('Nutzer nicht gefunden.');
-	} elseif($protected && $act !== 'class') {
+	} elseif($protected && !in_array($act, array('class', 'reset_cdn_old', 'reset_cdn64', 'reset_vpn'), true)) {
 		$bad('Andere Admins lassen sich hier nicht sperren, löschen oder übernehmen.');
 	} else {
 		$email = (string)$target['email'];
@@ -82,6 +83,24 @@ if(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 			adm_audit($pdo, $admId, $uid, 'reset_2fa', $n . ' Schlüssel');
 			adm_userlog($pdo, $uid, 'Zwei-Faktor-Anmeldung durch den Support zurückgesetzt.');
 			$ok('2FA zurückgesetzt (' . $n . ' Schlüssel entfernt).');
+			break;
+		case 'reset_cdn_old':
+		case 'reset_cdn64':
+		case 'reset_vpn':
+			$tr = adm_traffic($pdo, $target);
+			if($act === 'reset_vpn') {
+				$n = adm_reset_vpn($pdo, $uid);
+				adm_audit($pdo, $admId, $uid, $act, round($tr['vpn_gb'], 2) . ' GB' . ($tr['vpn_limited'] ? ', gedrosselt' : '') . ', ' . $n . ' Gateway(s) freigegeben');
+				adm_userlog($pdo, $uid, 'Cloud-Router-Traffic des Monats durch den Support zurückgesetzt.');
+				$ok('Cloud-Router-Traffic zurückgesetzt (' . round($tr['vpn_gb'], 2) . ' GB)' . ($n ? ', ' . $n . ' Gateway(s) freigegeben' : '') . '.');
+			} else {
+				$old = $act === 'reset_cdn_old';
+				$was = $old ? $tr['cdn_old_gb'] : (float)$tr['cdn64_gb'];
+				$n = $old ? adm_reset_cdn_old($pdo, $uid) : adm_reset_cdn64($pdo, $uid);
+				adm_audit($pdo, $admId, $uid, $act, round($was, 2) . ' GB, ' . $n . ' CDN64-Name(n) entsperrt');
+				adm_userlog($pdo, $uid, ($old ? 'CDN-Traffic (altes CDN)' : 'CDN64-Traffic') . ' des Monats durch den Support zurückgesetzt.');
+				$ok(($old ? 'Traffic altes CDN' : 'Traffic CDN64') . ' zurückgesetzt (' . round($was, 2) . ' GB)' . ($n ? ', ' . $n . ' CDN64-Name(n) wieder aktiv' : '') . '.');
+			}
 			break;
 		case 'delete_domain':
 			$did = (int)($_POST['domain_id'] ?? 0);
@@ -175,6 +194,7 @@ $fmt = function($t): string { return ($t === null || $t === '' || strpos((string
 	$stats = adm_stats($pdo, $uid);
 	$domains = adm_domains($pdo, $uid);
 	$twofa = $stats['2FA-Schlüssel'] ?? 0;
+	$traffic = adm_traffic($pdo, $user);
 ?>
 <div class="row">
 	<div class="col-xl-5">
@@ -190,7 +210,7 @@ $fmt = function($t): string { return ($t === null || $t === '' || strpos((string
 					<dt class="col-5">Domainlimit</dt><dd class="col-7"><?php echo (int)$user['domainlimit']; ?></dd>
 					<dt class="col-5">Updates DynDNS / API / Health</dt><dd class="col-7"><?php echo (int)$user['dyndns_updates']; ?> / <?php echo (int)$user['api_updates']; ?> / <?php echo (int)$user['healthcheck_updates']; ?></dd>
 					<dt class="col-5">SMS / Meldungen</dt><dd class="col-7"><?php echo (int)$user['sms_count']; ?> / <?php echo (int)$user['notification_count']; ?></dd>
-					<dt class="col-5">Traffic VPN / CDN</dt><dd class="col-7"><?php echo round(((float)$user['vpn_traffic_input'] + (float)$user['vpn_traffic_output']) / 1073741824, 2); ?> GB / <?php echo round(((float)$user['cdn_traffic_input'] + (float)$user['cdn_traffic_output']) / 1073741824, 2); ?> GB</dd>
+					<dt class="col-5">Traffic VPN / CDN</dt><dd class="col-7"><?php echo round($traffic['vpn_gb'], 2); ?> GB / <?php echo round($traffic['cdn_old_gb'] + (float)$traffic['cdn64_gb'], 2); ?> GB</dd>
 					<dt class="col-5">Guthaben</dt><dd class="col-7"><?php echo adm_h($user['guthaben']); ?><?php echo $user['partner_id'] !== '' ? ' · Partner ' . adm_h($user['partner_id']) : ''; ?></dd>
 					<dt class="col-5">Newsletter</dt><dd class="col-7"><?php echo (string)$user['newsletter'] === '1' ? 'ja' : 'nein'; ?></dd>
 				</dl>
@@ -216,6 +236,25 @@ $fmt = function($t): string { return ($t === null || $t === '' || strpos((string
 					. '<button class="btn btn-sm btn-outline-primary" type="submit" name="extend" value="12">+12 Monate</button>'
 					. '<div class="small text-muted mt-1">Verlängern rechnet ab dem bisherigen Ende (oder ab heute, falls schon abgelaufen) mit der gewählten Klasse.</div>', 'd-block');
 				?>
+			</div>
+		</div>
+
+		<div class="card shadow mb-3">
+			<div class="card-header"><i class="fa-solid fa-gauge-high"></i> Traffic (laufender Monat)</div>
+			<div class="card-body">
+				<?php
+				$gb = function($v) { return $v === null ? '–' : number_format((float)$v, 2, ',', '.') . ' GB'; };
+				$trow = function(string $label, string $usage, string $badge, string $act, string $confirm) use ($form) {
+					return '<div class="d-flex align-items-center justify-content-between border-bottom py-2"><div class="small"><b>' . $label . '</b><br>' . $usage . $badge . '</div>'
+						. $form($act, '<button class="btn btn-sm btn-outline-warning" type="submit"><i class="fa-solid fa-rotate-left"></i> Zurücksetzen</button>', 'd-inline ml-2', $confirm) . '</div>';
+				};
+				$cdnSum = $traffic['cdn_old_gb'] + (float)$traffic['cdn64_gb'];
+				echo $trow('CDN (alt)', $gb($traffic['cdn_old_gb']), '', 'reset_cdn_old', 'Traffic des alten CDN für diesen Monat auf 0 setzen?');
+				echo $trow('CDN64 (neu)', $gb($traffic['cdn64_gb']), $traffic['cdn64_blocked'] ? ' <span class="badge badge-danger">' . (int)$traffic['cdn64_blocked'] . ' Name(n) gesperrt</span>' : '', 'reset_cdn64', 'Traffic von CDN64 für diesen Monat auf 0 setzen? Wegen Traffic gesperrte Namen werden wieder aktiv.');
+				echo '<div class="small text-muted pt-1 pb-2">Limit beide CDNs zusammen: ' . $gb($cdnSum) . ' von ' . (int)$traffic['cdn_limit_gb'] . ' GB' . ($traffic['cdn_limit_gb'] > 0 && $cdnSum >= $traffic['cdn_limit_gb'] ? ' <span class="badge badge-danger">erreicht</span>' : '') . '</div>';
+				echo $trow('Cloud Router (VPN)', $gb($traffic['vpn_gb']) . ' von ' . (int)$traffic['vpn_limit_gb'] . ' GB', $traffic['vpn_limited'] ? ' <span class="badge badge-danger">gedrosselt</span>' : '', 'reset_vpn', 'Cloud-Router-Traffic für diesen Monat auf 0 setzen? Gedrosselte Gateways werden wieder freigegeben.');
+				?>
+				<div class="small text-muted mt-2">Wie der Monatswechsel, nur für diesen Nutzer. Beim alten CDN bleiben wegen des Limits abgeschaltete Proxys und Portmapper aus – der Nutzer schaltet sie selbst wieder ein. CDN64-Namen und Cloud-Router-Gateways werden sofort freigegeben.</div>
 			</div>
 		</div>
 

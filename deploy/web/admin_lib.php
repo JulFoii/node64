@@ -211,6 +211,72 @@ function adm_reset_2fa(PDO $pdo, int $uid): int {
 	return $st ? $st->rowCount() : 0;
 }
 
+// ---------------------------------------------------------------- Traffic (Monat)
+
+/**
+ * Traffic des Monats: altes CDN (users.cdn_traffic_*, MB), neues CDN (cdn64o_traffic ab dem 1., Bytes), Cloud Router
+ * (users.vpn_traffic_*, Bytes). Limits aus der Klasse (cdn_traffic fuer beide CDNs zusammen, vpn_traffic, je GB).
+ */
+function adm_traffic(PDO $pdo, array $user): array {
+	$cls = adm_one($pdo, "SELECT cdn_traffic, vpn_traffic FROM user_class WHERE id = :c", array('c' => (int)$user['user_class'])) ?? array();
+	$new = adm_one($pdo, "SELECT COALESCE(SUM(bytes_in + bytes_out), 0) b FROM cdn64o_traffic WHERE userid = :u AND day >= :d", array('u' => (int)$user['id'], 'd' => date('Y-m-01')));
+	return array(
+		'cdn_old_gb' => ((float)$user['cdn_traffic_input'] + (float)$user['cdn_traffic_output']) / 1024,
+		'cdn64_gb' => $new === null ? null : (float)$new['b'] / 1073741824,
+		'cdn_limit_gb' => (int)($cls['cdn_traffic'] ?? 0),
+		'cdn64_blocked' => adm_count($pdo, 'cdn64o_hosts', "userid = :u AND status = 'blocked' AND blocked_reason = 'traffic'", array('u' => (int)$user['id'])),
+		'vpn_gb' => ((float)$user['vpn_traffic_input'] + (float)$user['vpn_traffic_output']) / 1073741824,
+		'vpn_limit_gb' => (int)($cls['vpn_traffic'] ?? 0),
+		'vpn_limited' => (int)($user['vpn_limit_reached'] ?? 0) === 1,
+	);
+}
+
+/**
+ * Wegen Traffic gesperrte CDN64-Namen wieder aktiv, wenn altes und neues CDN zusammen unter dem Klassenlimit liegen
+ * (wie api_v2_cdn64o.php beim naechsten Bericht der Server – hier sofort). Liefert die Anzahl.
+ */
+function adm_cdn64_unblock(PDO $pdo, int $uid): int {
+	$u = adm_user($pdo, $uid);
+	if($u === null) { return 0; }
+	$t = adm_traffic($pdo, $u);
+	if($t['cdn_limit_gb'] <= 0 || $t['cdn_old_gb'] + (float)$t['cdn64_gb'] >= $t['cdn_limit_gb']) { return 0; }
+	$n = 0;
+	foreach(adm_all($pdo, "SELECT id FROM cdn64o_hosts WHERE userid = :u AND status = 'blocked' AND blocked_reason = 'traffic'", array('u' => $uid)) as $h) {
+		adm_q($pdo, "UPDATE cdn64o_hosts SET status = 'active', blocked_reason = '' WHERE id = :h", array('h' => $h['id']));
+		adm_q($pdo, "INSERT INTO cdn64o_events (host_id, userid, kind, message) VALUES (:h, :u, 'unblocked', 'support: traffic reset')", array('h' => $h['id'], 'u' => $uid));
+		$n++;
+	}
+	return $n;
+}
+
+/**
+ * Altes CDN: Monatszaehler auf 0 wie bots/cdn_vpn_traffic_delete.php am 1. Beim Limit abgeschaltete Proxys/Portmapper
+ * bleiben aus (vorheriger Zustand unbekannt), der Nutzer schaltet sie selbst wieder ein. Liefert entsperrte CDN64-Namen.
+ */
+function adm_reset_cdn_old(PDO $pdo, int $uid): int {
+	adm_q($pdo, "UPDATE users SET cdn_traffic_input = 0, cdn_traffic_output = 0 WHERE id = :u", array('u' => $uid));
+	return adm_cdn64_unblock($pdo, $uid);
+}
+
+/**
+ * Neues CDN (CDN64): Bytes des laufenden Monats auf 0 (Verbindungen/Anfragen bleiben fuer die Statistik), danach
+ * wegen Traffic gesperrte Namen freigeben. Liefert entsperrte Namen.
+ */
+function adm_reset_cdn64(PDO $pdo, int $uid): int {
+	adm_q($pdo, "UPDATE cdn64o_traffic SET bytes_in = 0, bytes_out = 0 WHERE userid = :u AND day >= :d", array('u' => $uid, 'd' => date('Y-m-01')));
+	return adm_cdn64_unblock($pdo, $uid);
+}
+
+/**
+ * Cloud Router (VPN): wie der Monatswechsel – Zaehler und Limit-Merker auf 0, gedrosselte Gateways freigeben
+ * (traffic_limit 2, vpn_bot setzt es um). Liefert die Anzahl der Gateways.
+ */
+function adm_reset_vpn(PDO $pdo, int $uid): int {
+	adm_q($pdo, "UPDATE users SET vpn_traffic_input = 0, vpn_traffic_output = 0, vpn_limit_reached = 0 WHERE id = :u", array('u' => $uid));
+	$st = adm_q($pdo, "UPDATE vpn_gateways SET traffic_limit = 2, actions = 'edit', status = 0 WHERE userid = :u AND traffic_limit = 1", array('u' => $uid));
+	return $st ? $st->rowCount() : 0;
+}
+
 /** Eine Domain loeschen (wie in der Oberflaeche: Records, Zone, CDN-Markierung, Failover). */
 function adm_delete_domain(PDO $pdo, int $uid, int $domainId): bool {
 	if(adm_one($pdo, "SELECT id FROM subdomains WHERE id = :d AND userid = :u", array('d' => $domainId, 'u' => $uid)) === null) { return false; }
