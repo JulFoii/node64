@@ -153,7 +153,7 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 				<button class="btn btn-sm btn-outline-danger" name="action" value="delete" type="submit" onclick="return confirm('Markierte Checks mit allen Messdaten löschen?');"><i class="fa-solid fa-trash"></i> Löschen</button>
 			</div>
 			<div class="table-responsive"><table class="table table-sm table-hover mb-0">
-				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked});"></th><th>Zustand</th><th>Name</th><th>Ziel</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
+				<thead><tr><th style="width:1%"><input type="checkbox" onclick="document.querySelectorAll('#bulk input[name=\'tokens[]\']').forEach(function(c){c.checked=event.target.checked&&c.closest('tr').style.display!=='none'});"></th><th>Zustand</th><th>Name</th><th>Ziel</th><th>Typ</th><th class="text-right">Latenz</th><th>Letzte Messungen</th><th>Seit</th><th></th></tr></thead>
 				<tbody>
 				<?php if (!$list) { echo '<tr><td colspan="9" class="text-muted p-3">Keine Checks' . ($all ? ' für diesen Filter' : '') . '. <a href="' . HC2_BASE . '/edit.php">Ersten Check anlegen</a>' . ($nodes ? '' : ' oder eine <a href="/link.php">Node verknüpfen</a>') . '.</td></tr>'; } ?>
 				<?php $lastGroup = null; $lastSub = null; $gKey = ''; $sKey = ''; $gn = 0; $sn = 0;
@@ -205,6 +205,7 @@ $qs = function(array $over) { return HC2_BASE . '/?' . http_build_query(array_me
 		document.querySelectorAll('tr[data-g]').forEach(function (tr) {
 			var hide = isClosed(tr.getAttribute('data-g')) || (tr.hasAttribute('data-s') && isClosed(tr.getAttribute('data-s')));
 			tr.style.display = hide ? 'none' : '';
+			if (hide) { var cb = tr.querySelector('input[name="tokens[]"]'); if (cb) { cb.checked = false; } }
 		});
 		heads.forEach(function (h) { var i = h.querySelector('.hc2-chev'); if (i) { i.style.transform = h.classList.contains('hc2-closed') ? 'rotate(-90deg)' : ''; } });
 	}

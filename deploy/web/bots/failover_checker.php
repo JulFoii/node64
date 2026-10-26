@@ -90,6 +90,7 @@ foreach($policies as $policy)
 				
 				$chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 				$record_key = strval(substr(str_shuffle($chars),0,32));
+				$trk = "0"; //nur gesetzt, wenn unten wirklich ein Ersatz-Record angelegt wird
 				
 				//Ist es eine IP oder ein Key?
 				if(!filter_var($rule["content"], FILTER_VALIDATE_IP) AND strlen($rule["content"]) == 32)
@@ -135,9 +136,11 @@ foreach($policies as $policy)
 					
 					//Gleicher Inhalt schon aktiv im selben RRset (anderer Record oder andere Regel dieser Policy)? Dann nicht
 					//doppelt anlegen - PowerDNS lehnt sonst das ganze RRset ab (422 Duplicate record) und die Zone bleibt alt
-					$statement = $pdo->prepare("SELECT id FROM subdomain_records WHERE subdomain_id = :sid AND BINARY praefix = :praefix AND type = :type AND content = :content AND deactivated = '0' LIMIT 1");
-					$result = $statement->execute(array('sid' => $record["subdomain_id"],'praefix' => $record["praefix"],'type' => $record["type"],'content' => $rule["content"]));
-					if($statement->fetch() !== false AND $deactivated == 0) {
+					$statement = $pdo->prepare("SELECT content FROM subdomain_records WHERE subdomain_id = :sid AND BINARY praefix = :praefix AND type = :type AND deactivated = '0'");
+					$result = $statement->execute(array('sid' => $record["subdomain_id"],'praefix' => $record["praefix"],'type' => $record["type"]));
+					$dup = false; $want = @inet_pton($rule["content"]);
+					foreach($statement->fetchAll() as $other) { if($want !== false AND @inet_pton($other["content"]) === $want) { $dup = true; break; } }
+					if($dup AND $deactivated == 0) {
 						do_zone_update($pdo,$record["userid"],$record["subdomain_id"],$record["type"],10,$record["praefix"]);
 					}else{
 					$statement = $pdo->prepare("INSERT INTO subdomain_records (subdomain_id,userid,domainname,praefix,content,ttl,deactivated,type,record_key,failover,failover_policy) 
@@ -155,6 +158,7 @@ foreach($policies as $policy)
 						'failover'=> 1,
 						'failover_policy'=> $policy["failover_hash"]));
 						$newrecordid = $pdo->lastInsertId();
+						$trk = $record_key;
 					//DNS Update ausführen
 					do_zone_update($pdo,$record["userid"],$record["subdomain_id"],$record["type"],10,$record["praefix"]);
 					
@@ -167,7 +171,7 @@ foreach($policies as $policy)
 				}
 				//Rules Status ändern in 
 				$statement = $pdo->prepare("UPDATE dns_failover_rules set status = :status,temp_record_key = :trk WHERE id = :id");
-				$result = $statement->execute(array('status' => "2",'trk' => $record_key,'id' => $rule["id"]));
+				$result = $statement->execute(array('status' => "2",'trk' => $trk,'id' => $rule["id"]));
 			}
 			
 			//Ganze Policy Status auf 2 setzen
@@ -220,8 +224,12 @@ foreach($policies as $policy)
 			//Temporäre Records löschen
 			//TEMPO LÖSCHEN
 			//War da drin: thema CDN -  AND deactivated = '0'
+			$statement = $pdo->prepare("SELECT DISTINCT userid,subdomain_id,type,praefix FROM subdomain_records WHERE failover_policy = :failover_policy AND failover = '1'");
+			$result = $statement->execute(array('failover_policy' => $policy["failover_hash"]));
+			$tempSets = $statement->fetchAll();
 			$statement = $pdo->prepare("DELETE FROM subdomain_records WHERE failover_policy = :failover_policy AND failover = '1'");
 			$result = $statement->execute(array('failover_policy' => $policy["failover_hash"]));
+			$done = array();
 				
 			$statement = $pdo->prepare("SELECT * FROM dns_failover_rules WHERE failover_hash = :fh");
 			$result = $statement->execute(array("fh"=>$policy["failover_hash"]));
@@ -253,11 +261,17 @@ foreach($policies as $policy)
 				
 				//DNS Update ausführen
 				do_zone_update($pdo,$record["userid"],$record["subdomain_id"],$record["type"],$accountclass["ttl"],$record["praefix"]);
+				$done[$record["subdomain_id"]."|".$record["type"]."|".$record["praefix"]] = 1;
 				
 				//Checken ob es sich hier um ein CDN handelt
 				if($record["cdn_token"] != 0) {
 					$command = cdn_update_dns($pdo, $record["id"], $record["userid"]);
 				}
+			}
+			//Zonen, deren Original-Record fehlt: Ersatz-IP trotzdem aus PowerDNS nehmen
+			foreach($tempSets as $ts) {
+				if(isset($done[$ts["subdomain_id"]."|".$ts["type"]."|".$ts["praefix"]])) { continue; }
+				do_zone_update($pdo,$ts["userid"],$ts["subdomain_id"],$ts["type"],$accountclass["ttl"],$ts["praefix"]);
 			}
 			//Ganze Policy Status auf 0 pending setzen
 			$statement = $pdo->prepare("UPDATE dns_failover_policies set status = :status,manual = :manual WHERE failover_hash = :policyhash");

@@ -10,7 +10,9 @@
  * entfernt: DNS seiner Namen zurueck auf die urspruenglichen Eintraege, die Namen mit Zuordnung, Ziel, Liste,
  * Portmapper und Zertifikat, zuletzt der Tunnel samt Token. Die CDN64-Server holen ihre Konfiguration alle 10 s und
  * lassen die Namen danach fallen. Keine Benachrichtigung; ab 48 Stunden zeigt die Seite cdn64 einen Hinweis mit Datum.
- * Ein Name, der noch an einem anderen (verbundenen) Tunnel haengt, bleibt.
+ * Ein Name, der noch an einem anderen (verbundenen) Tunnel haengt, bleibt. Meldet sich die Node selbst noch bei
+ * ipv64.net (node64_nodes.last_seen, z. B. PROXY64 nur ausgeschaltet), bleibt der Tunnel. Lehnt PowerDNS das
+ * Zuruecksetzen ab, bleibt der Name (und damit der Tunnel) bis zum naechsten Lauf.
  *
  * Sicherung: nur, wenn sich gerade ein CDN64-Server meldet und in den letzten 15 Minuten irgendein Tunnel verbunden
  * war - sonst stammen alte last_seen eher von einem Ausfall bei ipv64 bzw. den Servern als von verwaisten Nodes.
@@ -31,8 +33,8 @@ $edge = (int)$q("SELECT COUNT(*) FROM cdn64o_edges WHERE disabled = 0 AND last_s
 $live = (int)$q("SELECT COUNT(*) FROM cdn64o_tunnels WHERE last_seen >= NOW() - INTERVAL 15 MINUTE")->fetchColumn();
 if($edge === 0 OR $live === 0) { echo "kein CDN64-Server bzw. kein verbundener Tunnel gerade - nichts geprueft\n"; exit(0); }
 
-// wie c64o_dns_off: Server-Eintraege loeschen, Originale wieder aktivieren, an PowerDNS
-$dnsOff = function(array $h) use ($q, $pdo): void {
+// wie c64o_dns_off: Server-Eintraege loeschen, Originale wieder aktivieren, an PowerDNS; false, wenn PowerDNS ablehnt
+$dnsOff = function(array $h) use ($q, $pdo): bool {
 	foreach($q("SELECT record_id, role FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id']))->fetchAll(PDO::FETCH_ASSOC) as $r) {
 		if($r['role'] === 'edge') {
 			$q("DELETE FROM subdomain_records WHERE id = :i AND cdn_tmp = :m", array('i' => $r['record_id'], 'm' => C64X_CDN_TMP));
@@ -40,13 +42,16 @@ $dnsOff = function(array $h) use ($q, $pdo): void {
 			$q("UPDATE subdomain_records set deactivated = 0 WHERE id = :i", array('i' => $r['record_id']));
 		}
 	}
-	$q("DELETE FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id']));
+	$ok = true; $err = null;
 	foreach(array('A', 'AAAA') as $t) {
 		ob_start();
-		try { do_zone_update($pdo, (int)$h['userid'], (int)$h['subdomain_id'], $t, (string)C64X_TTL, $h['praefix']); }
-		catch(Throwable $e) { echo "  DNS " . $h['fqdn'] . " $t: " . $e->getMessage() . "\n"; }
+		try { if(!do_zone_update($pdo, (int)$h['userid'], (int)$h['subdomain_id'], $t, (string)C64X_TTL, $h['praefix'])) { $ok = false; } }
+		catch(Throwable $e) { $ok = false; $err = $e->getMessage(); }
 		finally { ob_end_clean(); }
+		if(!$ok) { echo "  DNS " . $h['fqdn'] . " $t: " . ($err ?? 'abgelehnt') . "\n"; break; }
 	}
+	if($ok) { $q("DELETE FROM cdn64o_records WHERE host_id = :h", array('h' => $h['id'])); }
+	return $ok;
 };
 // wie c64o_host_purge: alles eines Namens
 $purge = function(array $h) use ($q): void {
@@ -57,24 +62,30 @@ $purge = function(array $h) use ($q): void {
 		array('h' => $h['id'], 'u' => $h['userid'], 'm' => 'node not connected for ' . C64X_AFTER . ' days: removed'));
 };
 
-$tunnels = $q("SELECT * FROM cdn64o_tunnels WHERE COALESCE(last_seen, created_at) < NOW() - INTERVAL " . C64X_AFTER . " DAY")->fetchAll(PDO::FETCH_ASSOC);
-$names = 0;
+$tunnels = $q("SELECT t.* FROM cdn64o_tunnels t WHERE COALESCE(t.last_seen, t.created_at) < NOW() - INTERVAL " . C64X_AFTER . " DAY
+	AND NOT EXISTS (SELECT 1 FROM node64_nodes n WHERE n.userid = t.userid AND n.node_id = t.node_id AND n.removed_at IS NULL
+		AND n.last_seen >= UTC_TIMESTAMP() - INTERVAL " . C64X_AFTER . " DAY)")->fetchAll(PDO::FETCH_ASSOC);
+$names = 0; $removed = 0;
 foreach($tunnels as $t) {
 	$hosts = $q("SELECT h.* FROM cdn64o_hosts h JOIN cdn64o_host_tunnels ht ON ht.host_id = h.id WHERE ht.tunnel_id = :t", array('t' => $t['id']))->fetchAll(PDO::FETCH_ASSOC);
 	echo "Tunnel " . $t['id'] . " (User " . $t['userid'] . ", zuletzt " . ($t['last_seen'] ?? 'nie, angelegt ' . $t['created_at']) . "): " . count($hosts) . " Name(n)\n";
 	if($dry) { foreach($hosts as $h) { echo "  " . $h['fqdn'] . "\n"; } continue; }
-	$gone = array();
+	$gone = array(); $kept = 0;
 	foreach($hosts as $h) {
-		$q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h AND tunnel_id = :t", array('h' => $h['id'], 't' => $t['id']));
-		if($q("SELECT host_id FROM cdn64o_host_tunnels WHERE host_id = :h LIMIT 1", array('h' => $h['id']))->fetch() !== false) { continue; } // haengt noch an einem anderen Tunnel
-		$dnsOff($h);
+		if($q("SELECT host_id FROM cdn64o_host_tunnels WHERE host_id = :h AND tunnel_id <> :t LIMIT 1", array('h' => $h['id'], 't' => $t['id']))->fetch() !== false) { // haengt noch an einem anderen Tunnel
+			$q("DELETE FROM cdn64o_host_tunnels WHERE host_id = :h AND tunnel_id = :t", array('h' => $h['id'], 't' => $t['id']));
+			continue;
+		}
+		if(!$dnsOff($h)) { $kept++; continue; } // naechster Lauf versucht es erneut
 		$purge($h);
 		$gone[] = $h['fqdn'];
 	}
-	$q("DELETE FROM cdn64o_tunnels WHERE id = :i", array('i' => $t['id']));
 	$names += count($gone);
+	if($kept) { echo "  $kept Name(n) wegen DNS-Fehler behalten, Tunnel bleibt\n"; continue; }
+	$q("DELETE FROM cdn64o_tunnels WHERE id = :i", array('i' => $t['id']));
+	$removed++;
 	if(function_exists('add_log')) {
 		add_log($pdo, $t['userid'], "0", "CDN64 online", "Tunnel " . $t['id'] . " was not connected for " . C64X_AFTER . " days and was removed" . ($gone ? " with: " . implode(', ', $gone) : "") . ".");
 	}
 }
-echo count($tunnels) . " Tunnel" . ($dry ? " (nur angezeigt)" : " entfernt, $names Name(n)") . "\n";
+echo ($dry ? count($tunnels) . " Tunnel (nur angezeigt)" : "$removed Tunnel entfernt, $names Name(n)") . "\n";

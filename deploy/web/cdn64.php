@@ -252,7 +252,7 @@ function c64w_target_fields(?array $t): void {
 	foreach((array)$ov['hosts'] as $h) { foreach((array)$h['tunnels'] as $tid) { if(isset($c64wOld[$tid])) { $c64wOld[$tid]['hosts'][] = $h['fqdn']; } } }
 	foreach($c64wOld as $o) {
 		echo '<div class="col-12"><div class="alert alert-warning small"><i class="fa-solid fa-plug-circle-xmark"></i> <b>Node64 “' . c64w_h($o['name']) . '” has not been connected since ' . date('d M Y', $o['since']) . '.</b> '
-			. 'If it does not connect again, the tunnel' . ($o['hosts'] ? ' and its names (' . c64w_h(implode(', ', $o['hosts'])) . ')' : '') . ' will be removed automatically on <b>' . date('d M Y', $o['since'] + 14 * 86400) . '</b>'
+			. 'If Node64 does not report to ipv64.net again by then, the tunnel' . ($o['hosts'] ? ' and its names (' . c64w_h(implode(', ', $o['hosts'])) . ')' : '') . ' will be removed automatically on <b>' . date('d M Y', $o['since'] + 14 * 86400) . '</b>'
 			. ($o['hosts'] ? ' – DNS then points to the previous addresses again' : '') . '. Start Node64 again to keep ' . ($o['hosts'] ? 'them, or switch the names off below.' : 'it.') . '</div></div>';
 	} ?>
 	<div class="col-12 pb-3">
