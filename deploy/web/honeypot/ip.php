@@ -13,6 +13,7 @@
  * Logik und Datenschutz der Auskunft: hp_release_lib.php. Planung: docs/PLAN-NODE64-HONEYPOT64.md (Abschnitte 7, 9).
  */
 include("../header.php");
+echo '<link rel="stylesheet" href="flags.css?v=1">'; // Flaggen auch unter Windows
 require_once __DIR__ . '/hp_release_lib.php';
 
 $hpiEn = (($_GET['lang'] ?? ($_POST['lang'] ?? '')) === 'en');

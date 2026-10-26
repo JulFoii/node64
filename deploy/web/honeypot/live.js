@@ -8,6 +8,7 @@
 	var NS = "http://www.w3.org/2000/svg";
 	var $ = function (id) { return document.getElementById(id); };
 	var land = $("hlLand"), arcs = $("hlArcs"), selLayer = $("hlSel"), table = $("hlTable"), stage = $("hlStage");
+	var namesLayer = $("hlNames"), labelLayer = $("hlLabels"), strip = $("hlStrip");
 	var pauseBtn = $("hlPause"), fullBtn = $("hlFull");
 	var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	var names = window.Intl && Intl.DisplayNames ? new Intl.DisplayNames([lang], { type: "region" }) : null;
@@ -15,6 +16,7 @@
 	var nf = new Intl.NumberFormat(lang);
 	var MAX_LIVE = 12, PER_TICK = 3; // hoechstens so viele Boegen gleichzeitig / neue je Takt
 	var map = null, entries = [], fresh = [], seen = 0, running = true, replay = 0, shownIds = {}, live = [], sel = null;
+	var boxes = [], hits = {}; // belegte Flaechen der Beschriftungen, Boegen je Ziel-Land (Hervorhebung)
 
 	function name(cc) { try { return names ? names.of(cc) : cc; } catch (e) { return cc; } }
 	function flag(cc) { return /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65) : ""; }
@@ -60,6 +62,74 @@
 		});
 	}
 
+	// Beschriftung (Flagge und Code) an einem Punkt; null, wenn sie eine andere ueberdecken wuerde
+	function label(p, text, dst) {
+		var x = p[0] + 4, y = p[1] + (dst ? 12 : -4), w = text.length * 5 + 4;
+		for (var i = 0; i < boxes.length; i++) {
+			if (Math.abs(boxes[i].x - x) < Math.max(boxes[i].w, w) && Math.abs(boxes[i].y - y) < 12) { return null; }
+		}
+		var t = el("text", { x: x, y: y, "class": "hl-lbl" + (dst ? " hl-lbl-dst" : "") });
+		t.textContent = text;
+		labelLayer.appendChild(t);
+		var box = { x: x, y: y, w: w };
+		boxes.push(box);
+		return function () { t.remove(); boxes = boxes.filter(function (b) { return b !== box; }); };
+	}
+
+	// schwache Laendernamen der aktiven Laender (Quelle oder Ziel) auf der Flaeche, ohne Ueberdeckung
+	function drawNames(byCountry) {
+		namesLayer.replaceChildren();
+		var w = {};
+		Object.keys(byCountry || {}).forEach(function (cc) { w[cc] = byCountry[cc]; });
+		entries.forEach(function (e) { w[e.dst] = (w[e.dst] || 0) + e.n; });
+		var used = [];
+		Object.keys(w).sort(function (a, b) { return w[b] - w[a]; }).slice(0, 14).forEach(function (cc) {
+			var c = map.countries[cc];
+			if (!c) { return; }
+			var n = name(cc), tw = n.length * 3.9;
+			for (var i = 0; i < used.length; i++) { if (Math.abs(used[i][0] - c.x) < (used[i][2] + tw) / 2 + 2 && Math.abs(used[i][1] - c.y) < 9) { return; } }
+			used.push([c.x, c.y, tw]);
+			var t = el("text", { x: c.x, y: c.y + 3, "class": "hl-name" });
+			t.textContent = n;
+			namesLayer.appendChild(t);
+		});
+	}
+
+	// angegriffenes Land hell hervorheben, solange ein Bogen dorthin laeuft
+	function hit(cc, on) {
+		hits[cc] = Math.max(0, (hits[cc] || 0) + (on ? 1 : -1));
+		var p = land.querySelector('path[data-cc="' + cc + '"]');
+		if (p) { p.classList.toggle("hl-hit", hits[cc] > 0); }
+	}
+
+	// kompakte Zahlen unter der Karte (auch ohne Vollbild)
+	function renderStrip(s) {
+		if (!strip) { return; }
+		strip.replaceChildren();
+		var add = function (title, text) {
+			var sp = document.createElement("span"), b = document.createElement("b");
+			b.textContent = title + ": ";
+			sp.append(b, document.createTextNode(text));
+			strip.appendChild(sp);
+			return sp;
+		};
+		var top = (s.countries || []).slice(0, 3).map(function (c) { return flag(c[0]) + " " + c[0] + " " + nf.format(c[1]); });
+		if (top.length) { add(T.strip_top, top.join(" · ")); }
+		var p = pairs(null)[0];
+		if (p) { add(T.strip_pair, flag(p.cc) + " " + p.cc + " → " + flag(p.dst) + " " + p.dst + " (" + nf.format(p.n) + ")"); }
+		var k = {};
+		entries.forEach(function (e) { k[e.kind] = (k[e.kind] || 0) + e.n; });
+		var kk = Object.keys(k).sort(function (a, b) { return k[b] - k[a]; })[0];
+		if (kk) { add(T.strip_kind, kk + " (" + nf.format(k[kk]) + ")"); }
+		var lv = add(T.strip_live, String(live.length));
+		lv.id = "hlStripLive";
+	}
+
+	function liveCount() {
+		var x = $("hlStripLive");
+		if (x) { x.lastChild.textContent = String(live.length); }
+	}
+
 	function tip(e, rep) {
 		return cn(e.cc) + " (" + e.src + ") → " + cn(e.dst) + " · " + e.kind + " · " + svc(e) + " · " + tf.format(new Date(e.t)) + (rep ? " (" + T.replay + ")" : "");
 	}
@@ -74,11 +144,16 @@
 		arcs.append(p, dot, ring);
 		var item = { e: e, rep: rep, path: p };
 		live.unshift(item);
-		renderNow();
+		var la = label(a, flag(e.cc) + " " + e.cc, false), lb = label(b, flag(e.dst) + " " + e.dst, true);
+		hit(e.dst, true);
+		renderNow(); liveCount();
 		var gone = function () {
 			p.remove(); dot.remove(); ring.remove();
+			if (la) { la(); }
+			if (lb) { lb(); }
+			hit(e.dst, false);
 			live = live.filter(function (x) { return x !== item; });
-			renderNow();
+			renderNow(); liveCount();
 		};
 		if (!reduce && p.animate && p.getTotalLength) {
 			var len = p.getTotalLength();
@@ -200,7 +275,7 @@
 			[tf.format(new Date(e.t)), flag(e.cc) + " " + e.src, sw + e.kind, svc(e), cn(e.dst), nf.format(e.n)].forEach(function (v, i) {
 				var td = document.createElement("td");
 				if (i === 2) { td.innerHTML = sw; td.appendChild(document.createTextNode(e.kind)); } else { td.textContent = v; }
-				if (i === 1) { td.style.fontFamily = "monospace"; }
+				if (i === 1) { td.className = "hp-mono"; }
 				if (i === 5) { td.className = "text-right"; }
 				tr.appendChild(td);
 			});
@@ -224,7 +299,10 @@
 			list.forEach(function (e) { if (seen && e.t > seen) { fresh.push(e); } if (e.t > max) { max = e.t; } });
 			entries = list.slice().reverse();
 			drawLand((d.stats || {}).by_country);
+			Object.keys(hits).forEach(function (cc) { if (hits[cc] > 0) { var hp = land.querySelector('path[data-cc="' + cc + '"]'); if (hp) { hp.classList.add("hl-hit"); } } });
+			drawNames((d.stats || {}).by_country);
 			stats(d.stats || {});
+			renderStrip(d.stats || {});
 			renderTable(list);
 			renderPairs();
 			if (sel) { select(sel); }
@@ -261,7 +339,11 @@
 		running = !running;
 		pauseBtn.innerHTML = running ? '<i class="fa-solid fa-pause"></i> ' + T.pause : '<i class="fa-solid fa-play"></i> ' + T.play;
 		setBadges();
-		if (!running) { arcs.replaceChildren(); live = []; renderNow(); }
+		if (!running) {
+			arcs.replaceChildren(); labelLayer.replaceChildren(); boxes = []; live = []; hits = {};
+			land.querySelectorAll(".hl-hit").forEach(function (x) { x.classList.remove("hl-hit"); });
+			renderNow(); liveCount();
+		}
 	});
 
 	// Vollbild: Fullscreen API, sonst (z. B. iPhone) die Karte ueber die ganze Seite legen

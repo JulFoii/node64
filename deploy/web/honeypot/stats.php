@@ -16,6 +16,7 @@
  */
 ob_start(); // CSV-Export: Ausgabe von header.php wieder verwerfen
 include("../header.php");
+echo '<link rel="stylesheet" href="flags.css?v=1">'; // Flaggen auch unter Windows
 require_once __DIR__ . '/hp_stats_lib.php';
 
 $hssEn = (($_GET['lang'] ?? '') === 'en');

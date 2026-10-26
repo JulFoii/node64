@@ -1,0 +1,12 @@
+/* Honeypot64-Seiten (live.php, stats.php, ip.php): Laenderflaggen (Regional Indicator Symbols) auch unter Windows, das
+   keine Flaggen-Emojis hat - Schrift nur fuer diese Zeichen (unicode-range), alles andere bleibt bei der Bootstrap-Schrift.
+   "Twemoji Country Flags" aus country-flag-emoji-polyfill 0.1.8 (MIT), Grafiken Twemoji (c) Twitter, Inc. and other
+   contributors, CC-BY 4.0 (wie in Node64). */
+@font-face {
+	font-family: "Twemoji Country Flags";
+	unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E0063, U+E0065, U+E0067, U+E006C, U+E006E, U+E0073-E0074, U+E0077, U+E007F;
+	font-display: swap;
+	src: url("TwemojiCountryFlags.woff2") format("woff2");
+}
+body { font-family: "Twemoji Country Flags", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"; }
+code, kbd, pre, samp, .hp-mono { font-family: "Twemoji Country Flags", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }

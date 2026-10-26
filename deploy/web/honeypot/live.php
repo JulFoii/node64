@@ -9,6 +9,7 @@
  *   live.php?lang=en    Englisch
  */
 include("../header.php");
+echo '<link rel="stylesheet" href="flags.css?v=1">'; // Flaggen auch unter Windows
 $hlEn = (($_GET['lang'] ?? '') === 'en');
 function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en : $de; }
 ?>
@@ -50,7 +51,7 @@ function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en
 		</div>
 		<div class="card-body p-2">
 			<div class="hl-stage" id="hlStage">
-				<div class="hl-mapwrap"><svg id="hlMap" class="hl-map" viewBox="0 0 1000 436" role="img" aria-label="<?php echo hl_t('Weltkarte mit Angriffen', 'World map with attacks'); ?>"><g id="hlLand"></g><g id="hlSel"></g><g id="hlArcs"></g></svg>
+				<div class="hl-mapwrap"><svg id="hlMap" class="hl-map" viewBox="0 0 1000 436" role="img" aria-label="<?php echo hl_t('Weltkarte mit Angriffen', 'World map with attacks'); ?>"><g id="hlLand"></g><g id="hlNames"></g><g id="hlSel"></g><g id="hlArcs"></g><g id="hlLabels"></g></svg>
 				<a class="hl-logo" href="https://node64.de" target="_blank" rel="noopener" title="Node64 – Honeypot64"><img src="/img/node64/node64.svg" alt="Node64" class="hl-logo-l"><img src="/img/node64/node64_dark.svg" alt="Node64" class="hl-logo-d"></a></div>
 				<div class="hl-panel small" id="hlPanel">
 					<div class="hl-fs-only">
@@ -75,6 +76,7 @@ function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en
 					</div>
 				</div>
 			</div>
+			<div class="hl-strip small d-flex flex-wrap align-items-center my-1" id="hlStrip"></div>
 			<div class="small text-muted"><span id="hlUpdated"></span> · <?php echo hl_t('Land anklicken zeigt alle Verbindungen von und nach dort.', 'Click a country to see all its connections.'); ?></div>
 		</div>
 	</div>
@@ -90,10 +92,10 @@ function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en
 <style>
 	/* Farben als Variablen: hell und dunkel (html[data-theme="dark"] aus header.php) */
 	.hl-vars { --hl-sea: #f4f7fa; --hl-land: #e3e6ea; --hl-edge: #fff; --hl-hover: #333; --hl-m1: #fde6cf; --hl-m2: #fdd3ab; --hl-m3: #fdbd86; --hl-m4: #fca562; --hl-m5: #f68c45;
-		--hl-login: #dc3545; --hl-exploit: #fd7e14; --hl-scan: #17a2b8; --hl-probe: #6c757d; --hl-log: #007bff; --hl-panel: rgba(255,255,255,.88); --hl-new: #fff3cd; }
+		--hl-login: #dc3545; --hl-exploit: #fd7e14; --hl-scan: #17a2b8; --hl-probe: #6c757d; --hl-log: #007bff; --hl-panel: rgba(255,255,255,.88); --hl-new: #fff3cd; --hl-text: #343a40; --hl-hit: #ffe08a; }
 	html[data-theme="dark"] .hl-vars { --hl-sea: #161a1f; --hl-land: #2b3138; --hl-edge: #121417; --hl-hover: #e9ecef; --hl-m1: #4a3020; --hl-m2: #6b3d1f;
 		--hl-m3: #8f4c1e; --hl-m4: #b65c1f; --hl-m5: #dc6d22; --hl-login: #ff6b78; --hl-exploit: #ffa44f; --hl-scan: #4dd4ec; --hl-probe: #b8c0c8; --hl-log: #74aefe;
-		--hl-panel: rgba(27,31,36,.88); --hl-new: #4d3f12; }
+		--hl-panel: rgba(27,31,36,.88); --hl-new: #4d3f12; --hl-text: #e9ecef; --hl-hit: #f5d76e; }
 	.hl-stage { position: relative; background: var(--hl-sea); border-radius: .25rem; }
 	.hl-mapwrap { position: relative; }
 	.hl-map { display: block; width: 100%; height: auto; }
@@ -112,6 +114,15 @@ function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en
 	.hl-map #hlSel path { fill: none; stroke-linecap: round; stroke-opacity: .75; pointer-events: stroke; }
 	.hl-map #hlSel path:hover, .hl-map #hlSel path.hl-hot { stroke-opacity: 1; filter: drop-shadow(0 0 2px rgba(0,0,0,.5)); }
 	.hl-map circle.hl-src { stroke: var(--hl-edge); stroke-width: .6; }
+	/* Beschriftung: Flagge und Code an Quelle und Ziel (mit dem Bogen), schwache Laendernamen der aktiven Laender */
+	.hl-map text { font-family: "Twemoji Country Flags", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; pointer-events: none;
+		paint-order: stroke; stroke: var(--hl-sea); stroke-width: 2.4px; stroke-linejoin: round; }
+	.hl-map text.hl-lbl { font-size: 10.5px; fill: var(--hl-text); opacity: .85; }
+	.hl-map text.hl-lbl-dst { font-weight: 600; }
+	.hl-map text.hl-name { font-size: 9px; fill: var(--hl-text); opacity: .4; text-anchor: middle; }
+	.hl-map #hlLand path.hl-hit { fill: var(--hl-hit); transition: fill .4s; }
+	.hl-strip { gap: .3rem 1rem; }
+	.hl-strip b { font-weight: 600; }
 	.hl-map .hl-dst { fill: none; stroke: var(--hl-login); stroke-width: 1; transform-box: fill-box; transform-origin: center; animation: hlPulse 2s ease-out infinite; }
 	@keyframes hlPulse { from { transform: scale(.6); opacity: .9; } to { transform: scale(3); opacity: 0; } }
 	@media (prefers-reduced-motion: reduce) { .hl-map .hl-dst { animation: none; } }
@@ -154,6 +165,8 @@ function hl_t(string $de, string $en): string { global $hlEn; return $hlEn ? $en
 	'unavailable' => hl_t('Die Live-Daten sind gerade nicht verfügbar.', 'Live data is currently not available.'), 'attacks' => hl_t('Angriffe', 'attacks'),
 	'full' => hl_t('Vollbild', 'Full screen'), 'full_exit' => hl_t('Vollbild beenden', 'Exit full screen'), 'now_empty' => hl_t('Gerade kein Bogen.', 'No arc right now.'),
 	'sel_country' => hl_t('Verbindungen von und nach {name}', 'Connections from and to {name}'), 'sel_pair' => hl_t('Verbindung {from} → {to}', 'Connection {from} → {to}'),
-	'sel_empty' => hl_t('In der letzten Stunde keine Verbindungen.', 'No connections in the last hour.')), JSON_UNESCAPED_UNICODE); ?>;</script>
-<script src="live.js?v=3"></script>
+	'sel_empty' => hl_t('In der letzten Stunde keine Verbindungen.', 'No connections in the last hour.'),
+	'strip_top' => hl_t('Top-Herkunft', 'Top origins'), 'strip_pair' => hl_t('Häufigste Verbindung', 'Top connection'), 'strip_kind' => hl_t('Häufigste Art', 'Top kind'),
+	'strip_live' => hl_t('Bögen gerade', 'Arcs now')), JSON_UNESCAPED_UNICODE); ?>;</script>
+<script src="live.js?v=4"></script>
 <?php include("../footer.php"); ?>
