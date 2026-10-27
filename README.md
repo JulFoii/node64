@@ -128,6 +128,12 @@ Docker-Checks laufen nur lokal auf der Node; sie lassen sich nicht online prüfe
 
 Der Node stellt alles, was die Oberfläche kann, auch als JSON-API im eigenen Netz bereit: Status, Module, Einstellungen, Audit-Log, Logs, Backup, Benachrichtigungskanäle und das komplette Healthchecks-Modul. Die Referenz liegt im Node unter `/api/docs`, die maschinenlesbare Beschreibung (OpenAPI 3.1) unter `/api/openapi.json`.
 
+Die schreibgeschützte **Netzwerkübersicht** unter *Healthchecks → Netzwerkübersicht* kombiniert nur konfigurierte und
+bereits zuverlässig abgefragte Quellen; Bedienung, Datenquellen und technische Grenzen stehen in
+[docs/NETZWERKUEBERSICHT.md](docs/NETZWERKUEBERSICHT.md).
+Für einen Betrieb aus einem eigenen Repository auf einem Hetzner-Server siehe
+[docs/DEPLOY-HETZNER-EIGENES-REPO.md](docs/DEPLOY-HETZNER-EIGENES-REPO.md).
+
 Anmeldung mit einem API-Key aus den Einstellungen (`Authorization: Bearer node64_…`) oder mit der Browser-Sitzung. Ohne Anmeldung erreichbar sind nur `/api/health` (für Docker) und `/api/push/{token}` (Heartbeats).
 
 ![Healthchecks](internal/web/static/img/healthcheck_service_monitoring_ipv64.png)
@@ -159,7 +165,7 @@ curl -X POST --data '{"files": 1200}' http://localhost:8080/api/push/<token>
 
 Push-Checks lassen sich an jeder Node und bei ipv64 auslösen. Misst diese Node den Check nicht allein, gibt sie den Push über ipv64 an die anderen messenden Nodes weiter; ist das ohne Verbindung nicht möglich, antwortet sie mit 503.
 
-Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents|chart`, `GET /api/events`, `GET /api/incidents`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`, `GET|POST /api/channels`, `POST /api/channels/{id}/test`, `GET /api/status`, `GET|PUT /api/settings`, `GET /api/backup`. Alles mit Parametern und Antworten unter `/api/docs`.
+Weitere Endpunkte: `PUT`/`DELETE /api/checks/{token}`, `POST .../pause|resume|run|clone`, `GET .../events|incidents|chart`, `GET /api/events`, `GET /api/incidents`, `GET /api/healthchecks/network-map`, `GET|POST /api/maintenance`, `PUT|DELETE /api/maintenance/{id}`, `GET|POST /api/channels`, `POST /api/channels/{id}/test`, `GET /api/status`, `GET|PUT /api/settings`, `GET /api/backup`. Alles mit Parametern und Antworten unter `/api/docs`.
 
 ICMP-Checks brauchen im Container entweder unprivilegiertes Ping (`sysctls: net.ipv4.ping_group_range=0 65535`, siehe compose oben) oder `cap_add: NET_RAW`.
 

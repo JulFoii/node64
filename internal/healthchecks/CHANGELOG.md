@@ -1,5 +1,14 @@
 # Änderungen – Healthchecks
 
+## 2.37.3 – 2026-10-27
+
+### Neu
+- Netzwerkübersicht: Eine interaktive, automatisch aktualisierte Karte unter Healthchecks zeigt nur belastbar bekannte
+  Beziehungen aus Check-Konfiguration, gekoppelten Nodes sowie eingerichteten Proxmox- und Docker-Quellen. Sie bietet
+  Suche, Filter, Zoom, Verschieben, automatische Anordnung, Detailansicht und die letzten Statusereignisse. Der neue
+  geschützte Endpunkt `GET /api/healthchecks/network-map` liefert dieselbe Momentaufnahme; es gibt keinen unsicheren
+  Netzwerkscan und unbekannte Informationen sind entsprechend gekennzeichnet.
+
 ## 2.37.2 – 2026-10-26
 
 ### Geändert

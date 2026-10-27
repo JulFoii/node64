@@ -104,6 +104,7 @@
     "settings_ports": "Ports",
     "settings_data": "Daten & Sicherung",
     "docker": "Docker",
+    "network_map": "Netzwerkübersicht",
     "settings_modules": "Module"
   },
   "common": {
@@ -4333,6 +4334,33 @@
       "auto_known": "Automatisch – erkannt: {name}",
       "hint": "Ziel der Bögen auf der Live-Karte, hier und auf ipv64.net. Nur nötig, wenn das erkannte Land nicht stimmt (z. B. Server eines Hosters im Ausland). Gilt nur für die Anzeige, nicht für die Bewertung der Angreifer."
     }
+  },
+  "network_map": {
+    "hint": "Live-Ansicht der konfigurierten Checks, bekannten Node64-Dienste sowie eingerichteten Proxmox- und Docker-Quellen.",
+    "boundary": "Die Karte führt keinen Netzwerkscan aus. Zielhosts, Verbindungen und Abhängigkeiten stammen ausschließlich aus der Konfiguration und zuletzt erfolgreich abgefragten Datenquellen.",
+    "loading": "Netzwerkübersicht wird geladen …",
+    "error": "Die Netzwerkübersicht ist momentan nicht verfügbar.",
+    "empty": "Für die ausgewählten Filter sind keine bekannten Objekte vorhanden.",
+    "center": "Ansicht zentrieren",
+    "layout": "Automatisch anordnen",
+    "controls": "Mausrad: zoomen · Ziehen: verschieben · Knoten auswählen: Details anzeigen",
+    "select": "Wähle einen Knoten aus, um Details anzuzeigen.",
+    "all_types": "Alle Typen",
+    "all_status": "Alle Zustände",
+    "unknown": "Unbekannt",
+    "addresses": "IP-Adressen",
+    "host": "Host",
+    "open": "Details öffnen",
+    "events_empty": "Keine aktuellen Ereignisse.",
+    "type_node": "Node",
+    "type_check": "Check",
+    "type_host": "Zielhost",
+    "type_pve_node": "Proxmox-Node",
+    "type_vm": "VM / LXC",
+    "type_docker_host": "Docker-Host",
+    "type_container": "Container",
+    "warn_events": "Aktuelle Statusereignisse sind vorübergehend nicht verfügbar.",
+    "warn_virtualization": "Proxmox- und Docker-Daten sind vorübergehend nicht verfügbar."
   },
   "pve": {
     "ev": {

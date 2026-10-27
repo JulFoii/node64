@@ -16510,6 +16510,82 @@
         }
       }
     },
+    "/healthchecks/network-map": {
+      "get": {
+        "tags": [
+          "Healthchecks"
+        ],
+        "summary": "Aktuelle Netzwerkübersicht",
+        "description": "Liefert die aus Node64-Konfiguration und vorhandenen Healthcheck-, Docker- und Proxmox-Daten abgeleitete Topologie. Der Endpunkt führt keine Netzwerk-Scans aus.",
+        "responses": {
+          "200": {
+            "description": "Aktuelle Netzwerkübersicht",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "generated_at",
+                    "refresh_seconds",
+                    "nodes",
+                    "edges",
+                    "events",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "generated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "refresh_seconds": {
+                      "type": "integer",
+                      "description": "Empfohlenes Aktualisierungsintervall in Sekunden"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "kind": { "type": "string" },
+                          "name": { "type": "string" },
+                          "state": { "type": "string" },
+                          "host": { "type": "string" },
+                          "target": { "type": "string" },
+                          "addresses": { "type": "array", "items": { "type": "string" } },
+                          "detail": { "type": "string" },
+                          "message": { "type": "string" },
+                          "last_seen": { "type": "string", "format": "date-time" },
+                          "stale": { "type": "boolean" },
+                          "url": { "type": "string" },
+                          "metrics": { "type": "object" }
+                        }
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": { "type": "string" },
+                          "to": { "type": "string" },
+                          "kind": { "type": "string" }
+                        }
+                      }
+                    },
+                    "events": { "type": "array", "items": { "type": "object" } },
+                    "warnings": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Healthchecks-Modul ist deaktiviert"
+          }
+        }
+      }
+    },
     "/healthchecks/docker/systems": {
       "get": {
         "tags": [

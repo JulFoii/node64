@@ -30,7 +30,7 @@ func TestNavDockerUnderHealthchecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	k, active := subs("/healthchecks/docker")
-	if strings.Join(k, ",") != "nav.status_pages,nav.proxmox,nav.docker,nav.link" {
+	if strings.Join(k, ",") != "nav.network_map,nav.status_pages,nav.proxmox,nav.docker,nav.link" {
 		t.Fatalf("submenu: %v", k)
 	}
 	if active != "nav.docker" {

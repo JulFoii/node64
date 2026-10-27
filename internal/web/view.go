@@ -294,7 +294,8 @@ func (s *Server) nav(r *http.Request) []NavItem {
 		items = append(items, NavItem{Key: m.Info.TitleKey, Path: m.Info.Path, Icon: m.Info.Icon, Available: m.Info.Available, Enabled: m.Running,
 			Hidden: m.Info.Available && !m.Enabled})
 		if m.Info.Path == "/healthchecks" && m.Enabled { // Healthchecks-Sync gehoert zu den Healthchecks (ohne sie kein Menuepunkt)
-			items = append(items, NavItem{Key: "nav.status_pages", Path: "/healthchecks/status-pages", Icon: "bi-broadcast", Available: true, Enabled: m.Running, Sub: true},
+			items = append(items, NavItem{Key: "nav.network_map", Path: "/healthchecks/network-map", Icon: "bi-diagram-3", Available: true, Enabled: m.Running, Sub: true},
+				NavItem{Key: "nav.status_pages", Path: "/healthchecks/status-pages", Icon: "bi-broadcast", Available: true, Enabled: m.Running, Sub: true},
 				NavItem{Key: "nav.proxmox", Path: "/healthchecks/proxmox", Icon: "bi-hdd-rack", Available: true, Enabled: m.Running, Sub: true},
 				NavItem{Key: "nav.docker", Path: "/healthchecks/docker", Icon: "bi-box-seam", Available: true, Enabled: m.Running, Sub: true})
 			items = append(items, link)

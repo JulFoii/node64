@@ -1,0 +1,31 @@
+{{define "content"}}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+	<div><h1 class="h4 mb-1"><i class="bi bi-diagram-3-fill text-primary me-1"></i> {{.T "nav.network_map"}}</h1><p class="small text-body-secondary mb-0">{{.T "network_map.hint"}}</p></div>
+	<div class="btn-group btn-group-sm" role="group">
+		<button class="btn btn-outline-secondary" type="button" data-network-center title="{{.T "network_map.center"}}"><i class="bi bi-bullseye"></i></button>
+		<button class="btn btn-outline-secondary" type="button" data-network-layout title="{{.T "network_map.layout"}}"><i class="bi bi-magic"></i></button>
+		<button class="btn btn-outline-secondary" type="button" data-network-refresh title="{{.T "logs.refresh"}}"><i class="bi bi-arrow-clockwise"></i></button>
+	</div>
+</div>
+<div class="alert alert-info py-2 small"><i class="bi bi-shield-check"></i> {{.T "network_map.boundary"}}</div>
+<div class="row g-3" id="network-map" data-api="/api/healthchecks/network-map" data-loading="{{.T "network_map.loading"}}" data-error="{{.T "network_map.error"}}" data-empty="{{.T "network_map.empty"}}" data-all-types="{{.T "network_map.all_types"}}" data-all-status="{{.T "network_map.all_status"}}" data-target="{{.T "hc.target"}}" data-addresses="{{.T "network_map.addresses"}}" data-host="{{.T "network_map.host"}}" data-open="{{.T "network_map.open"}}" data-events-empty="{{.T "network_map.events_empty"}}" data-warn-events="{{.T "network_map.warn_events"}}" data-warn-virtualization="{{.T "network_map.warn_virtualization"}}" data-kind-node64="Node64" data-kind-node="{{.T "network_map.type_node"}}" data-kind-check="{{.T "network_map.type_check"}}" data-kind-host="{{.T "network_map.type_host"}}" data-kind-cloud="Cloud" data-kind-pve="Proxmox" data-kind-pve-node="{{.T "network_map.type_pve_node"}}" data-kind-vm="{{.T "network_map.type_vm"}}" data-kind-docker-host="{{.T "network_map.type_docker_host"}}" data-kind-container="{{.T "network_map.type_container"}}">
+	<div class="col-12 col-xl-9">
+		<div class="card network-map-card">
+			<div class="card-header d-flex gap-2 align-items-center flex-wrap">
+				<div class="input-group input-group-sm network-search"><span class="input-group-text"><i class="bi bi-search"></i></span><input type="search" class="form-control" data-network-search placeholder="{{.T "common.search"}} …"></div>
+				<select class="form-select form-select-sm w-auto" data-network-kind><option value="">{{.T "network_map.all_types"}}</option></select>
+				<select class="form-select form-select-sm w-auto" data-network-state><option value="">{{.T "common.status"}}: {{.T "common.all"}}</option><option value="up">{{.T "hc.state.up"}}</option><option value="down">{{.T "hc.state.down"}}</option><option value="unchecked">{{.T "hc.state.unchecked"}}</option><option value="unknown">{{.T "network_map.unknown"}}</option></select>
+				<span class="ms-auto small text-body-secondary" data-network-meta></span>
+			</div>
+			<div class="network-stage" data-network-stage tabindex="0" aria-label="{{.T "nav.network_map"}}"><canvas data-network-canvas></canvas><div class="network-empty" data-network-empty></div></div>
+			<div class="card-footer small text-body-secondary d-flex justify-content-between flex-wrap gap-2"><span>{{.T "network_map.controls"}}</span><span data-network-updated></span></div>
+		</div>
+	</div>
+	<div class="col-12 col-xl-3">
+			<div class="card network-details h-100"><div class="card-header"><i class="bi bi-info-circle"></i> {{.T "common.details"}}</div><div class="card-body small" data-network-details>{{.T "network_map.select"}}</div></div>
+	</div>
+	<div class="col-12"><div class="card"><div class="card-header"><i class="bi bi-clock-history text-primary"></i> {{.T "hc.events"}}</div><div class="list-group list-group-flush small" data-network-events><div class="list-group-item text-body-secondary">{{.T "network_map.loading"}}</div></div></div></div>
+	<div class="col-12" data-network-warnings hidden></div>
+</div>
+{{end}}
+{{define "scripts"}}<script src="/static/js/network-map.js?v={{.Version}}"></script>{{end}}

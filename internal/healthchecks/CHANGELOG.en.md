@@ -1,5 +1,14 @@
 # Changes – Healthchecks
 
+## 2.37.3 – 2026-10-27
+
+### New
+- Network map: an interactive, automatically refreshed map under Healthchecks shows only dependable relationships
+  from check configuration, linked nodes and configured Proxmox/Docker sources. It includes search, filters, zoom,
+  pan, auto-layout, details and recent status events. The new protected endpoint
+  `GET /api/healthchecks/network-map` provides the same snapshot; there is no unreliable network scan and unknown
+  information is marked accordingly.
+
 ## 2.37.2 – 2026-10-26
 
 ### Changed

@@ -104,6 +104,7 @@
     "settings_ports": "Ports",
     "settings_data": "Data & backup",
     "docker": "Docker",
+    "network_map": "Network map",
     "settings_modules": "Modules"
   },
   "common": {
@@ -4333,6 +4334,33 @@
       "auto_known": "Automatic – detected: {name}",
       "hint": "Target of the arcs on the live map, here and on ipv64.net. Only needed if the detected country is wrong (e.g. a hosting provider's server abroad). Affects only the display, not the rating of attackers."
     }
+  },
+  "network_map": {
+    "hint": "Live view of configured checks, known Node64 services, and configured Proxmox and Docker sources.",
+    "boundary": "The map does not scan the network. Hosts, links and dependencies come only from configuration and the most recently queried data sources.",
+    "loading": "Loading network map …",
+    "error": "The network map is currently unavailable.",
+    "empty": "No known objects match the selected filters.",
+    "center": "Center view",
+    "layout": "Auto-arrange",
+    "controls": "Mouse wheel: zoom · Drag: pan · Select a node: show details",
+    "select": "Select a node to show its details.",
+    "all_types": "All types",
+    "all_status": "All statuses",
+    "unknown": "Unknown",
+    "addresses": "IP addresses",
+    "host": "Host",
+    "open": "Open details",
+    "events_empty": "No recent events.",
+    "type_node": "Node",
+    "type_check": "Check",
+    "type_host": "Target host",
+    "type_pve_node": "Proxmox node",
+    "type_vm": "VM / LXC",
+    "type_docker_host": "Docker host",
+    "type_container": "Container",
+    "warn_events": "Recent status events are temporarily unavailable.",
+    "warn_virtualization": "Proxmox and Docker data are temporarily unavailable."
   },
   "pve": {
     "ev": {

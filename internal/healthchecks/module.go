@@ -200,7 +200,7 @@ func (m *Module) SetPushForward(fn func(token string, down bool, msg, from strin
 }
 
 func (m *Module) Info() module.Info {
-	return module.Info{Name: Name, TitleKey: "nav.healthchecks", Icon: "bi-heart-pulse", Path: "/healthchecks", Available: true, Order: 10, Version: "2.37.2", Changelog: changelog, ChangelogEN: changelogEN}
+	return module.Info{Name: Name, TitleKey: "nav.healthchecks", Icon: "bi-heart-pulse", Path: "/healthchecks", Available: true, Order: 10, Version: "2.37.3", Changelog: changelog, ChangelogEN: changelogEN}
 }
 
 func (m *Module) Migrations() []store.Migration {
@@ -306,6 +306,7 @@ func (m *Module) aggregate(ctx context.Context) {
 // Routes registriert API und Seiten. Die Push-URL ist oeffentlich.
 func (m *Module) Routes(mux *http.ServeMux, g module.Guards) {
 	api := func(h http.HandlerFunc) http.Handler { return g.Enabled(g.Auth(h)) }
+	page := func(h http.HandlerFunc) http.Handler { return g.Enabled(g.Auth(h)) }
 	mux.Handle("GET /api/checks", api(m.apiList))
 	mux.Handle("POST /api/checks", api(m.apiCreate))
 	mux.Handle("GET /api/checks/{token}", api(m.apiGet))
@@ -333,6 +334,7 @@ func (m *Module) Routes(mux *http.ServeMux, g module.Guards) {
 	mux.Handle("GET /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
 	mux.Handle("POST /api/push/{token}", g.Enabled(http.HandlerFunc(m.apiPush)))
 	m.uiRoutes(mux, g)
+	m.networkMapRoutes(mux, page, api)
 	m.statusRoutes(mux, g) // oeffentliche Statusseiten /status/{slug} (statuspublic.go)
 	m.onlineRoutes(mux, g)
 	m.onlineAPIRoutes(mux, api)

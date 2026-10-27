@@ -288,6 +288,22 @@ th a:hover { text-decoration: underline; }
 .nav-img { height: 16px; width: auto; vertical-align: -2px; margin-right: 2px; }
 .hc-empty-img { max-width: 520px; }
 
+/* Live Network Map: Canvas bleibt absichtlich klein und ohne externe Grafikbibliothek. */
+.network-map-card { overflow: hidden; }
+.network-search { width: min(100%, 24rem); }
+.network-stage { position: relative; height: min(64vh, 680px); min-height: 360px; overflow: hidden; background-color: var(--bs-tertiary-bg); background-image: radial-gradient(var(--bs-border-color) 1px, transparent 1px); background-size: 18px 18px; cursor: grab; touch-action: none; outline: none; }
+.network-stage:active { cursor: grabbing; }
+.network-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--bs-primary); }
+.network-stage canvas { display: block; width: 100%; height: 100%; }
+.network-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 2rem; text-align: center; color: var(--bs-secondary-color); pointer-events: none; }
+.network-empty[hidden] { display: none; }
+.network-details { min-height: 16rem; }
+.network-dot { flex: 0 0 .8rem; height: .8rem; border-radius: 50%; margin-top: .25rem; }
+.network-metrics { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .75rem; }
+.network-metrics dt { margin: 0; color: var(--bs-secondary-color); font-weight: 400; text-transform: capitalize; }
+.network-metrics dd { margin: 0; text-align: right; font-family: var(--bs-font-monospace); }
+@media (max-width: 575.98px) { .network-stage { height: 55vh; min-height: 320px; } .network-search { width: 100%; } }
+
 /* Schriftgroesse (Einstellungen > Darstellung): alles ist rem-basiert und skaliert mit */
 html[data-fs="sm"] { font-size: 87.5%; }
 html[data-fs="lg"] { font-size: 112.5%; }
